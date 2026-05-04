@@ -1,0 +1,26 @@
+{
+  "name": "@warden/core",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "@warden/ai": "workspace:*",
+    "@warden/db": "workspace:*",
+    "@warden/env": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@warden/config": "workspace:*",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

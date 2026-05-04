@@ -1,0 +1,25 @@
+{
+  "name": "@warden/ai",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "catalog:",
+    "@warden/env": "workspace:*",
+    "ai": "catalog:"
+  },
+  "devDependencies": {
+    "@warden/config": "workspace:*",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
