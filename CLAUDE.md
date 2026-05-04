@@ -107,8 +107,8 @@ Do not use `process.env` directly in app code — always go through `wardenEnv()
 
 ## Milestone status
 
-- [ ] M1 — Scaffold (in progress; see [`scaffolding-plan.md`](./scaffolding-plan.md))
-- [ ] M2 — Ecosystem detection + TSC/ESLint runners
+- [x] M1 — Scaffold (see [`scaffolding-plan.md`](./scaffolding-plan.md))
+- [x] M2 — Ecosystem detection + TSC/ESLint runners
 - [ ] M3 — npm audit + OSV verification
 - [ ] M4 — LLM formatter (end-to-end `warden review`)
 - [ ] M5+ — Improvements driven by dogfooding feedback

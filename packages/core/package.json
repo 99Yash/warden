@@ -13,6 +13,7 @@
     "@warden/ai": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
+    "nanoid": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

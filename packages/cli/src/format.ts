@@ -1,30 +1,55 @@
-import type { CommentSet, ReviewInput } from "@warden/core";
+import type { Category, CommentSet, ReviewInput, Tier } from "@warden/core";
 import pc from "picocolors";
 
-/**
- * Pretty-prints a `CommentSet` for terminal output. Severity-colored,
- * priority-ordered (per ADR-0012), with OSC 8 hyperlinks for `file:line`
- * references where the terminal supports them.
- *
- * M1 stub: prints a "not implemented yet" message and the empty result.
- * M4 will fill this in with the full priority-ordered renderer.
- */
+const PRIORITY_ORDER: Category[] = [
+  "correctness",
+  "security",
+  "vulnerability",
+  "contract",
+  "clarity",
+  "style",
+  "dedup",
+  "tests",
+];
+
 export function formatCommentSet(
   result: CommentSet,
   mode: ReviewInput["config"]["mode"],
 ): string {
+  const lines: string[] = [];
+
   if (result.comments.length === 0) {
-    return [
-      pc.dim(`warden ${mode}: not implemented yet (M1 scaffold).`),
-      pc.dim(`  duration: ${result.metadata.durationMs}ms`),
-      result.metadata.degradedWorkers.length > 0
-        ? pc.yellow(`  degraded workers: ${result.metadata.degradedWorkers.join(", ")}`)
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    lines.push(pc.green(`warden ${mode}: no findings.`));
+  } else {
+    const sorted = [...result.comments].sort((a, b) => {
+      const pa = PRIORITY_ORDER.indexOf(a.category);
+      const pb = PRIORITY_ORDER.indexOf(b.category);
+      if (pa !== pb) return pa - pb;
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      return b.confidence - a.confidence;
+    });
+
+    lines.push(
+      pc.bold(`warden ${mode}: ${result.comments.length} finding${result.comments.length === 1 ? "" : "s"}`),
+    );
+    for (const c of sorted) {
+      const sev = tierSwatch(c.tier);
+      const loc = pc.cyan(`${c.file}:${c.lineStart}`);
+      const cat = pc.dim(`[${c.category}]`);
+      lines.push(`${sev} ${loc} ${cat} ${c.claim}`);
+    }
   }
 
-  // Placeholder for M4: priority-ordered render (correctness → clarity → style → dedup → tests).
-  return result.comments.map((c) => `${c.file}:${c.lineStart}  ${c.claim}`).join("\n");
+  lines.push(pc.dim(`  duration: ${result.metadata.durationMs}ms`));
+  if (result.metadata.degradedWorkers.length > 0) {
+    lines.push(pc.yellow(`  degraded: ${result.metadata.degradedWorkers.join(", ")}`));
+  }
+
+  return lines.join("\n");
+}
+
+function tierSwatch(tier: Tier): string {
+  if (tier === 1) return pc.red("●");
+  if (tier === 2) return pc.yellow("●");
+  return pc.dim("●");
 }

@@ -1,9 +1,34 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { review, type ReviewConfig } from "@warden/core";
 import { wardenEnv } from "@warden/env";
 import { Command } from "commander";
 import pc from "picocolors";
 import { formatCommentSet } from "./format.js";
+
+function findUp(filename: string): string | undefined {
+  let dir = process.cwd();
+  while (true) {
+    const candidate = resolve(dir, filename);
+    if (existsSync(candidate)) return candidate;
+    const parent = resolve(dir, "..");
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+// Node 22+ ships process.loadEnvFile natively; loaded before @warden/env is read.
+const envPath = findUp(".env");
+if (envPath) process.loadEnvFile(envPath);
+
+function findRepoRoot(): string {
+  const pnpmWs = findUp("pnpm-workspace.yaml");
+  if (pnpmWs) return resolve(pnpmWs, "..");
+  const pkg = findUp("package.json");
+  if (pkg) return resolve(pkg, "..");
+  return process.cwd();
+}
 
 const program = new Command();
 
@@ -25,7 +50,7 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
 
   const result = await review({
     diff: "",
-    repoRoot: process.cwd(),
+    repoRoot: findRepoRoot(),
     config: { mode },
   });
 

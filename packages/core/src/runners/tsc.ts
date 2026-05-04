@@ -1,0 +1,97 @@
+import { spawn } from "node:child_process";
+import { isAbsolute, relative, resolve } from "node:path";
+import type { ToolFinding } from "./types.js";
+
+export interface TscRunResult {
+  findings: ToolFinding[];
+  degraded: string[];
+}
+
+export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise<TscRunResult> {
+  if (tsconfigPaths.length === 0) {
+    return { findings: [], degraded: [] };
+  }
+
+  const results = await Promise.all(
+    tsconfigPaths.map((tsconfig) => runOne(repoRoot, tsconfig)),
+  );
+
+  const seen = new Set<string>();
+  const findings: ToolFinding[] = [];
+  const degraded: string[] = [];
+
+  for (const r of results) {
+    if (r.degraded) degraded.push(r.degraded);
+    for (const f of r.findings) {
+      const key = `${f.file}:${f.line}:${f.column}:${f.ruleId ?? ""}:${f.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      findings.push(f);
+    }
+  }
+
+  return { findings, degraded };
+}
+
+interface OneResult {
+  findings: ToolFinding[];
+  degraded?: string;
+}
+
+function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
+  return new Promise((resolveP) => {
+    const child = spawn(
+      "npx",
+      ["--no-install", "tsc", "-b", "--pretty", "false", "--force", tsconfig],
+      { cwd: repoRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString();
+    });
+
+    child.on("error", () => {
+      resolveP({
+        findings: [],
+        degraded: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
+      });
+    });
+
+    child.on("close", () => {
+      const findings = parseTscOutput(stdout + "\n" + stderr, repoRoot);
+      resolveP({ findings });
+    });
+  });
+}
+
+const DIAG_RE =
+  /^(.+?)\((\d+),(\d+)\): (error|warning|info|message) (TS\d+): (.+)$/;
+
+function parseTscOutput(output: string, repoRoot: string): ToolFinding[] {
+  const findings: ToolFinding[] = [];
+  for (const raw of output.split("\n")) {
+    const line = raw.trimEnd();
+    const m = DIAG_RE.exec(line);
+    if (!m) continue;
+    const [, fileRaw, lineStr, colStr, sevRaw, code, message] = m;
+    if (!fileRaw || !lineStr || !colStr || !sevRaw || !code || !message) continue;
+    const absFile = isAbsolute(fileRaw) ? fileRaw : resolve(repoRoot, fileRaw);
+    const file = relative(repoRoot, absFile);
+    const severity = sevRaw === "error" ? "error" : sevRaw === "warning" ? "warning" : "info";
+    findings.push({
+      source: "tsc",
+      file,
+      line: Number.parseInt(lineStr, 10),
+      column: Number.parseInt(colStr, 10),
+      severity,
+      ruleId: code,
+      message,
+    });
+  }
+  return findings;
+}
