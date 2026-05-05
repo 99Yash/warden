@@ -1,12 +1,15 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+export type Lockfile = "npm" | "pnpm" | "yarn";
+
 export interface EcosystemContext {
   repoRoot: string;
   isMonorepo: boolean;
   tsconfigPaths: string[];
   hasEslint: boolean;
   hasPackageJson: boolean;
+  lockfile: Lockfile | undefined;
 }
 
 const SKIP_DIRS = new Set([
@@ -41,7 +44,18 @@ export function detectEcosystem(repoRoot: string): EcosystemContext {
     tsconfigPaths: findTsconfigs(repoRoot),
     hasEslint: detectEslint(repoRoot),
     hasPackageJson: existsSync(join(repoRoot, "package.json")),
+    lockfile: detectLockfile(repoRoot),
   };
+}
+
+function detectLockfile(repoRoot: string): Lockfile | undefined {
+  // Order matters: pnpm-lock.yaml takes precedence over package-lock.json since
+  // pnpm projects often have an out-of-date package-lock.json from earlier npm
+  // experiments. yarn.lock is the loser when ambiguous — same reasoning.
+  if (existsSync(join(repoRoot, "pnpm-lock.yaml"))) return "pnpm";
+  if (existsSync(join(repoRoot, "package-lock.json"))) return "npm";
+  if (existsSync(join(repoRoot, "yarn.lock"))) return "yarn";
+  return undefined;
 }
 
 function detectMonorepo(repoRoot: string): boolean {

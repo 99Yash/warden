@@ -5,11 +5,14 @@ import { runEslint } from "./runners/eslint.js";
 import { runTsc } from "./runners/tsc.js";
 import type { ToolFinding } from "./runners/types.js";
 import type { Category, Comment, CommentSet, Tier } from "./schema.js";
+import { runVulnerabilityCheck } from "./vuln/index.js";
 
 export * from "./schema.js";
-export { detectEcosystem, type EcosystemContext } from "./ecosystem/index.js";
+export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosystem/index.js";
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 export type { ToolFinding } from "./runners/types.js";
+export type { AuditAdvisory, AuditSeverity } from "./runners/audit.js";
+export { verifyOsv, type OsvRecord, type VerifiedAdvisory } from "./verify/osv.js";
 
 export interface ReviewConfig {
   mode: "check" | "review";
@@ -38,22 +41,31 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   const changed = input.diff ? parseUnifiedDiff(input.diff) : undefined;
   const changedPaths = changed?.map((c) => c.path);
 
-  const [tscResult, eslintResult] = await Promise.all([
+  const [tscResult, eslintResult, vulnResult] = await Promise.all([
     runTsc(input.repoRoot, ecosystem.tsconfigPaths),
     ecosystem.hasEslint && changedPaths && changedPaths.length > 0
       ? runEslint(input.repoRoot, changedPaths)
       : Promise.resolve({ findings: [], degraded: [] as string[] }),
+    ecosystem.lockfile
+      ? runVulnerabilityCheck(input.repoRoot, ecosystem.lockfile)
+      : Promise.resolve({
+          comments: [] as Comment[],
+          degraded: ["audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan"],
+        }),
   ]);
 
   const allFindings = [...tscResult.findings, ...eslintResult.findings];
+  // Tool findings are file/line-anchored, so they get diff-scoped. Vulnerability
+  // findings live in package.json and surface across the whole tree — a CVE in
+  // an existing dep is still a CVE even if this PR didn't touch the lockfile.
   const scoped = changed ? scopeToDiff(allFindings, changed) : allFindings;
-  const comments = scoped.map(toComment);
+  const comments = [...scoped.map(toComment), ...vulnResult.comments];
 
   return {
     comments,
     metadata: {
       durationMs: Date.now() - startedAt,
-      degradedWorkers: [...tscResult.degraded, ...eslintResult.degraded],
+      degradedWorkers: [...tscResult.degraded, ...eslintResult.degraded, ...vulnResult.degraded],
     },
   };
 }

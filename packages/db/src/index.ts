@@ -31,3 +31,8 @@ export function closeDb() {
 export { resolveCachePath } from "./path.js";
 export * from "./helpers.js";
 export * from "./schemas.js";
+
+// Re-export the drizzle-orm operator surface that consumers need so callers
+// can stay on `@warden/db` as the single import point and don't need to add
+// `drizzle-orm` to their own package.json.
+export { and, eq, gt, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";

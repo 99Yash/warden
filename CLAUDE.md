@@ -45,7 +45,7 @@ All packages are `@warden/*`. The CLI binary is `warden`.
 
 **Core → AI:** `packages/core/src/llm/` (when M4 lands) imports model dispatchers from `@warden/ai` (`getBossModel()`, `getWorkerStrongModel()`, `getWorkerCheapModel()`). Never imports AI SDK provider functions directly — always go through `@warden/ai`.
 
-**Core → DB:** `packages/core/src/cache/` (when M3 lands) reads/writes the four cache tables from `@warden/db`. `@warden/db` exposes a `db()` accessor returning the better-sqlite3 connection singleton; the file is auto-created at `.warden/cache.sqlite` (relative to repo root) on first use.
+**Core → DB:** `packages/core/src/cache/` reads/writes the cache tables from `@warden/db`. `@warden/db` exposes a `db()` accessor returning the better-sqlite3 connection singleton; the file is auto-created at `.warden/cache.sqlite` (anchored to the nearest repo root via `resolveCachePath()`) on first use. `@warden/db` re-exports drizzle-orm operators (`eq`, `and`, `gt`, etc.) so callers don't add `drizzle-orm` to their own deps.
 
 **Core stays I/O-pure (ADR-0013).** It must not import `commander`, `picocolors`, `ora`, or anything that reads `process.argv` / writes to `process.stdout` / assumes a TTY. All input is supplied via `ReviewInput`; all output is the returned `CommentSet`. This is what makes the future bot wrappers possible without rewriting the engine.
 
@@ -109,9 +109,9 @@ Do not use `process.env` directly in app code — always go through `wardenEnv()
 
 - [x] M1 — Scaffold (see [`scaffolding-plan.md`](./scaffolding-plan.md))
 - [x] M2 — Ecosystem detection + TSC/ESLint runners
-- [ ] M3 — npm audit + OSV verification
-- [ ] M4 — LLM formatter (end-to-end `warden review`)
-- [ ] M5+ — Improvements driven by dogfooding feedback
+- [x] M3 — npm audit + OSV verification (citation-discipline path lit up; advisories without an OSV record are dropped)
+- [ ] M4 — LLM formatter (end-to-end `warden review`). **Constraint per ADR-0015:** prompts live in dedicated files (e.g. `packages/core/src/llm/prompts/`), never embedded as multi-hundred-line string literals in business logic.
+- [ ] M5+ — Improvements driven by dogfooding feedback. Custom-code vuln worker (if/when scheduled) follows ADR-0015's borrow/reject/diverge stance against DeepSec.
 
 Future, architecturally enabled per ADR-0013 (not committed):
 

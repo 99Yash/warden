@@ -30,6 +30,7 @@ Companion doc: `vision.md` (the long-form thinking framework, preserved from the
 | Comment ordering     | Correctness → Clarity → Style → Dedup → Tests (ADR-0012); orthogonal to severity tier |
 | Roadmap (post-v0)    | GitHub PR bot → Slack bot → ClickUp integration (ADR-0013); architecture stays bot-ready |
 | CLI UX paradigm      | One-shot non-interactive CLI (ADR-0014); no TUI; interactive triage deferred to a future web app |
+| Prior-art posture    | DeepSec study (ADR-0015): borrow pipeline shape + plugin slots; reject free-form findings + 2-agent revalidation; prompts-as-files from M4 |
 
 ---
 
@@ -286,5 +287,23 @@ Interactive review triage (walk through findings one at a time, mark Useful / No
 **Alternatives.** Ink-based TUI (rejected — see above; also reading like Claude Code is the wrong reference frame: Claude Code is an *agentic conversation*, Warden is a *one-shot review tool*). REPL mode `warden> review` then drill into findings (rejected — interaction shape is wrong; review is "look at output, act on it," not "converse with the tool"). Hybrid `warden review` plain + `warden review -i` interactive (deferred — re-evaluate against dogfooding evidence; web-first will likely win).
 
 **Caveat.** A future `warden patrol --watch` mode (parked per ADR-0011) would be long-running and could benefit from a TUI-style status display. That's a separate decision when patrol gets implemented; nothing in v0 forecloses it. The constraint that survives is `core` stays I/O-pure (ADR-0013) — even patrol's eventual UI lives outside `core`.
+
+---
+
+## ADR-0015 — DeepSec as prior art: borrow the pipeline, reject the grounding model
+
+**Decision.** Vercel Labs released [DeepSec](https://vercel.com/blog/introducing-deepsec-find-and-fix-vulnerabilities-in-your-code-base) in May 2026 — open-source, CLI-based, LLM-agent-driven SAST for custom-code vulnerabilities. It is the closest shipped prior art for the agent-driven vuln-discovery worker `vision.md` §3 sketches and ADR-0008 defers. After reading the source (`~/Developer/oss/deepsec`), Warden commits to the following position:
+
+- **Borrow** the pipeline shape and ergonomic patterns when the M5+ custom-code vuln worker is scoped: three-verb pipeline (`scan` → `process` → `revalidate`), directory-batched file processing, plugin-slot architecture (DeepSec exposes seven slots — `matchers`, `notifiers`, `ownership`, `people`, `executor`, `agents`, `commands`), append-only analysis history with re-investigation markers.
+- **Reject** DeepSec's grounding model. Specifically: free-form `description` / `recommendation` fields on findings (escape hatches for ungrounded claims), embedded multi-thousand-line system prompts as TypeScript string literals (`packages/processor/src/index.ts:37-149` in DeepSec — clear ergonomic debt), and second-agent revalidation as the false-positive control.
+- **Diverge** on the `Finding` shape and the validation pass. Warden's findings carry structured `evidence: { tool, source, range }[]` so every claim has a citable origin. Warden's revalidation re-verifies *the source* (re-fetch the OSV record, re-run the static tool, re-query the `.d.ts`), not *the LLM's judgment of the source*.
+
+**Why.** DeepSec's two-agent design (investigation + revalidation) treats the LLM as oracle *and* judge. Stacking two LLM judgments leaves a residual 10–20% false-positive rate, which DeepSec acknowledges. ADR-0008's citation thesis is the exact counter-bet: deterministic tooling and external sources are oracle, the LLM is judge and formatter only. That design difference ripples through the data model — DeepSec's `Finding` (`packages/core/src/types.ts:117-127`) stores `{ severity, vulnSlug, title, description, lineNumbers, recommendation, confidence }` with `description` and `recommendation` as free-form prose; Warden's must store the citation explicitly because the citation is what makes the claim postable. The pipeline patterns (three verbs, batching, plugin slots) are orthogonal to that bet — they are general orchestration shapes, transferable without conflict.
+
+**Near-term constraint (M4 — load-bearing).** Even though M4 is a single LLM call (no agent loop, no boss/worker), prompts live in dedicated files from day one — e.g. `packages/core/src/llm/prompts/formatter.md` or a sibling `.ts` that exports a single template-literal string. The cost of this rule is one directory; the cost of *not* having it is the DeepSec failure mode (1200-line system prompt embedded in business logic, unreviewable, untestable). Codify this when M4 lands; it is cheap to honor and expensive to retrofit.
+
+**Alternatives.** Ignore DeepSec entirely (rejected — open-source prior art with shared model assumptions is too useful to skip; the divergence points are clearer once the borrowed shapes are explicit). Adopt DeepSec wholesale and bolt OSV verification on top (rejected — the second-agent revalidation pattern fundamentally conflicts with verify-or-drop; bolting OSV onto a free-form `description` field doesn't fix the unverified-prose problem, it just adds a sidecar). Wait until M5 to record any of this (rejected — the M4 prompts-as-files constraint is *now*-actionable; the M5+ shape decisions are easier to honor when written down before the milestone starts than re-derived under deadline).
+
+**Caveat.** This ADR commits to a *direction* for M5+, not a *milestone schedule*. The custom-code vuln worker may never get prioritized over multi-ecosystem expansion or the GitHub PR bot (ADR-0013); dogfooding evidence will decide. What this ADR fixes is: *if* and *when* it ships, the design rules above are pre-decided so the milestone work is implementation, not architecture.
 
 ---
