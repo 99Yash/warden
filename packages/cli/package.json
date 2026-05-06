@@ -17,6 +17,7 @@
     "@warden/core": "workspace:*",
     "@warden/env": "workspace:*",
     "commander": "catalog:",
+    "log-update": "catalog:",
     "ora": "catalog:",
     "picocolors": "catalog:"
   },

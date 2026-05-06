@@ -1,15 +1,22 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z
     .string()
-    .min(1, "ANTHROPIC_API_KEY is required — see https://console.anthropic.com"),
+    .min(
+      1,
+      'ANTHROPIC_API_KEY is required — see https://console.anthropic.com',
+    ),
+  // Optional fallback per ADR-0017. When set, the LLM cascade routes to
+  // Google Gemini after Anthropic fails post-retry. When unset, Anthropic
+  // failure is hard-fail.
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
   WARDEN_LOG_LEVEL: z
-    .enum(["silent", "error", "warn", "info", "debug"])
-    .default("info"),
+    .enum(['silent', 'error', 'warn', 'info', 'debug'])
+    .default('info'),
   NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
+    .enum(['development', 'production', 'test'])
+    .default('development'),
 });
 
 export type WardenEnv = z.infer<typeof envSchema>;
@@ -21,8 +28,8 @@ export function wardenEnv(): WardenEnv {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     const formatted = result.error.issues
-      .map((i) => `  ${i.path.join(".")}: ${i.message}`)
-      .join("\n");
+      .map((i) => `  ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
     throw new Error(
       `Missing or invalid environment variables:\n${formatted}\n\nSet them in .env at the repo root, or export them in your shell.`,
     );

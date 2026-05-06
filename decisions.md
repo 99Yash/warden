@@ -31,6 +31,8 @@ Companion doc: `vision.md` (the long-form thinking framework, preserved from the
 | Roadmap (post-v0)    | GitHub PR bot → Slack bot → ClickUp integration (ADR-0013); architecture stays bot-ready |
 | CLI UX paradigm      | One-shot non-interactive CLI (ADR-0014); no TUI; interactive triage deferred to a future web app |
 | Prior-art posture    | DeepSec study (ADR-0015): borrow pipeline shape + plugin slots; reject free-form findings + 2-agent revalidation; prompts-as-files from M4 |
+| Index storage seams  | Content-addressed, model-versioned, interface-shaped stores; bulk export/import primitive; queue decoupled from storage (ADR-0016)        |
+| LLM provider posture | Anthropic primary; one-retry on transient; Google Gemini fallback (gemini-2.5-pro/flash matched to sonnet/haiku tiers); hard fail if both fail (ADR-0017)        |
 
 ---
 
@@ -305,5 +307,86 @@ Interactive review triage (walk through findings one at a time, mark Useful / No
 **Alternatives.** Ignore DeepSec entirely (rejected — open-source prior art with shared model assumptions is too useful to skip; the divergence points are clearer once the borrowed shapes are explicit). Adopt DeepSec wholesale and bolt OSV verification on top (rejected — the second-agent revalidation pattern fundamentally conflicts with verify-or-drop; bolting OSV onto a free-form `description` field doesn't fix the unverified-prose problem, it just adds a sidecar). Wait until M5 to record any of this (rejected — the M4 prompts-as-files constraint is *now*-actionable; the M5+ shape decisions are easier to honor when written down before the milestone starts than re-derived under deadline).
 
 **Caveat.** This ADR commits to a *direction* for M5+, not a *milestone schedule*. The custom-code vuln worker may never get prioritized over multi-ecosystem expansion or the GitHub PR bot (ADR-0013); dogfooding evidence will decide. What this ADR fixes is: *if* and *when* it ships, the design rules above are pre-decided so the milestone work is implementation, not architecture.
+
+---
+
+## ADR-0016 — Index storage discipline: content-addressed, model-versioned, portable from day one
+
+**Decision.** When the indexing layer lands (M5+ — chunk store, embedding store, Merkle tree, async job queue, sketched in `vision.md` §9 and elaborated in the indexing-design discussion logged 2026-05-05), it ships with four non-negotiable properties. These are pre-decided now so the milestone work is implementation, not architecture — same posture as ADR-0015's M4 prompts-as-files rule.
+
+1. **Storage is interface-shaped, not SQLite-shaped.** `ChunkStore`, `EmbeddingStore`, `MerkleStore`, and `JobRunner` are interfaces (location TBD when M5+ scopes — likely `@warden/core` or a new `@warden/index` package). The default implementation is SQLite-backed via `@warden/db`. Hosted implementations (Postgres, Pinecone, S3 + Faiss, etc.) are deployment swaps. No business logic touches `db.exec()` or Drizzle queries directly for index data — only through the interface.
+2. **Every embedding row carries `model_id` + `model_version`.** Row shape: `(chunk_hash, model_id, model_version, vector_bytes, created_at)`. Lets a hosted backend tell whether a local row is reusable (same model) or must be re-embedded (different model), and prevents silent corruption when the embedding model is upgraded.
+3. **Bulk export/import is a first-class operation from day one.** `warden index export <path>` writes a portable archive (content-addressed rows + manifest with model metadata + repo Merkle root); `warden index import <path>` reads it. The discipline of building it forces the format to stay portable. Primitive doubles as a backup, a CI cache artifact, and the path for opt-in migration to hosted.
+4. **The async queue is decoupled from storage.** `JobRunner` is a separate interface from the stores. Default impl is an in-process worker pulling from a SQLite-backed task table. Tasks are content-addressed by input — re-running the same `(embed_chunk, chunk_hash, model_id@version)` task is a no-op. A future remote dispatcher (hosted job server) is a swap, not a refactor.
+
+**Why.** v0 commits to local-first (ADR-0007's local cache, ADR-0013's I/O-pure core). Future bot deployments (ADR-0013) and an eventual hosted indexing backend require migrating user-built indexes to the cloud without re-embedding from scratch where possible, and without ever silently mixing artifacts from different embedding models. Content-addressed, model-versioned storage makes per-user migration a one-time `INSERT INTO cloud_store SELECT * FROM local_store`. Without these seams, local-to-hosted migration becomes "rebuild every user's index in the cloud" — survivable but wasteful, and architecturally unrecoverable if assumptions about local SQLite leak into business logic.
+
+The decision also rejects the symmetric framing "decide local vs hosted globally." Local vs hosted decomposes into four separable concerns, each with its own swap point:
+
+| Concern                  | Local-first answer                                                              | When hosted earns rent                                                       |
+| ------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Trust / data residency   | Always local; never auto-flips.                                                 | Org-policy decision.                                                         |
+| Derived artifact storage | Local default.                                                                  | Opt-in offload at scale (~>1 GB indexes) or for team sharing.                |
+| Derived artifact compute | Local default with the queue.                                                   | Large codebases (hours of embed time) or shared team work.                   |
+| Bot deployment           | Doesn't apply.                                                                  | Hosted by necessity (webhooks need a public URL — ADR-0013).                 |
+
+The four interfaces above (`ChunkStore`, `EmbeddingStore`, `MerkleStore`, `JobRunner`) are each one of these concerns' swap points. Coupling them is the failure mode this ADR forecloses.
+
+**Sizing reality check (so storage isn't a phantom worry).** int8-quantized 384-dim embeddings: ~384 bytes per chunk + ~1 KB metadata. 50k LOC ≈ ~15 MB. 500k LOC ≈ ~150 MB. 5M LOC ≈ ~1.5 GB. The actually binding constraint at scale is embed-generation *time*, not *storage* — so compute offload precedes storage offload when pain shows up. Migration upload (1 GB × 1000 users = 1 TB total) is parallelizable, one-time per user, not a scale problem.
+
+**Cursor's design as reference (per indexing-design discussion).** Cursor's secure indexing (Merkle tree of file/dir hashes, simhash for index dedup, content-proof scheme for cross-team index reuse) is the closest shipped prior art. Their hosted design solves *team caching* — a problem Warden v0 doesn't have. Useful primitives to borrow: content-addressed chunk caching, Merkle-tree change detection, simhash-style summary for index dedup. Useful constraint to inherit: no leakage of unauthorized files (matters even single-user once bot-mode arrives). What Warden diverges on: Cursor optimizes for sub-second autocomplete latency; Warden optimizes for review correctness with citation discipline — that buys 10s of seconds per review, which changes the precision/recall tradeoff and the retrieval modalities (multi-modal index — symbol + type + embedding + history — not embedding-only).
+
+**Alternatives.** Hard-code SQLite throughout the indexing layer, swap at hosted-mode time (rejected — guarantees the assumptions leak; "swap at hosted-mode time" becomes a rewrite). Skip model-versioning, treat embeddings as opaque blobs (rejected — produces silent corruption on model upgrade, exactly the failure mode that erodes the citation/trust thesis behind ADR-0008). Defer all of this until hosted mode is actually being built (rejected — the cost of these four seams is small at design time and substantial to retrofit). Adopt Cursor's content-proof / simhash machinery in v0 (rejected — solves team-sharing, which Warden v0 doesn't have; revisit when team-shared indexes become a real product requirement).
+
+**Caveat — this is a *direction*, not a milestone.** The indexing layer is M5+; this ADR is what M5+ implementation must respect, not a commitment to ship the layer on a schedule. If indexing never lands, the ADR is dormant. If it does, the constraints are pre-decided.
+
+**Caveat — interface design happens with the M5+ implementation, not now.** This ADR commits to *which* abstractions exist (`ChunkStore`, `EmbeddingStore`, `MerkleStore`, `JobRunner`) and *what properties they enforce* (content-addressing, model versioning, portable export, decoupled queue). The actual method shapes get designed when the first implementation lands. Premature interface design — guessing at methods before there's a real consumer — is exactly the dead weight ADR-0013 cautions against.
+
+**Caveat — first-install UX.** When the indexing layer ships, first `warden review` runs against cheap signals (imports + symbol search + heuristic dirs) and produces a usable result while the chunk + Merkle + embedding store builds in the background via `JobRunner`. Subsequent reviews get the upgraded retrieval. This avoids Cursor's cold-start problem (Warden has no team index to copy from on first install) and is fine because Warden is not latency-bound the way autocomplete is. A dedicated `warden index` subcommand makes the build explicit, debuggable, and CI-cacheable.
+
+---
+
+## ADR-0017 — LLM provider fallback: Anthropic primary, Google secondary
+
+**Decision.** Amends ADR-0006's hardcoded-single-provider stance. The M4 LLM call (and every subsequent LLM call) follows a deterministic cascade:
+
+1. **Try Anthropic** at the requested tier (`getBossModel()` / `getWorkerStrongModel()` / `getWorkerCheapModel()`).
+2. **On transient failure** (HTTP 429, HTTP 5xx, network error, timeout), retry once with a 1s backoff against Anthropic.
+3. **If retry fails or hard error** (auth, malformed response after schema validation), switch to **Google Gemini** at the matched tier:
+   - boss / strong → `gemini-2.5-pro`
+   - cheap → `gemini-2.5-flash`
+4. **If Google also fails**, hard fail — exit non-zero, surface the upstream error.
+
+**Cascade lives in `@warden/core/src/llm/cascade.ts`**, not as AI SDK middleware. Each cascade transition emits a `degradedWorkers` entry so the user sees the provider switch even on success-via-fallback. Format: `llm: anthropic <reason>, served from google`.
+
+**Env.** Adds `GOOGLE_GENERATIVE_AI_API_KEY` (AI SDK convention; `@ai-sdk/google` reads it by default) as **optional** in `@warden/env`. When unset, no fallback — Anthropic transient/hard failure goes straight to hard fail. `ANTHROPIC_API_KEY` remains required as in ADR-0006.
+
+**Why.** ADR-0006's single-provider hardcode was right when v0 had no LLM call to depend on. M4 inverts that: `warden review` is the headline command, the LLM is the formatter, and a single transient Anthropic 429 breaking the headline command is bad UX. Single-provider was a *startup-cost* optimization (one API key, one billing flow, one set of failure modes) — `vision.md` §2 itself flagged the trade-off. With M4 the LLM is load-bearing; resilience earns rent.
+
+Google as the second provider:
+- Different infrastructure / different uptime correlation than Anthropic. (OpenAI as fallback would correlate more — both heavily Microsoft-Azure-adjacent at peak load.)
+- AI SDK v6 has first-class `@ai-sdk/google` support — same `LanguageModel` shape, no wrapper code beyond the cascade itself.
+- Tier mapping is clean: `gemini-2.5-pro` is genuinely sonnet-class for code-review reasoning; `gemini-2.5-flash` is haiku-class for pattern-matching tasks. The cheap tier specifically — gemini-2.5-flash beats most older haiku-class options on cost-per-token at comparable quality, so the fallback isn't a degradation.
+- User has already provisioned the key. The architecture commitment is "have a fallback path"; the choice of *which* second provider is point-in-time and revisitable.
+
+**Why caller-side cascade, not AI SDK middleware.**
+- Failure mode visible at the call site. `degradedWorkers` metadata is naturally produced.
+- AI SDK middleware would hide the cascade behind a single `LanguageModel` reference. Harder to log, harder to debug, fragile to AI SDK API churn.
+- ~30 lines of cascade code in `@warden/core/llm/cascade.ts` is cheaper than depending on experimental middleware APIs.
+
+**Alternatives.**
+- Stay single-provider, hard-fail on Anthropic outage (rejected — M4 makes this UX-breaking). The original ADR-0006 trade-off no longer holds when the LLM call is the headline path.
+- Three-or-more provider chain (rejected for v0 — diminishing returns; two providers cover realistic outage scenarios; revisit only if Google + Anthropic outages start correlating, which they currently don't).
+- User-configurable fallback chain via YAML (rejected — power-user feature, deferred to the BYOLLM milestone ADR-0006 already names; tier-mapping needs to stay opinionated for v0).
+- AI SDK middleware-based fallback (rejected — see above).
+- OpenAI as fallback instead of Google (rejected — user has the Google key provisioned, choice is made; OpenAI's tier-pricing volatility makes gemini-2.5-flash the more stable cheap-tier fallback at this point in time).
+
+**Caveat — multi-provider fallback ≠ BYOLLM.** ADR-0006's deferred BYOLLM milestone (user-configurable model per role, multi-provider auto-detect via `WARDEN_API_KEY`) stays deferred. ADR-0017 commits to *one specific* fallback path with hardcoded tier mapping; it does not open the YAML-config door.
+
+**Caveat — fallback SKUs are point-in-time.** Gemini SKUs evolve. Capture them in `packages/ai/src/models.ts` next to the Anthropic getters and revisit on Google's next-gen ship. The stable contract is the *tier mapping* (boss/strong → strong-fallback, cheap → cheap-fallback), not the specific SKU strings.
+
+**Caveat — degradedWorkers messaging is load-bearing.** The user must see when fallback was used even on success — silent provider switching erodes the trust property Warden depends on. The `degradedWorkers` array in `CommentSetMetadata` already exists per `vision.md` §11; Warden writes there both on Anthropic-recovery-after-retry (`llm: anthropic 429, retried successfully`) and on Google-fallback-success (`llm: anthropic <reason>, served from google`).
+
+**Caveat — does not affect ADR-0008's citation thesis.** Citation discipline is about *what the LLM is asked to claim* (tool findings + verified CVEs only, no LLM-generated assertions per the M4 grilling Q1 → A+C decision). The provider behind the LLM doesn't change that. A Gemini fallback that triages tool findings + asks clarification questions honors the thesis identically to a Sonnet primary.
 
 ---

@@ -4,6 +4,8 @@ packages:
 
 catalog:
   '@ai-sdk/anthropic': ^3.0.0
+  '@ai-sdk/google': ^3.0.0
+  log-update: ^7.0.0
   '@types/better-sqlite3': ^7.6.13
   '@types/node': ^22.13.11
   ai: 6.0.77

@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { review, type ReviewConfig } from "@warden/core";
+import {
+  resolveDiff,
+  review,
+  type FormatterEvent,
+  type ReviewConfig,
+  type ResolvedDiff,
+} from "@warden/core";
 import { wardenEnv } from "@warden/env";
 import { Command } from "commander";
 import pc from "picocolors";
 import { formatCommentSet } from "./format.js";
+import { createPhaseRenderer } from "./render.js";
 
 function findUp(filename: string): string | undefined {
   let dir = process.cwd();
@@ -41,6 +48,9 @@ program
 
 interface CommonOpts {
   json?: boolean;
+  base?: string;
+  stdin?: boolean;
+  verbose?: boolean;
 }
 
 async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<void> {
@@ -48,10 +58,49 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
   // by failing on first LLM call. ADR-0008's "fail fast at scaffold time."
   wardenEnv();
 
+  const repoRoot = findRepoRoot();
+  const { diff, description } = await acquireDiff(repoRoot, mode, opts);
+
+  if (!opts.json) {
+    process.stdout.write(pc.dim(`warden ${mode}  ${description}\n`));
+  }
+
+  const renderer = !opts.json && mode === "review" ? createPhaseRenderer() : undefined;
+
+  const emit = renderer
+    ? (event: FormatterEvent) => {
+        switch (event.type) {
+          case "phase-start":
+            renderer.startLlmPhase(`drafting review (${event.provider}/${event.modelId})`);
+            break;
+          case "reasoning-delta":
+            renderer.appendReasoning(event.text);
+            break;
+          case "phase-complete":
+            renderer.completeLlmPhase(
+              `${event.revisedCount} revisions, ${event.questionCount} question${event.questionCount === 1 ? "" : "s"} (${event.durationMs}ms)`,
+            );
+            break;
+          case "phase-degraded":
+            renderer.fail(event.reason);
+            break;
+          case "fallback-engaged":
+            // Provider switch — the cascade is recovering, not failing. The
+            // next phase-start event opens a fresh spinner under the new
+            // provider; here we just close the current region with a yellow
+            // notice. (Caught by M4 dogfood: previous version called
+            // renderer.fail() which misleadingly painted a red ✗.)
+            renderer.note(`${event.from} → ${event.to} (${event.reason})`);
+            break;
+        }
+      }
+    : undefined;
+
   const result = await review({
-    diff: "",
-    repoRoot: findRepoRoot(),
-    config: { mode },
+    diff,
+    repoRoot,
+    config: { mode, verbose: opts.verbose === true },
+    emit,
   });
 
   if (opts.json) {
@@ -59,28 +108,62 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     return;
   }
 
-  process.stdout.write(formatCommentSet(result, mode) + "\n");
+  process.stdout.write("\n" + formatCommentSet(result, mode) + "\n");
 }
 
-program
-  .command("check")
-  .description(
-    "Fast deterministic-only review (TSC + ESLint + npm audit + OSV verification). No LLM call. Suitable for pre-commit / CI gating.",
-  )
-  .option("--json", "Emit machine-readable JSON output instead of pretty CLI.")
-  .action(async (opts: CommonOpts) => {
-    await runReview("check", opts);
-  });
+async function acquireDiff(
+  repoRoot: string,
+  mode: ReviewConfig["mode"],
+  opts: CommonOpts,
+): Promise<ResolvedDiff> {
+  if (opts.stdin === true) {
+    const diff = await readAllStdin();
+    return { diff, description: "stdin" };
+  }
+  return resolveDiff({ repoRoot, mode, baseRef: opts.base });
+}
 
-program
-  .command("review")
-  .description(
-    "Full pipeline: deterministic checks + LLM formatter that triages findings, writes citations, and orders comments by review priority.",
-  )
-  .option("--json", "Emit machine-readable JSON output instead of pretty CLI.")
-  .action(async (opts: CommonOpts) => {
-    await runReview("review", opts);
+function readAllStdin(): Promise<string> {
+  return new Promise((resolveP, rejectP) => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on("end", () => resolveP(data));
+    process.stdin.on("error", rejectP);
   });
+}
+
+const sharedOpts = (cmd: Command): Command =>
+  cmd
+    .option("--json", "Emit machine-readable JSON output instead of pretty CLI.")
+    .option(
+      "--base <ref>",
+      "Override the base ref for the diff (default: uncommitted in check, vs default-branch in review).",
+    )
+    .option("--stdin", "Read the unified diff from stdin instead of running git.")
+    .option("--verbose", "Surface tier-3 (style/dedup) findings; suppressed by default.");
+
+sharedOpts(
+  program
+    .command("check")
+    .description(
+      "Fast deterministic-only review (TSC + ESLint + npm audit + OSV verification). No LLM call. Suitable for pre-commit / CI gating.",
+    ),
+).action(async (opts: CommonOpts) => {
+  await runReview("check", opts);
+});
+
+sharedOpts(
+  program
+    .command("review")
+    .description(
+      "Full pipeline: deterministic checks + LLM formatter that triages findings, writes citations, and orders comments by review priority.",
+    ),
+).action(async (opts: CommonOpts) => {
+  await runReview("review", opts);
+});
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);

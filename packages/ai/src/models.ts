@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import { anthropicProvider } from "./provider.js";
+import { anthropicProvider, googleProvider } from "./provider.js";
 
 /**
  * Strong-tier model used for the boss / synthesizer / grader pass and for
@@ -25,4 +25,27 @@ export function getWorkerStrongModel(): LanguageModel {
  */
 export function getWorkerCheapModel(): LanguageModel {
   return anthropicProvider()("claude-haiku-4-5-20251001");
+}
+
+/**
+ * ADR-0017 fallback dispatchers. Returns the Google-tier counterpart of
+ * the corresponding Anthropic getter, or `undefined` when no Google key is
+ * configured — caller-side cascade then proceeds to hard fail.
+ *
+ * Tier mapping is the stable contract; specific Gemini SKUs are
+ * point-in-time and revisited on each Google generation ship.
+ */
+export function getBossFallbackModel(): LanguageModel | undefined {
+  const g = googleProvider();
+  return g?.("gemini-2.5-pro");
+}
+
+export function getWorkerStrongFallbackModel(): LanguageModel | undefined {
+  const g = googleProvider();
+  return g?.("gemini-2.5-pro");
+}
+
+export function getWorkerCheapFallbackModel(): LanguageModel | undefined {
+  const g = googleProvider();
+  return g?.("gemini-2.5-flash");
 }
