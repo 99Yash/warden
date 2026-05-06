@@ -342,7 +342,17 @@ The four interfaces above (`ChunkStore`, `EmbeddingStore`, `MerkleStore`, `JobRu
 
 **Caveat — interface design happens with the M5+ implementation, not now.** This ADR commits to *which* abstractions exist (`ChunkStore`, `EmbeddingStore`, `MerkleStore`, `JobRunner`) and *what properties they enforce* (content-addressing, model versioning, portable export, decoupled queue). The actual method shapes get designed when the first implementation lands. Premature interface design — guessing at methods before there's a real consumer — is exactly the dead weight ADR-0013 cautions against.
 
-**Caveat — first-install UX.** When the indexing layer ships, first `warden review` runs against cheap signals (imports + symbol search + heuristic dirs) and produces a usable result while the chunk + Merkle + embedding store builds in the background via `JobRunner`. Subsequent reviews get the upgraded retrieval. This avoids Cursor's cold-start problem (Warden has no team index to copy from on first install) and is fine because Warden is not latency-bound the way autocomplete is. A dedicated `warden index` subcommand makes the build explicit, debuggable, and CI-cacheable.
+**Caveat — first-install UX.** When the indexing layer ships, first `warden review` runs against cheap signals (imports + symbol search + heuristic dirs) and produces a usable result while the chunk + Merkle + embedding store builds in the background via `JobRunner`. Subsequent reviews get the upgraded retrieval. This avoids Cursor's cold-start problem (Warden has no team index to copy from on first install) and is fine because Warden is not latency-bound the way autocomplete is.
+
+The user-facing entry point is `warden init` (not `warden index`) — reads as friendly first-time setup in line with `git init` / `cargo init` / `terraform init`. Idempotent: re-running refreshes the index (same code path). `warden review` handles incremental updates implicitly via Merkle change detection.
+
+When `warden review` runs with a missing or stale index (Merkle-root divergence beyond a threshold, or `--no-context` flag), the CLI surfaces a single dim limitation banner above the phase log:
+
+```
+! Running without repo context. Run `warden init` once for sharper findings.
+```
+
+The banner is yellow-toned (degraded, not failed), one line, auto-disappears once init has been run, and is not suppressible via flag (fix the cause, not the symptom). The banner state also enters `degradedWorkers` metadata so the `--json` output reflects it for bot wrappers per ADR-0013.
 
 ---
 
