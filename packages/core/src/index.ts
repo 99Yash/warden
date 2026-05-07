@@ -1,9 +1,16 @@
 import { stableCommentId } from "./comment-id.js";
+import {
+  CheapSignalsSelector,
+  candidatesToRetrievedContext,
+  type ContextSelector,
+  type SelectorOutput,
+} from "./context/index.js";
 import { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 import { detectEcosystem } from "./ecosystem/index.js";
 import { formatReview } from "./llm/index.js";
 import type { FormatterListener } from "./llm/index.js";
 import { runEslint } from "./runners/eslint.js";
+import { runJscpd } from "./runners/jscpd.js";
 import { runTsc } from "./runners/tsc.js";
 import type { ToolFinding } from "./runners/types.js";
 import type { Category, Comment, CommentSet, RetrievedContext, Tier } from "./schema.js";
@@ -17,6 +24,15 @@ export type { FormatterEvent, FormatterListener } from "./llm/index.js";
 export type { ToolFinding } from "./runners/types.js";
 export type { AuditAdvisory, AuditSeverity } from "./runners/audit.js";
 export { verifyOsv, type OsvRecord, type VerifiedAdvisory } from "./verify/osv.js";
+export {
+  CheapSignalsSelector,
+  TsCompilerParser,
+  candidatesToRetrievedContext,
+  type ContextCandidate,
+  type ContextSelector,
+  type Reason,
+  type SelectorOutput,
+} from "./context/index.js";
 
 export interface ReviewConfig {
   mode: "check" | "review";
@@ -29,8 +45,14 @@ export interface ReviewInput {
   repoRoot: string;
   config: ReviewConfig;
   /**
-   * M5+ context-selection output. M4 always passes `{ chunks: [] }` (the
-   * default), forward-compat per ADR-0016 / the indexing-design discussion.
+   * Override the M5 cheap-signals selector. Default constructs a
+   * `CheapSignalsSelector` with the host repo's tsconfig. Pass `null` to
+   * skip context selection entirely (e.g. test harnesses).
+   */
+  selector?: ContextSelector | null;
+  /**
+   * Pre-computed context (e.g. injected by tests). When provided the selector
+   * is skipped and this value flows directly to the LLM formatter.
    */
   retrievedContext?: RetrievedContext;
   /** Optional listener for streaming events (phase progress, reasoning deltas). */
@@ -54,7 +76,25 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   const changed = input.diff ? parseUnifiedDiff(input.diff) : undefined;
   const changedPaths = changed?.map((c) => c.path);
 
-  const [tscResult, eslintResult, vulnResult] = await Promise.all([
+  // M5 (ADR-0018): selector runs parallel with TSC/ESLint/vuln. `check` mode
+  // skips it — `check` is deterministic-only and never invokes the LLM, so
+  // there's no consumer that would benefit from selector output.
+  const shouldRunSelector =
+    input.config.mode === "review" &&
+    input.selector !== null &&
+    !input.retrievedContext &&
+    changed !== undefined &&
+    changed.length > 0;
+  const selector =
+    shouldRunSelector && input.selector !== undefined
+      ? input.selector
+      : shouldRunSelector
+      ? new CheapSignalsSelector({ tsconfigPath: ecosystem.tsconfigPaths[0] })
+      : null;
+
+  const emptySelectorResult: SelectorOutput = { candidates: [], degraded: [] };
+
+  const [tscResult, eslintResult, vulnResult, selectorResult] = await Promise.all([
     runTsc(input.repoRoot, ecosystem.tsconfigPaths),
     ecosystem.hasEslint && changedPaths && changedPaths.length > 0
       ? runEslint(input.repoRoot, changedPaths)
@@ -65,9 +105,38 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
           comments: [] as Comment[],
           degraded: ["audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan"],
         }),
+    selector
+      ? selector
+          .select({
+            repoRoot: input.repoRoot,
+            changed: changed ?? [],
+            ecosystem,
+          })
+          .catch((err: unknown) => ({
+            candidates: [],
+            degraded: [`context: selector failed (${formatErr(err)})`],
+          }) satisfies SelectorOutput)
+      : Promise.resolve(emptySelectorResult),
   ]);
 
-  const allFindings = [...tscResult.findings, ...eslintResult.findings];
+  // jscpd runs sequentially after the selector — it consumes the candidate
+  // path set per ADR-0018. Skipped when there's nothing scoped to look at.
+  const candidatePaths = selectorResult.candidates.map((c) => c.path);
+  const scopedForJscpd = uniqStrings([...(changedPaths ?? []), ...candidatePaths]);
+  const jscpdResult =
+    scopedForJscpd.length > 0
+      ? await runJscpd(
+          input.repoRoot,
+          scopedForJscpd,
+          new Set(changedPaths ?? []),
+        )
+      : { findings: [] as ToolFinding[], degraded: [] as string[] };
+
+  const allFindings = [
+    ...tscResult.findings,
+    ...eslintResult.findings,
+    ...jscpdResult.findings,
+  ];
   // Tool findings are file/line-anchored, so they get diff-scoped. Vulnerability
   // findings live in package.json and surface across the whole tree — a CVE in
   // an existing dep is still a CVE even if this PR didn't touch the lockfile.
@@ -79,17 +148,35 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     ...tscResult.degraded,
     ...eslintResult.degraded,
     ...vulnResult.degraded,
+    ...jscpdResult.degraded,
+    ...selectorResult.degraded,
   ];
 
   // Mode branch per ADR-0011 + grilling Q12-D: `check` is deterministic-only;
   // `review` adds the LLM triage + clarification-question pass per Q1 (A+C).
   let comments: Comment[] = [...toolComments, ...vulnComments];
   if (input.config.mode === "review" && comments.length > 0) {
+    let ctxFromSelector: RetrievedContext = { chunks: [], sameFolderPaths: [] };
+    if (input.retrievedContext) {
+      ctxFromSelector = input.retrievedContext;
+    } else if (selectorResult.candidates.length > 0) {
+      try {
+        ctxFromSelector = await candidatesToRetrievedContext(
+          selectorResult.candidates,
+          input.repoRoot,
+        );
+      } catch (err) {
+        // Mirrors the selector's own `.catch()` — prompt-assembly failures
+        // (e.g. a candidate file disappearing between selection and read)
+        // shouldn't abort the LLM pass; degrade to diff-only context.
+        degraded.push(`context: prompt-assembly failed (${formatErr(err)})`);
+      }
+    }
     const formatted = await formatReview({
       diff: input.diff,
       toolComments,
       vulnComments,
-      retrievedContext: input.retrievedContext ?? { chunks: [] },
+      retrievedContext: ctxFromSelector,
       emit: input.emit,
     });
     comments = formatted.comments;
@@ -177,7 +264,26 @@ function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } {
       ? { tier: 1, category: "correctness" }
       : { tier: 2, category: "correctness" };
   }
+  if (f.source === "jscpd") {
+    return { tier: 3, category: "dedup" };
+  }
   return f.severity === "error"
     ? { tier: 2, category: "style" }
     : { tier: 3, category: "style" };
+}
+
+function uniqStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+
+function formatErr(err: unknown): string {
+  if (err instanceof Error) return err.message.slice(0, 160);
+  return String(err).slice(0, 160);
 }

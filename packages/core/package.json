@@ -13,6 +13,7 @@
     "@warden/ai": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
+    "jscpd": "catalog:",
     "nanoid": "catalog:",
     "zod": "catalog:"
   },

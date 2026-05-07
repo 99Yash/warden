@@ -179,13 +179,29 @@ function renderComments(comments: Comment[]): string {
 }
 
 function renderRetrievedContext(ctx: RetrievedContext): string {
-  if (ctx.chunks.length === 0) return "(empty — context-selection layer not yet active)";
-  return ctx.chunks
-    .map(
-      (c) =>
-        `### ${c.path}:${c.lineStart}-${c.lineEnd}\nReason: ${c.reason}\n\`\`\`\n${c.snippet}\n\`\`\``,
-    )
-    .join("\n\n");
+  const sections: string[] = [];
+
+  if (ctx.chunks.length > 0) {
+    sections.push("## Adjacent files (with evidence)");
+    sections.push(
+      ctx.chunks
+        .map(
+          (c) =>
+            `### ${c.path}:${c.lineStart}-${c.lineEnd}\nReason: ${c.reason}\n\`\`\`\n${c.snippet}\n\`\`\``,
+        )
+        .join("\n\n"),
+    );
+  }
+
+  if (ctx.sameFolderPaths.length > 0) {
+    sections.push("## Same-folder neighbors (paths only — awareness signal, no content)");
+    sections.push(ctx.sameFolderPaths.map((p) => `- ${p}`).join("\n"));
+  }
+
+  if (sections.length === 0) {
+    return "(empty — no adjacent context surfaced for this diff)";
+  }
+  return sections.join("\n\n");
 }
 
 function readThinkingBudgetFromEnv(): number | undefined {

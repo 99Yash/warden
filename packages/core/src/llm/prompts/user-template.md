@@ -18,7 +18,10 @@ These were produced by `npm audit` and verified against OSV.dev. Treat them as a
 
 # Retrieved repository context
 
-Code adjacent to the diff that may help you judge intent. Empty when no context-selection has run.
+Code adjacent to the diff that may help you judge intent. Two kinds of evidence:
+
+- **Adjacent files (with evidence)**: line ranges from files that import / are imported by / reference symbols in the diff. Cite by `path:line` when a claim leans on these.
+- **Same-folder neighbors (paths only)**: awareness signal for files living next to the diff. No content is shown — you do not know what's in them, so do not claim things about them.
 
 {{retrieved_context}}
 

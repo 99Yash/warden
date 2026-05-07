@@ -15,6 +15,13 @@
       "when": 1778076755735,
       "tag": "0001_charming_master_chief",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778124912437,
+      "tag": "0002_quiet_sumo",
+      "breakpoints": true
     }
   ]
 }
