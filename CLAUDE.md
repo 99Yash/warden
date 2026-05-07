@@ -2,7 +2,7 @@
 
 Warden is an AI code review CLI. It runs deterministic tooling (TSC, ESLint, `npm audit`), verifies every external claim through citable sources (OSV.dev), and uses an LLM only as a triage and formatting layer.
 
-Read [`decisions.md`](./decisions.md) before proposing architectural changes — 14 ADRs cover every major choice and rejection. [`vision.md`](./vision.md) is the long-form thinking framework that preceded the project; most of it is intentionally deferred past v0.
+Read [`decisions.md`](./decisions.md) before proposing architectural changes — 17 ADRs cover every major choice and rejection. [`vision.md`](./vision.md) is the long-form thinking framework that preceded the project; most of it is intentionally deferred past v0.
 
 ## Commands
 
@@ -41,7 +41,7 @@ All packages are `@warden/*`. The CLI binary is `warden`.
 
 ## How the pieces coordinate
 
-**CLI → core:** `packages/cli/src/index.ts` parses argv with commander, calls `review({ diff, repoRoot, config })` from `@warden/core`, formats the returned `CommentSet` via `packages/cli/src/format.ts`. The CLI is the *only* consumer of `core` in v0; future bots (`apps/github-bot/`, `apps/slack-bot/`) will be additional consumers.
+**CLI → core:** `packages/cli/src/index.ts` parses argv with commander, calls `review({ diff, repoRoot, config })` from `@warden/core`, formats the returned `CommentSet` via `packages/cli/src/format.ts`. The CLI is the _only_ consumer of `core` in v0; future bots (`apps/github-bot/`, `apps/slack-bot/`) will be additional consumers.
 
 **Core → AI:** `packages/core/src/llm/` (when M4 lands) imports model dispatchers from `@warden/ai` (`getBossModel()`, `getWorkerStrongModel()`, `getWorkerCheapModel()`). Never imports AI SDK provider functions directly — always go through `@warden/ai`.
 
@@ -51,14 +51,14 @@ All packages are `@warden/*`. The CLI binary is `warden`.
 
 ## Package boundaries
 
-| Package         | Allowed dependencies                                                          | Forbidden                                                |
-| --------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `@warden/cli`   | `@warden/core`, `@warden/env`, commander, picocolors, ora, Node stdlib        | None significant.                                        |
-| `@warden/core`  | `@warden/ai`, `@warden/db`, `@warden/env`, zod, Node stdlib                   | commander, picocolors, ora, `process.argv`, `process.stdout` (use return values). |
-| `@warden/ai`    | AI SDK + provider packages, `@warden/env`                                     | `@warden/core` (other direction); `@warden/db`.         |
-| `@warden/db`    | drizzle-orm, better-sqlite3, `@warden/env`                                    | `@warden/core` / `@warden/ai`.                          |
-| `@warden/env`   | zod only                                                                      | Anything else (must be importable from any package).    |
-| `@warden/config`| Nothing at runtime; ships TS configs only.                                    | N/A.                                                     |
+| Package          | Allowed dependencies                                                   | Forbidden                                                                         |
+| ---------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `@warden/cli`    | `@warden/core`, `@warden/env`, commander, picocolors, ora, Node stdlib | None significant.                                                                 |
+| `@warden/core`   | `@warden/ai`, `@warden/db`, `@warden/env`, zod, Node stdlib            | commander, picocolors, ora, `process.argv`, `process.stdout` (use return values). |
+| `@warden/ai`     | AI SDK + provider packages, `@warden/env`                              | `@warden/core` (other direction); `@warden/db`.                                   |
+| `@warden/db`     | drizzle-orm, better-sqlite3, `@warden/env`                             | `@warden/core` / `@warden/ai`.                                                    |
+| `@warden/env`    | zod only                                                               | Anything else (must be importable from any package).                              |
+| `@warden/config` | Nothing at runtime; ships TS configs only.                             | N/A.                                                                              |
 
 ## TypeScript conventions
 
@@ -82,13 +82,13 @@ Drizzle config reads the SQLite file path from `@warden/env`'s default (`.warden
 
 ## AI SDK
 
-Warden uses AI SDK v6 (`ai@^6`). Common v6 differences from v5 (mirrors Alfred):
+Warden uses AI SDK v6 (`ai@^6`). Common v6 differences from v5:
 
 - `maxTokens` → `maxOutputTokens` in `generateText` / `streamText`.
 - `maxSteps` → `stopWhen: [stepCountIs(n)]`.
 - `tool()` uses `inputSchema`, not `parameters`.
 - `LanguageModel` is a union — do not hardcode string model IDs in type positions.
-- `generateObject` is *@deprecated* — use `generateText` with an `output` setting.
+- `generateObject` is _@deprecated_ — use `generateText` with an `output` setting.
 
 Model selection: `getBossModel()`, `getWorkerStrongModel()`, `getWorkerCheapModel()` from `@warden/ai`. Do not call AI SDK provider functions directly from `@warden/core`. v0 hardcodes Anthropic per ADR-0006.
 
@@ -96,10 +96,12 @@ Model selection: `getBossModel()`, `getWorkerStrongModel()`, `getWorkerCheapMode
 
 Validated by `wardenEnv()` from `@warden/env`. Calling it with missing required vars throws a clear error.
 
-| Var                  | Notes                                                |
-| -------------------- | ---------------------------------------------------- |
-| `ANTHROPIC_API_KEY`  | Required. Even `warden check` validates env at start. |
-| `WARDEN_LOG_LEVEL`   | Optional. Default `info`. Values: `silent`, `error`, `warn`, `info`, `debug`. |
+| Var                            | Notes                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`            | Required. Even `warden check` validates env at start.                                                     |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Optional. Enables the ADR-0017 fallback (Anthropic → retry → Google). When unset, Anthropic failure is hard-fail. |
+| `WARDEN_THINKING_BUDGET`       | Optional. Anthropic extended-thinking budget in tokens. Default 4096.                                     |
+| `WARDEN_LOG_LEVEL`             | Optional. Default `info`. Values: `silent`, `error`, `warn`, `info`, `debug`.                             |
 
 When adding a new env var: update `packages/env/src/index.ts`, `.env.example`, and this file.
 
@@ -110,8 +112,8 @@ Do not use `process.env` directly in app code — always go through `wardenEnv()
 - [x] M1 — Scaffold (see [`scaffolding-plan.md`](./scaffolding-plan.md))
 - [x] M2 — Ecosystem detection + TSC/ESLint runners
 - [x] M3 — npm audit + OSV verification (citation-discipline path lit up; advisories without an OSV record are dropped)
-- [ ] M4 — LLM formatter (end-to-end `warden review`). **Constraint per ADR-0015:** prompts live in dedicated files (e.g. `packages/core/src/llm/prompts/`), never embedded as multi-hundred-line string literals in business logic.
-- [ ] M5+ — Improvements driven by dogfooding feedback. Custom-code vuln worker (if/when scheduled) follows ADR-0015's borrow/reject/diverge stance against DeepSec.
+- [x] M4 — LLM formatter (end-to-end `warden review`). LLM is constrained to triage tool findings + ask clarification questions — never invents assertions (preserves ADR-0008 citation thesis). Prompts live in `packages/core/src/llm/prompts/{system,user-template}.md` per ADR-0015. Multi-provider fallback (Anthropic → retry → Google) per ADR-0017. Stable hash comment ids + content-addressed `llm_review_cache` table per the M4 grilling. Diff source auto-detects per mode (uncommitted for `check`, vs default-branch for `review`); `--base`/`--stdin`/`--verbose` flags supported. Phase log + reasoning-tail UX in `packages/cli/src/render.ts`.
+- [ ] M5+ — Improvements driven by dogfooding feedback. Custom-code vuln worker (if/when scheduled) follows ADR-0015's borrow/reject/diverge stance against DeepSec. Indexing / context-selection layer per ADR-0016 + the indexing-design discussion (cheap-signal v1, embedding-backed v2, jscpd as scoped runner).
 
 Future, architecturally enabled per ADR-0013 (not committed):
 

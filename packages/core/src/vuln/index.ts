@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { nanoid } from "nanoid";
+import { stableCommentId } from "../comment-id.js";
 import type { Lockfile } from "../ecosystem/index.js";
 import { runAudit, type AuditAdvisory, type AuditSeverity } from "../runners/audit.js";
 import type { Comment, Source, Tier } from "../schema.js";
@@ -93,13 +93,15 @@ function toComment(
 
   const explanation = verified.record.summary ?? verified.record.details?.slice(0, 400) ?? advisory.title;
 
+  const file = pkgLines?.relativePath ?? "package.json";
   return {
-    id: nanoid(10),
-    file: pkgLines?.relativePath ?? "package.json",
+    id: stableCommentId(`vuln:${verified.ghsaId}:${advisory.packageName}:${file}:${line}`),
+    file,
     lineStart: line,
     lineEnd: line,
     tier: severityToTier(advisory.severity),
     category: "vulnerability",
+    kind: "assertion",
     claim: `${advisory.packageName}: ${advisory.title}`,
     explanation,
     sources,
