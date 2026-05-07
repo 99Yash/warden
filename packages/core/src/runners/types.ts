@@ -1,7 +1,7 @@
 export type FindingSeverity = "error" | "warning" | "info";
 
 export interface ToolFinding {
-  source: "tsc" | "eslint";
+  source: "tsc" | "eslint" | "jscpd";
   file: string;
   line: number;
   column: number;

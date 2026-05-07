@@ -33,6 +33,7 @@ Companion doc: `vision.md` (the long-form thinking framework, preserved from the
 | Prior-art posture    | DeepSec study (ADR-0015): borrow pipeline shape + plugin slots; reject free-form findings + 2-agent revalidation; prompts-as-files from M4 |
 | Index storage seams  | Content-addressed, model-versioned, interface-shaped stores; bulk export/import primitive; queue decoupled from storage (ADR-0016)        |
 | LLM provider posture | Anthropic primary; one-retry on transient; Google Gemini fallback (gemini-2.5-pro/flash matched to sonnet/haiku tiers); hard fail if both fail (ADR-0017)        |
+| Context selection (M5) | Cheap-signals selector + jscpd dedup runner; embeddings/Merkle/`warden init`/banner deferred to M6 (ADR-0018) |
 
 ---
 
@@ -398,5 +399,56 @@ Google as the second provider:
 **Caveat — degradedWorkers messaging is load-bearing.** The user must see when fallback was used even on success — silent provider switching erodes the trust property Warden depends on. The `degradedWorkers` array in `CommentSetMetadata` already exists per `vision.md` §11; Warden writes there both on Anthropic-recovery-after-retry (`llm: anthropic 429, retried successfully`) and on Google-fallback-success (`llm: anthropic <reason>, served from google`).
 
 **Caveat — does not affect ADR-0008's citation thesis.** Citation discipline is about *what the LLM is asked to claim* (tool findings + verified CVEs only, no LLM-generated assertions per the M4 grilling Q1 → A+C decision). The provider behind the LLM doesn't change that. A Gemini fallback that triages tool findings + asks clarification questions honors the thesis identically to a Sonnet primary.
+
+---
+
+## ADR-0018 — M5: cheap-signals context selector + jscpd dedup runner
+
+**Decision.** M5 ships the first, narrowest iteration of ADR-0016's context-selection layer: deterministic cheap signals + jscpd as a scoped dedup runner. No embeddings, no chunk store, no Merkle tree, no `JobRunner` queue, no `warden init` subcommand, no limitation banner — every one of those is explicitly deferred to M6. Concretely:
+
+1. **Context selector v1.** `ContextSelector` interface lives in `@warden/core/src/context/` (directory, not a workspace package). The default `CheapSignalsSelector` walks the host repo via the TypeScript Compiler API to compute four signals: direct importers, direct imports, same-folder siblings, and symbol references. Output is a ranked `ContextCandidate[]` where each candidate carries discriminated `reasons[]`, and most reasons carry per-reason `Evidence[]` (start/end line ranges pointing at the lines that triggered the signal).
+2. **jscpd dedup runner.** Programmatic-API integration of `jscpd`, scoped to `changedFiles ∪ selector.candidates.map(c => c.path)`. Each clone whose pair touches the diff becomes a `Comment { category: "dedup", tier: 3, source: "jscpd" }` flowing through the existing `toolComments` channel (ADR-0012's `dedup` category finally has a producing runner).
+3. **Pipeline shape.** Selector runs *parallel* with TSC/ESLint/vuln (its signals don't depend on tool output). jscpd runs *sequentially after* the selector (it consumes the candidate path set). LLM formatter receives selector output via the existing `RetrievedContext` seam in `ReviewInput` — M4 left the seam typed and forward-compat per ADR-0016.
+4. **Cache.** Two new tables in `@warden/db`:
+   - `import_graph(filePath, fileSha, importsJson, exportsJson, computedAt)` — content-addressed, immutable; primary key `(filePath, fileSha)`.
+   - `file_state(filePath, currentSha, observedAt)` — path → current-SHA pointer, refreshed via `git ls-files --modified --others --exclude-standard`.
+5. **LLM prompt assembly.** For evidence-bearing reasons: emit each evidence range with ±5 lines of surrounding code, deduped/merged when ranges overlap. For same-folder-only candidates: emit path-only (no content). Total context budget: ~3–5k tokens.
+
+**Why.**
+
+This ADR turns ADR-0016's pre-decided storage discipline into the smallest credible *consumer* shape. The four ADR-0016 properties (content-addressed, model-versioned, portable, queue-decoupled) are abstract until something exercises them — M5 exercises only content-addressing (cheap signals have no embedding model, no chunks to portably export, no async queue work). That partial exercise is the right pace: the import-graph cache is the wedge into the discipline, the embedding store is M6, and the seams between them get designed by M6's implementation rather than pre-guessed (per ADR-0016's "interface design happens with the implementation, not now" caveat).
+
+The deeper reason for *cheap signals first*, not embeddings first:
+
+- **The LLM has no repo context today.** M4 ships triage + clarification questions, but every adjudication is "diff + tool findings + verified CVEs" with zero adjacent code. The biggest review-quality gap right now is breadth of view. Cheap signals close most of that gap (directly imported files, files in the same module, files referencing changed symbols) without any embedding infrastructure.
+- **Embeddings are a separate cluster of decisions.** Local Transformers.js vs. hosted Voyage/Cohere/OpenAI; chunking strategy (tree-sitter vs. AST-symbol vs. naive line-based); model-versioning UX on upgrade; queue + worker for async embed generation. None of those are 1-line decisions. Folding them into M5 either rushes them or balloons the milestone.
+- **jscpd is the immediately-payable consumer.** ADR-0012 created the `dedup` category two milestones ago and there has never been a runner producing dedup findings. M5 closes the loop: the selector's path set is exactly the input scope jscpd needs to avoid running repo-wide.
+
+Two design choices that didn't survive the planning grilling — and the reasoning behind their replacements — are worth recording explicitly because they are the non-obvious nuances:
+
+1. **Full-file context → evidence-range context.** First draft: top-N candidates × full file content (capped at 500 lines) → ~12k tokens of context per review. Refined during planning: each `Reason` already knows *why* its file ranked, so each reason carries an `Evidence[]` of line ranges pointing at the trigger lines. The prompt then emits only those ranges (±5 lines surrounding) instead of full files. Token cost dropped from ~12k to ~3–5k, and citation precision *improved* because the LLM now sees the lines that *caused* the candidate to surface, not lines that happened to live in a related file. This is a strictly better design surfaced by grilling, not pre-conceived.
+2. **Same-folder content → same-folder path-only.** Initial recommendation: include same-folder candidates' first ~80 lines as fallback context for evidence-less candidates. Refined: same-folder is *tertiary* — folders are noisy, often contain unrelated files, and dumping their content pollutes the prompt window. Final design: same-folder candidates feed jscpd by path, and the LLM prompt lists them under a "Same-folder neighbors" header without content. Folder structure is informative; folder *content* is mostly noise.
+
+Two more nuances that came out of the discussion are worth pinning here:
+
+- **Content-addressing is the invalidation mechanism.** A `(path, sha)`-keyed cache row is forever-valid for that exact content; "stale" rows are simply unreachable when the file changes. The natural worry "we have to invalidate the cache for staleness" reduces to a different question: *given a path, how do we cheaply know its current SHA?* For M5, the answer is `git ls-files --modified` as a per-review staleness oracle. Merkle trees (ADR-0016's `MerkleStore`) earn rent later when chunk-level granularity makes per-file granularity insufficient — but for file-level import-graph staleness, git is precisely the right granularity.
+- **Tree-sitter is for multi-ecosystem, not for v1.** Tempting because Cursor uses it and ADR-0016 references it as prior art, but inside a TS-only stack tree-sitter is a heavy WASM dep with no upside over the TypeScript Compiler API (which is already a transitive dep via the TSC runner). Putting parsing behind a `SourceParser` interface lets the tree-sitter impl drop in later when Python/Go land — the trigger for refactor is "next ecosystem," not "next milestone."
+
+**Alternatives.**
+
+- **Embeddings + Merkle in M5 (the full ADR-0016 layer).** Rejected — packs four separate decision clusters (embedding model, chunking strategy, model-version UX, async queue) into one milestone and risks the layer landing as a mash. The cheap-signals tier earns most of the user-visible quality gain on its own.
+- **Custom-code SAST worker (DeepSec-shaped per ADR-0015) as M5.** Rejected — depends on context selection to be good, so it pulls indexing in as a transitive dependency anyway. Better as a later milestone once the selector is dogfood-validated.
+- **GitHub PR bot (per ADR-0013) as M5.** Rejected — distribution milestone, not a quality milestone. Reviews shipped via a bot are only as good as the underlying review engine; improving the engine first compounds.
+- **`warden init` + banner in M5 with reduced wording.** Rejected — semantics drift. `warden init` for "warm the import-graph cache" is a thin verb whose contract has to expand at M6 (also building chunks, embeddings, Merkle). Users running M5's `init` once and assuming "I'm done indexing" would be wrong by M6. Defer until the verb's contract is the full thing.
+- **Repo-wide jscpd with output filtering to diff-touching pairs.** Rejected — heavier compute, defeats the point of having a selector. Selector output is exactly the right input scope for jscpd.
+- **AST-verified symbol-ref signal.** Rejected for v1 — symbol-ref is a *ranking* signal, so false positives (symbol name appears in a comment or string) only demote the candidate slightly via score, never surface as a finding. Grep is cheap and good enough; AST-verified upgrade if dogfooding shows precision is too low.
+- **New `@warden/context` package now.** Rejected for M5 — surface is small (~3–4 files). Package boundary creation deferred to M6 when the embedding layer's surface justifies it; the name (`@warden/context` vs `@warden/embed`) can be chosen with full M6 contents in view.
+
+**Caveats.**
+
+- **First-review cold start is visible.** Initial parse over a 5k-file repo is ~10–30s. Surfaced as `degraded[]`: `"context: cold import-graph build (parsed N files in Ts)"`. No banner — that's M6's job. Subsequent reviews hit the cache and add near-zero overhead.
+- **Cross-file moves with no symbol overlap can slip through.** A pure rename from `auth/login.ts` → `auth/elsewhere/session.ts` with renamed symbols and no imports yet wired won't be detected as related by the four signals. Acceptable v1 limitation; revisit at M6 when chunk-level content addressing makes "this chunk used to live somewhere else" structurally detectable.
+- **No score-weighting tuning surface in v1.** Per-signal weights are hardcoded (imported-by 1.0, imports 0.8, symbol-ref 0.6, same-folder 0.3). Configurable via flag/config later if dogfooding shows the defaults are wrong.
+- **Test files participate in the import graph.** `*.test.ts` and `*.spec.ts` are regular source for parsing purposes — they import the code they exercise, so they show up as importers of changed source. This is correct (when you change `login.ts`, `login.test.ts` is genuinely relevant). Test-pairing as an *explicit* signal stays deferred to M6.
 
 ---
