@@ -1,6 +1,11 @@
 import { CURRENT_DEFAULT, VOYAGE_MODELS } from "@warden/ai";
-import { SqliteChunkStore, SqliteMerkleStore, readLockedModel } from "../indexing/index.js";
-import type { ChunkStore, MerkleStore } from "../indexing/index.js";
+import {
+  SqliteChunkStore,
+  SqliteEmbeddingStore,
+  SqliteMerkleStore,
+  readLockedModel,
+} from "../indexing/index.js";
+import type { ChunkStore, EmbeddingStore, MerkleStore } from "../indexing/index.js";
 
 /**
  * Limitation banner state (ADR-0019 #7). Computed before the selector runs
@@ -16,6 +21,7 @@ import type { ChunkStore, MerkleStore } from "../indexing/index.js";
 export type BannerState =
   | { kind: "no-banner" }
   | { kind: "no-index" }
+  | { kind: "no-embeddings" }
   | { kind: "stale"; filesChanged: number }
   | { kind: "model-aged"; indexedModel: string; currentDefault: string; ageDays: number }
   | { kind: "model-deprecated"; indexedModel: string; deprecatedAfter: string };
@@ -31,6 +37,7 @@ export interface BannerInputs {
   currentDefault?: string;
   /** Test seam — defaults wire up the SQLite stores. */
   chunkStore?: ChunkStore;
+  embeddingStore?: EmbeddingStore;
   merkleStore?: MerkleStore;
   /** Current file→sha map; when supplied, drives stale detection. */
   currentHashes?: Map<string, string>;
@@ -39,13 +46,14 @@ export interface BannerInputs {
 export async function computeBannerState(inputs: BannerInputs): Promise<BannerState> {
   const currentDefault = inputs.currentDefault ?? CURRENT_DEFAULT;
   const chunkStore = inputs.chunkStore ?? new SqliteChunkStore();
+  const embeddingStore = inputs.embeddingStore ?? new SqliteEmbeddingStore();
   const merkleStore = inputs.merkleStore ?? new SqliteMerkleStore();
 
   const chunkCount = await chunkStore.count();
   if (chunkCount === 0) return { kind: "no-index" };
 
-  // Locked-model checks: deprecation > aged > nothing. Look these up before
-  // the merkle diff so EOL'd-SKU users always see the high-priority banner.
+  // Locked-model deprecation runs first: an EOL'd SKU is the most severe
+  // state, and the user needs to switch models when re-running init.
   const locked = await readLockedModel();
   if (locked) {
     const meta = VOYAGE_MODELS[locked.modelId];
@@ -59,16 +67,28 @@ export async function computeBannerState(inputs: BannerInputs): Promise<BannerSt
         };
       }
     }
-    if (locked.modelId !== currentDefault) {
-      const ageDays = computeDefaultAgeDays(currentDefault);
-      if (ageDays !== null && ageDays >= 180) {
-        return {
-          kind: "model-aged",
-          indexedModel: locked.modelId,
-          currentDefault,
-          ageDays,
-        };
-      }
+  }
+
+  // Partial-init detection: chunks exist but no embeddings for the locked
+  // model — Phase 3 of `warden init` failed wholesale (Voyage outage,
+  // payment block, Ctrl-C). Without this state, the banner returns
+  // no-banner and the run looks clean despite missing semantic context.
+  // No locked-model row with chunks > 0 means meta was never written —
+  // same actionable outcome (re-run init).
+  if (!locked) return { kind: "no-embeddings" };
+  const embeddingCount = await embeddingStore.count(locked.modelId, locked.modelVersion);
+  if (embeddingCount === 0) return { kind: "no-embeddings" };
+
+  // Aged-model notice once the user is on a behind-by-≥6-months SKU.
+  if (locked.modelId !== currentDefault) {
+    const ageDays = computeDefaultAgeDays(currentDefault);
+    if (ageDays !== null && ageDays >= 180) {
+      return {
+        kind: "model-aged",
+        indexedModel: locked.modelId,
+        currentDefault,
+        ageDays,
+      };
     }
   }
 
@@ -108,6 +128,8 @@ export function bannerStateToDegraded(state: BannerState): string[] {
       return [];
     case "no-index":
       return ["context: no index — run `warden init` once for context-aware findings"];
+    case "no-embeddings":
+      return ["context: no embeddings yet — re-run `warden init` to complete indexing"];
     case "stale":
       return [
         `context: index stale — ${state.filesChanged} file${state.filesChanged === 1 ? "" : "s"} changed since last init`,

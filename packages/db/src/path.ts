@@ -2,11 +2,12 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 /**
- * Resolves the SQLite cache file path. Anchors to the nearest repo root
- * (highest ancestor containing `pnpm-workspace.yaml`, then `package.json`,
- * then `.git`) so the cache lives at `<repo-root>/.warden/cache.sqlite`
- * regardless of which subdirectory the CLI was invoked from. Falls back to
- * `process.cwd()` if no marker is found.
+ * Resolves the SQLite cache file path. Anchors to the repo root by walking
+ * upward from `process.cwd()` and stopping at the first strong boundary
+ * marker — `pnpm-workspace.yaml` (workspace root), `.git` (repo root), then
+ * `package.json` (single-package fallback). The cache lives at
+ * `<repo-root>/.warden/cache.sqlite`. Falls back to `process.cwd()` when no
+ * marker is found.
  *
  * Per ADR-0007 the cache is local-only and gitignored. It's per-repo: each
  * project gets its own cache without explicit configuration.
@@ -22,27 +23,26 @@ export function resolveCachePath(): string {
 }
 
 function findRepoRoot(): string {
-  // Highest ancestor with pnpm-workspace.yaml wins (workspace root in monorepos);
-  // otherwise highest ancestor with package.json (single-package projects);
-  // otherwise nearest .git. cwd is the final fallback.
+  // Nearest-marker walk: a stray parent `package.json` (a tooling sandbox,
+  // an outer monorepo) must not pull warden's cache out of the project the
+  // user is actually working in. `.git` is checked before `package.json`
+  // because it's a stronger repo-boundary signal.
   const cwd = process.cwd();
-  const workspaceRoot = findHighest(cwd, "pnpm-workspace.yaml");
+  const workspaceRoot = findNearest(cwd, "pnpm-workspace.yaml");
   if (workspaceRoot) return workspaceRoot;
-  const packageRoot = findHighest(cwd, "package.json");
-  if (packageRoot) return packageRoot;
-  const gitRoot = findHighest(cwd, ".git");
+  const gitRoot = findNearest(cwd, ".git");
   if (gitRoot) return gitRoot;
+  const packageRoot = findNearest(cwd, "package.json");
+  if (packageRoot) return packageRoot;
   return cwd;
 }
 
-function findHighest(start: string, marker: string): string | undefined {
+function findNearest(start: string, marker: string): string | undefined {
   let dir = start;
-  let highest: string | undefined;
   while (true) {
-    if (existsSync(resolve(dir, marker))) highest = dir;
+    if (existsSync(resolve(dir, marker))) return dir;
     const parent = resolve(dir, "..");
-    if (parent === dir) break;
+    if (parent === dir) return undefined;
     dir = parent;
   }
-  return highest;
 }
