@@ -13,6 +13,7 @@
     "@warden/ai": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
+    "code-chunk": "0.1.14",
     "jscpd": "catalog:",
     "nanoid": "catalog:",
     "zod": "catalog:"

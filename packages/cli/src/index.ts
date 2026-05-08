@@ -11,8 +11,9 @@ import {
 import { wardenEnv } from "@warden/env";
 import { Command } from "commander";
 import pc from "picocolors";
+import { runInitCommand } from "./commands/init.js";
 import { formatCommentSet } from "./format.js";
-import { createPhaseRenderer } from "./render.js";
+import { createPhaseRenderer, renderBannerLine } from "./render.js";
 
 function findUp(filename: string): string | undefined {
   let dir = process.cwd();
@@ -65,6 +66,10 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     process.stdout.write(pc.dim(`warden ${mode}  ${description}\n`));
   }
 
+  // ADR-0019 #7: limitation banner — rendered once after `review()` returns,
+  // above the formatted comment set, when the index is missing / stale / behind.
+  // The banner string lives in `result.metadata.degradedWorkers`. (Skipped on
+  // --json — JSON consumers read it from the structured metadata directly.)
   const renderer = !opts.json && mode === "review" ? createPhaseRenderer() : undefined;
 
   const emit = renderer
@@ -106,6 +111,13 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
   if (opts.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     return;
+  }
+
+  if (mode === "review") {
+    const bannerLine = renderBannerLine(result.metadata.degradedWorkers);
+    if (bannerLine) {
+      process.stdout.write("\n" + bannerLine + "\n");
+    }
   }
 
   process.stdout.write("\n" + formatCommentSet(result, mode) + "\n");
@@ -164,6 +176,22 @@ sharedOpts(
 ).action(async (opts: CommonOpts) => {
   await runReview("review", opts);
 });
+
+program
+  .command("init")
+  .description(
+    "Build (or refresh) the embedding-backed context index used by `warden review`. Walk → chunk → embed; idempotent re-runs hit the cache.",
+  )
+  .option("--rebuild", "Drop the locked-model embeddings and re-embed under the current default SKU.")
+  .option("--dry-run", "Run Phases 1+2 (walk + chunk) and print the estimate; skip Voyage calls.")
+  .option("--max-cost <usd>", "Abort before Phase 3 (embedding) if the estimate exceeds this USD value.")
+  .option("--json", "Emit structured event log + summary instead of the phase-log UI.")
+  .action(
+    async (opts: { rebuild?: boolean; dryRun?: boolean; maxCost?: string; json?: boolean }) => {
+      const repoRoot = findRepoRoot();
+      await runInitCommand(opts, repoRoot);
+    },
+  );
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);

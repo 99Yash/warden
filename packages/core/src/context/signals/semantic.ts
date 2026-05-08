@@ -1,0 +1,119 @@
+import type { EmbeddingProvider } from "@warden/ai";
+import type { ChunkStore, EmbeddingStore } from "../../indexing/index.js";
+import type { Evidence } from "../index.js";
+
+/**
+ * Semantic signal for the M6 selector v2 (ADR-0019 #9). Embeds the unified
+ * diff once via Voyage `type=query`, retrieves top-K chunks above a
+ * similarity threshold, aggregates per-file via *max* (preserves "this one
+ * chunk is highly relevant" without diluting via mean).
+ *
+ * Failure modes degrade gracefully — Voyage 5xx during `review` returns
+ * empty hits + a `degraded` entry; the selector falls back to M5 cheap
+ * signals only and never hard-fails the review.
+ */
+
+export const SEMANTIC_TOP_K = 50;
+export const SEMANTIC_SIMILARITY_THRESHOLD = 0.5;
+
+export interface SemanticHit {
+  chunkHash: string;
+  similarity: number;
+  startLine: number;
+  endLine: number;
+}
+
+export interface SemanticSignalInput {
+  diff: string;
+  embeddingProvider: EmbeddingProvider;
+  embeddingStore: EmbeddingStore;
+  chunkStore: ChunkStore;
+  /** Voyage SKU to query under — must equal the locked-model id of the index. */
+  lockedModelId: string;
+  /**
+   * Cache-key handle for the *corpus-side* rows (`type=document`). The query
+   * is embedded with `type=query`; we search against `document` rows because
+   * that's what `warden init` wrote.
+   */
+  lockedModelVersionForDocument: string;
+}
+
+export interface SemanticSignalOutput {
+  /** filePath → max-aggregated hit info. */
+  hitsByFile: Map<string, SemanticHit>;
+  degraded: string[];
+}
+
+export async function semanticSignal(input: SemanticSignalInput): Promise<SemanticSignalOutput> {
+  if (!input.diff || input.diff.trim().length === 0) {
+    return { hitsByFile: new Map(), degraded: [] };
+  }
+
+  let queryVector: Float32Array;
+  try {
+    const embedded = await input.embeddingProvider.embed({
+      inputs: [input.diff],
+      inputType: "query",
+    });
+    const v = embedded.vectors[0];
+    if (!v) {
+      return {
+        hitsByFile: new Map(),
+        degraded: ["context: voyage query embed returned no vector — semantic signal disabled"],
+      };
+    }
+    queryVector = v;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      hitsByFile: new Map(),
+      degraded: [`context: voyage query embed failed (${msg.slice(0, 120)}) — semantic signal disabled`],
+    };
+  }
+
+  // Sanity check: empty index → cheap-signals carry the review.
+  const corpusCount = await input.embeddingStore.count(
+    input.lockedModelId,
+    input.lockedModelVersionForDocument,
+  );
+  if (corpusCount === 0) {
+    return {
+      hitsByFile: new Map(),
+      degraded: ["context: no embeddings yet — run `warden init`"],
+    };
+  }
+
+  const ranked = await input.embeddingStore.search(
+    queryVector,
+    input.lockedModelId,
+    input.lockedModelVersionForDocument,
+    SEMANTIC_TOP_K,
+  );
+  const aboveThreshold = ranked.filter((r) => r.similarity >= SEMANTIC_SIMILARITY_THRESHOLD);
+  if (aboveThreshold.length === 0) {
+    return { hitsByFile: new Map(), degraded: [] };
+  }
+
+  const records = await input.chunkStore.getManyByHash(aboveThreshold.map((r) => r.chunkHash));
+  const hitsByFile = new Map<string, SemanticHit>();
+  for (const r of aboveThreshold) {
+    const record = records.get(r.chunkHash);
+    if (!record) continue;
+    const hit: SemanticHit = {
+      chunkHash: r.chunkHash,
+      similarity: r.similarity,
+      startLine: record.startLine,
+      endLine: record.endLine,
+    };
+    const existing = hitsByFile.get(record.filePath);
+    if (!existing || existing.similarity < hit.similarity) {
+      hitsByFile.set(record.filePath, hit);
+    }
+  }
+
+  return { hitsByFile, degraded: [] };
+}
+
+export function semanticEvidence(hit: SemanticHit): Evidence[] {
+  return [{ startLine: hit.startLine, endLine: hit.endLine }];
+}

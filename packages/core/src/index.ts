@@ -1,3 +1,9 @@
+import { CURRENT_DEFAULT, getEmbeddingProvider } from "@warden/ai";
+import {
+  bannerStateToDegraded,
+  computeBannerState,
+  type BannerState,
+} from "./banner/index.js";
 import { stableCommentId } from "./comment-id.js";
 import {
   CheapSignalsSelector,
@@ -7,6 +13,13 @@ import {
 } from "./context/index.js";
 import { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 import { detectEcosystem } from "./ecosystem/index.js";
+import { ensureGitignore } from "./init/ensure-gitignore.js";
+import { walkRepo } from "./init/walk.js";
+import {
+  SqliteChunkStore,
+  SqliteEmbeddingStore,
+  readLockedModel,
+} from "./indexing/index.js";
 import { formatReview } from "./llm/index.js";
 import type { FormatterListener } from "./llm/index.js";
 import { runEslint } from "./runners/eslint.js";
@@ -26,13 +39,60 @@ export type { AuditAdvisory, AuditSeverity } from "./runners/audit.js";
 export { verifyOsv, type OsvRecord, type VerifiedAdvisory } from "./verify/osv.js";
 export {
   CheapSignalsSelector,
+  CodeChunkAdapter,
   TsCompilerParser,
   candidatesToRetrievedContext,
+  type ChunkRecord,
+  type Chunker,
   type ContextCandidate,
   type ContextSelector,
   type Reason,
   type SelectorOutput,
 } from "./context/index.js";
+export {
+  bannerStateToDegraded,
+  computeBannerState,
+  computeSoftNotice,
+  type BannerState,
+  type SoftNotice,
+} from "./banner/index.js";
+export { ensureGitignore } from "./init/ensure-gitignore.js";
+export {
+  estimateInit,
+  ESTIMATE_CONSTANTS,
+  runInit,
+  walkRepo,
+  type InitEvent,
+  type InitListener,
+  type InitOptions,
+  type InitSummary,
+} from "./init/index.js";
+export {
+  CURRENT_FORMAT_VERSION,
+  META_KEYS,
+  SqliteChunkStore,
+  SqliteEmbeddingStore,
+  SqliteIndexExporter,
+  SqliteIndexImporter,
+  SqliteMerkleStore,
+  SyncJobRunner,
+  readLockedModel,
+  readRepoMerkleRoot,
+  taskIdFor,
+  writeLockedModel,
+  writeRepoMerkleRoot,
+  type ChunkStore,
+  type EmbeddingRecord,
+  type EmbeddingStore,
+  type ExportCounts,
+  type IndexExporter,
+  type IndexImporter,
+  type JobRunner,
+  type LockedModel,
+  type MerkleNode,
+  type MerkleStore,
+  type Task,
+} from "./indexing/index.js";
 
 export interface ReviewConfig {
   mode: "check" | "review";
@@ -73,8 +133,40 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     };
   }
 
+  // ADR-0019 #12: ensure `.warden/` lives in `.gitignore` before any cache
+  // write — first verb a user runs in a fresh repo gets the entry.
+  const gitignoreDegraded: string[] = [];
+  try {
+    const gitignore = await ensureGitignore(input.repoRoot);
+    if (gitignore.added) gitignoreDegraded.push("gitignore: added .warden/ entry");
+  } catch (err) {
+    gitignoreDegraded.push(`gitignore: failed to ensure entry (${formatErr(err)})`);
+  }
+
   const changed = input.diff ? parseUnifiedDiff(input.diff) : undefined;
   const changedPaths = changed?.map((c) => c.path);
+
+  // M6 (ADR-0019 #7): banner state is computed *before* the selector runs,
+  // off the index's current state. `check` skips it — deterministic-only verb.
+  // Walk the repo to feed `currentHashes` so the `stale` banner can fire when
+  // the working tree has drifted from the merkle snapshot. Sharing this walk
+  // with the selector's own incremental hash pass is a M7+ optimization.
+  let bannerState: BannerState = { kind: "no-banner" };
+  if (input.config.mode === "review") {
+    try {
+      const walk = await walkRepo(input.repoRoot);
+      const currentHashes = new Map<string, string>();
+      for (const f of walk.files.values()) currentHashes.set(f.path, f.fileSha);
+      bannerState = await computeBannerState({
+        repoRoot: input.repoRoot,
+        currentDefault: CURRENT_DEFAULT,
+        currentHashes,
+      });
+    } catch (err) {
+      bannerState = { kind: "no-banner" };
+      gitignoreDegraded.push(`banner: state lookup failed (${formatErr(err)})`);
+    }
+  }
 
   // M5 (ADR-0018): selector runs parallel with TSC/ESLint/vuln. `check` mode
   // skips it — `check` is deterministic-only and never invokes the LLM, so
@@ -85,11 +177,50 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     !input.retrievedContext &&
     changed !== undefined &&
     changed.length > 0;
+
+  // Wire the M6 semantic signal in when the index is ready. Banner state
+  // already told us if it isn't (no-index / model-deprecated trigger
+  // degradedWorkers and the selector falls back to cheap signals only).
+  let semanticDeps:
+    | {
+        embeddingProvider: ReturnType<typeof getEmbeddingProvider>;
+        embeddingStore: SqliteEmbeddingStore;
+        chunkStore: SqliteChunkStore;
+        lockedModelId: string;
+        lockedModelVersionForDocument: string;
+      }
+    | undefined;
+  if (shouldRunSelector && bannerState.kind !== "no-index") {
+    try {
+      const locked = await readLockedModel();
+      if (locked) {
+        semanticDeps = {
+          embeddingProvider: getEmbeddingProvider(),
+          embeddingStore: new SqliteEmbeddingStore(),
+          chunkStore: new SqliteChunkStore(),
+          lockedModelId: locked.modelId,
+          lockedModelVersionForDocument: locked.modelVersion,
+        };
+      }
+    } catch (err) {
+      gitignoreDegraded.push(
+        `context: semantic signal disabled (${formatErr(err)}) — falling back to cheap signals`,
+      );
+    }
+  }
+
   const selector =
     shouldRunSelector && input.selector !== undefined
       ? input.selector
       : shouldRunSelector
-      ? new CheapSignalsSelector({ tsconfigPath: ecosystem.tsconfigPaths[0] })
+      ? new CheapSignalsSelector({
+          tsconfigPath: ecosystem.tsconfigPaths[0],
+          embeddingProvider: semanticDeps?.embeddingProvider ?? null,
+          embeddingStore: semanticDeps?.embeddingStore ?? null,
+          chunkStore: semanticDeps?.chunkStore ?? null,
+          lockedModelId: semanticDeps?.lockedModelId,
+          lockedModelVersionForDocument: semanticDeps?.lockedModelVersionForDocument,
+        })
       : null;
 
   const emptySelectorResult: SelectorOutput = { candidates: [], degraded: [] };
@@ -111,6 +242,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
             repoRoot: input.repoRoot,
             changed: changed ?? [],
             ecosystem,
+            diff: input.diff,
           })
           .catch((err: unknown) => ({
             candidates: [],
@@ -145,6 +277,8 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   const vulnComments = vulnResult.comments;
 
   const degraded = [
+    ...gitignoreDegraded,
+    ...bannerStateToDegraded(bannerState),
     ...tscResult.degraded,
     ...eslintResult.degraded,
     ...vulnResult.degraded,
@@ -202,6 +336,10 @@ const PRIORITY_ORDER: Category[] = [
   "security",
   "vulnerability",
   "contract",
+  "scalability",
+  "consistency",
+  "deadcode",
+  "committability",
   "clarity",
   "style",
   "dedup",

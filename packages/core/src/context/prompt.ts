@@ -102,6 +102,9 @@ function renderReasonLabel(reasons: Reason[]): string {
       case "symbol-ref":
         label = `symbol-ref ${r.symbol}`;
         break;
+      case "semantic":
+        label = `semantic similarity=${r.similarity.toFixed(2)}`;
+        break;
       case "same-folder":
         continue;
     }

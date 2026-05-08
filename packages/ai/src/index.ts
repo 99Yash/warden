@@ -1,5 +1,6 @@
 export * from "./provider.js";
 export * from "./models.js";
+export * from "./embeddings/index.js";
 
 // Re-export the AI SDK primitives `@warden/core` consumes. Per the package
 // boundary table in CLAUDE.md, `core` is forbidden from importing `ai`

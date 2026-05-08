@@ -1,13 +1,20 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveCachePath } from "./path.js";
+
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "migrations");
 
 let _sqlite: Database.Database | undefined;
 let _db: ReturnType<typeof drizzle> | undefined;
 
 /**
  * Returns the singleton Drizzle handle backed by `.warden/cache.sqlite`.
- * Creates the file (and the `.warden/` directory) on first use.
+ * Creates the file (and the `.warden/` directory) on first use, then
+ * applies any pending migrations so the very first call from any package
+ * sees a fully-initialized schema.
  */
 export function db() {
   if (!_db) {
@@ -15,6 +22,7 @@ export function db() {
     _sqlite.pragma("journal_mode = WAL");
     _sqlite.pragma("foreign_keys = ON");
     _db = drizzle(_sqlite);
+    migrate(_db, { migrationsFolder: MIGRATIONS_DIR });
   }
   return _db;
 }
@@ -35,4 +43,4 @@ export * from "./schemas.js";
 // Re-export the drizzle-orm operator surface that consumers need so callers
 // can stay on `@warden/db` as the single import point and don't need to add
 // `drizzle-orm` to their own package.json.
-export { and, eq, gt, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
+export { and, count, eq, gt, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
