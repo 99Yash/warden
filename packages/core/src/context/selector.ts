@@ -2,9 +2,11 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
+import type { EmbeddingProvider } from "@warden/ai";
 import { and, db, eq, fileState, importGraph } from "@warden/db";
 import type { ChangedFile } from "../diff/index.js";
 import type { EcosystemContext } from "../ecosystem/index.js";
+import type { ChunkStore, EmbeddingStore } from "../indexing/index.js";
 import {
   MAX_CONTENT_BEARING,
   MAX_REASON_WEIGHT_SUM,
@@ -25,6 +27,7 @@ import {
   type Graph,
 } from "./signals/imports.js";
 import { buildFilesByDir, collectSameFolderReasons } from "./signals/same-folder.js";
+import { semanticSignal } from "./signals/semantic.js";
 import { collectSymbolRefHits } from "./signals/symbol-refs.js";
 
 /**
@@ -53,6 +56,20 @@ export interface CheapSignalsSelectorOptions {
   parser?: SourceParser;
   /** Override tsconfig path for module resolution. Falls back to `ecosystem.tsconfigPaths[0]`. */
   tsconfigPath?: string;
+  /**
+   * M6 (ADR-0019 #9): when all three are supplied, the selector adds a
+   * semantic signal to the cheap-signals layer. The class name stays
+   * `CheapSignalsSelector` because the surface still composes M5's four
+   * binary signals — semantic is an additive intensity-scaled layer rather
+   * than a replacement.
+   */
+  embeddingProvider?: EmbeddingProvider | null;
+  embeddingStore?: EmbeddingStore | null;
+  chunkStore?: ChunkStore | null;
+  /** Locked-model id of the index — required when the three above are set. */
+  lockedModelId?: string;
+  /** Cache-key handle for corpus-side rows (`type=document`). */
+  lockedModelVersionForDocument?: string;
 }
 
 export class CheapSignalsSelector implements ContextSelector {
@@ -62,6 +79,7 @@ export class CheapSignalsSelector implements ContextSelector {
     repoRoot: string;
     changed: ChangedFile[];
     ecosystem: EcosystemContext;
+    diff?: string;
   }): Promise<SelectorOutput> {
     const { repoRoot, changed, ecosystem } = input;
     const degraded: string[] = [];
@@ -252,6 +270,42 @@ export class CheapSignalsSelector implements ContextSelector {
       ]);
     }
 
+    // 6b. Semantic signal (M6 / ADR-0019 #9). Embedding deps are optional —
+    //     when any of them are missing, semantic stays off and the selector
+    //     reduces to its M5 behavior. Voyage failure during a configured run
+    //     degrades to cheap-signals + a degraded[] entry; never hard-fails.
+    const semanticReady =
+      this.opts.embeddingProvider != null &&
+      this.opts.embeddingStore != null &&
+      this.opts.chunkStore != null &&
+      typeof this.opts.lockedModelId === "string" &&
+      typeof this.opts.lockedModelVersionForDocument === "string" &&
+      typeof input.diff === "string" &&
+      input.diff.length > 0;
+    if (semanticReady) {
+      const semantic = await semanticSignal({
+        diff: input.diff ?? "",
+        embeddingProvider: this.opts.embeddingProvider!,
+        embeddingStore: this.opts.embeddingStore!,
+        chunkStore: this.opts.chunkStore!,
+        lockedModelId: this.opts.lockedModelId!,
+        lockedModelVersionForDocument: this.opts.lockedModelVersionForDocument!,
+      });
+      degraded.push(...semantic.degraded);
+      for (const [filePath, hit] of semantic.hitsByFile) {
+        const rel = filePath.split(sep).join("/");
+        if (changedRelSet.has(rel)) continue;
+        addReasons(rel, [
+          {
+            kind: "semantic",
+            chunkHash: hit.chunkHash,
+            similarity: hit.similarity,
+            evidence: [{ startLine: hit.startLine, endLine: hit.endLine }],
+          },
+        ]);
+      }
+    }
+
     // 7. Score + rank.
     const ranked: ContextCandidate[] = [];
     for (const [path, reasons] of reasonsByCandidate) {
@@ -289,9 +343,23 @@ function isContentBearing(c: ContextCandidate): boolean {
 }
 
 function scoreReasons(reasons: Reason[]): number {
-  const kinds = new Set(reasons.map((r) => r.kind));
+  // ADR-0019 #9: cheap signals are binary (sum unique kinds × weight);
+  // semantic is intensity-scaled (weight × max chunk similarity per file).
+  // Per-file aggregation already retained the max-similarity hit in the
+  // semantic signal step, so we read it directly off the kept reasons.
+  const seenKinds = new Set<Reason["kind"]>();
   let sum = 0;
-  for (const k of kinds) sum += REASON_WEIGHTS[k];
+  let maxSemantic = 0;
+  for (const r of reasons) {
+    if (r.kind === "semantic") {
+      if (r.similarity > maxSemantic) maxSemantic = r.similarity;
+      continue;
+    }
+    if (seenKinds.has(r.kind)) continue;
+    seenKinds.add(r.kind);
+    sum += REASON_WEIGHTS[r.kind];
+  }
+  if (maxSemantic > 0) sum += REASON_WEIGHTS.semantic * maxSemantic;
   return sum / MAX_REASON_WEIGHT_SUM;
 }
 

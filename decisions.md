@@ -34,6 +34,7 @@ Companion doc: `vision.md` (the long-form thinking framework, preserved from the
 | Index storage seams  | Content-addressed, model-versioned, interface-shaped stores; bulk export/import primitive; queue decoupled from storage (ADR-0016)        |
 | LLM provider posture | Anthropic primary; one-retry on transient; Google Gemini fallback (gemini-2.5-pro/flash matched to sonnet/haiku tiers); hard fail if both fail (ADR-0017)        |
 | Context selection (M5) | Cheap-signals selector + jscpd dedup runner; embeddings/Merkle/`warden init`/banner deferred to M6 (ADR-0018) |
+| Indexing layer (M6)    | Voyage `voyage-code-3` hosted embeddings + `code-chunk` chunker + locked-model index + selector v2 semantic reason; export/import CLI deferred (ADR-0019) |
 
 ---
 
@@ -450,5 +451,114 @@ Two more nuances that came out of the discussion are worth pinning here:
 - **Cross-file moves with no symbol overlap can slip through.** A pure rename from `auth/login.ts` → `auth/elsewhere/session.ts` with renamed symbols and no imports yet wired won't be detected as related by the four signals. Acceptable v1 limitation; revisit at M6 when chunk-level content addressing makes "this chunk used to live somewhere else" structurally detectable.
 - **No score-weighting tuning surface in v1.** Per-signal weights are hardcoded (imported-by 1.0, imports 0.8, symbol-ref 0.6, same-folder 0.3). Configurable via flag/config later if dogfooding shows the defaults are wrong.
 - **Test files participate in the import graph.** `*.test.ts` and `*.spec.ts` are regular source for parsing purposes — they import the code they exercise, so they show up as importers of changed source. This is correct (when you change `login.ts`, `login.test.ts` is genuinely relevant). Test-pairing as an *explicit* signal stays deferred to M6.
+
+---
+
+## ADR-0019 — M6: hosted embedding-backed selector + content-addressed indexing storage
+
+**Decision.** M6 ships the embedding-backed iteration of ADR-0016's storage layer with **one consumer** — the selector's new `semantic` reason variant. Cross-repo retrieval, the `leverage` review category, the custom-code SAST worker (DeepSec-shaped per ADR-0015), full `warden index export/import` CLI verbs, real async/daemon `JobRunner` impls, and BYOEmbedder are all explicitly deferred to M7+. Same posture ADR-0018 took for M5: ship the storage discipline with the smallest credible consumer; let dogfooding inform the next slice. The decisions below are pre-decided so the milestone work is implementation, not architecture.
+
+The full surface:
+
+1. **Embedding provider — Voyage `voyage-code-3`, hosted.** Single provider for v0; `VOYAGE_API_KEY` required (validation surfaced at start of any verb that touches the index, like `ANTHROPIC_API_KEY` already is). `EmbeddingProvider` interface in `@warden/ai/src/embeddings/` so a future BYOEmbedder milestone is additive — drop in additional impls (`OpenAIProvider`, local `TransformersProvider`, etc.) without touching consumers. Tier mapping matches Voyage's API contract: corpus-side embeds use `type=document`; query-side (diff embeddings during `review`) use `type=query`. Query-side results are not cached.
+
+2. **Chunking — depend on `code-chunk` (npm, MIT, pinned exact version).** Tree-sitter AST-aware chunker shipping native + WASM tree-sitter, six languages out of the box (TS, JS, Python, Rust, Go, Java) — matches Warden's roadmap from `vision.md` §2. Exposes scope chain + imports + signatures per chunk; benchmarks 70.1% recall@5 on its eval (next-best Chonkie's `CodeChunker` at 49% on the same eval). `Chunker` interface in `packages/core/src/context/chunker.ts` keeps the impl swappable. Documented fork triggers (`code-chunk` abandoned >6mo, blocking bug we can't get merged upstream, Effect dep grows past comfort threshold) → fork to `@warden/chunker` from MIT source. Don't pre-empt the fork.
+
+3. **Embedding row schema:**
+    ```ts
+    embeddings: {
+      chunk_hash:     text,                       // sha256(raw chunk content)
+      model_id:       text,                       // "voyage-code-3"
+      model_version:  text,                       // "dim=1024;type=document"
+      vector:         blob,                       // 1024 × float32 = 4 KB/row
+      created_at:     timestamp,
+      // PRIMARY KEY (chunk_hash, model_id, model_version)
+    }
+    ```
+    Composite primary key — same chunk under a different setup is a separate row, both valid. No DB-level FK from `embeddings` to `chunks`: cardinality is mismatched, content-addressing covers correctness. `chunk_hash` is `sha256(raw chunk content)` with no whitespace normalization — whitespace changes are real changes. Float32 at rest for v0 (~4 KB/chunk × ~50k chunks ≈ ~200 MB on a 5k-file repo); int8 quantization deferred to a real storage-pain trigger.
+
+4. **`JobRunner` timing model — Model A (`warden init` is the only embed entry point).** Reviews never modify the index. Default `JobRunner` impl is synchronous in-process with concurrency-limited promise pool (4 concurrent Voyage batches × ≤128 inputs/batch). SQLite-backed task table for crash-recovery: a Ctrl-C'd init resumes via content-addressed task idempotency — re-running `(embed_chunk, chunk_hash, model_id@version)` is a no-op per ADR-0016 #4. No daemon, no background subprocess, no review-time embed in M6. Model B (review-time incremental embed) and Model C (background subprocess) are documented future directions for M7+ if dogfooding shows users skip `init` consistently.
+
+5. **`warden init` UX.** Three phases visible to the user: walk → chunk → embed. After Phase 1, a pre-flight LOC-based estimate panel ("≈ 12,400 chunks · ≈ 4.6M tokens · ≈ $0.83 · ETA ~50s"). Phase 3 shows observed-throughput ETA, running cost, cached-vs-newly-embedded counts. Idempotent re-runs (cache hits skip Voyage). Flags: `--rebuild` (drop current locked-model rows, switch to current default, re-embed), `--dry-run` (Phases 1+2, no API calls), `--max-cost <USD>` (abort before Phase 3 if estimate exceeds). No `--watch`, no `--background`, no interactive prompts (per ADR-0014). On failure: missing `VOYAGE_API_KEY` → fail at start; transient Voyage 5xx → retry per JobRunner; persistent failure → preserve already-persisted progress, exit non-zero with how to resume.
+
+6. **Locked-model concept.** First-ever `init` writes `embedding_model_id`, `embedding_model_version`, `embedding_locked_at`, `format_version`, `repo_merkle_root` into a single key/value `index_meta` table. **Incremental embeds always use the locked model** regardless of Warden's current default — Voyage SKU bumps don't auto-rebuild. The user's path to upgrade is `warden init --rebuild`, which switches the locked model to `CURRENT_DEFAULT` and re-embeds. Cost is surfaced upfront with explicit "this is optional" framing. Mid-stream key-change handling for v2 multi-user / production scenarios is deferred.
+
+7. **Limitation banner gradient.** Banner state is computed *before* the selector runs (no "we tried to retrieve and got empty" inference). `warden check` never fires the banner — it's a deterministic-only verb that doesn't use the index.
+    | State | Trigger | Surface |
+    |---|---|---|
+    | A. No index | `chunks` empty | Banner in `review` |
+    | B. Stale | Merkle divergence > 0 (any divergence, no percentage threshold) | Banner in `review` |
+    | C. Current | matches | (silent) |
+    | D-soft | Newer SKU available | Soft note in `init` only — never in `degradedWorkers` |
+    | D-aged | Locked model >6mo non-default | Soft banner in `review`; structured `degradedWorkers` |
+    | D-deprecated | Voyage EOL'd locked SKU | Real banner in `review` |
+    
+    D-aged math uses `defaultSince` of `CURRENT_DEFAULT`, not `locked_at` — i.e., "the new model has been current for >6mo," not "the locked model is 6mo old." Banner is not suppressible via flag (per ADR-0016); `WARDEN_LOG_LEVEL=silent` is the only global escape.
+    
+    Hardcoded `VOYAGE_MODELS` registry in `@warden/ai/src/embeddings/voyage-models.ts` carries `defaultSince` + `deprecatedAfter` per SKU. Bumping `CURRENT_DEFAULT` is ADR-worthy.
+
+8. **Bulk export/import — interface-ready, CLI deferred. Amends ADR-0016 #3.** Build `IndexExporter` / `IndexImporter` as abstract methods on the storage seam with one SQLite impl in M6. Don't ship `warden index export/import` CLI verbs. The portability discipline ADR-0016 #3 cared about is preserved (storage layer can stream-export without SQLite-specific shortcuts); the CLI shipping is deferred until a concrete consumer materializes (CI cache artifact, hosted-mode migration, or laptop-switching pain). Backup affordance for v0 dogfood is documented as `cp .warden/cache.sqlite cache.sqlite.bak` — SQLite is one file.
+
+9. **Selector v2 composition.** New `Reason` variant `{ kind: "semantic"; chunkHash; similarity; evidence: Evidence[] }` joins M5's four cheap signals. The selector embeds the unified diff text once via Voyage `type=query`, retrieves top-50 chunks, drops similarity < 0.5, aggregates per-file via *max* (preserves "this one chunk is highly relevant"). Score weight `0.9` (slot between `imported-by`'s 1.0 and `imports`' 0.8), intensity-scaled — file's semantic contribution is `0.9 × max_chunk_similarity`. Cheap signals stay binary because they're inherently binary; semantic gets intensity scaling because cosine similarity is calibrated. Updated `MAX_REASON_WEIGHT_SUM = 3.6`. `MAX_CONTENT_BEARING` stays 8 (token budget). No query-embedding cache (one Voyage call per review is free; M4's `llm_review_cache` short-circuits on diff-hash hit). Voyage failure during `review` degrades to M5 cheap-signals + `degradedWorkers` entry; never hard-fails.
+
+10. **Storage interface placement.** Interfaces + SQLite impls in `packages/core/src/indexing/` (gerund avoids collision with the `index.ts` barrel). Five new schemas in `packages/db/src/schema/`: `chunks`, `embeddings`, `merkle`, `jobs`, `index-meta` (single key/value table for locked-model + format_version + repo_merkle_root). Embedding provider in `packages/ai/src/embeddings/` — symmetric to LLM model dispatchers. Zero new package boundaries cross; CLAUDE.md's forbidden-imports table is honored unchanged. A future `@warden/index-postgres` (or any non-SQLite impl) is additive — implements the same `interfaces.ts` types without touching `@warden/core/indexing/` consumers.
+
+11. **`@warden/context` / `@warden/index` workspace package — deferred.** ~20 files across `context/` + `indexing/` doesn't meet the split-justification bar (one consumer, same release cadence, same build setup, tight coupling to review-pipeline assembly). Documented split triggers for M7+: (a) non-review consumer of indexing emerges (e.g., DeepSec-shaped SAST worker per ADR-0015), (b) `@warden/ai/embeddings/` grows multi-provider routing (BYOEmbedder), (c) external consumers want to embed Warden's chunks independently, (d) a `code-chunk` fork happens.
+
+12. **Auto-`.gitignore` helper.** `ensureGitignore(repoRoot)` runs at the top of `init`, `review`, and `check` — idempotent; appends `.warden/` to existing `.gitignore` (under a `# warden` comment), creates a minimal `.gitignore` if none exists, never overwrites other entries. Surfaces `"gitignore: added .warden/ entry"` in `degradedWorkers` on first add. Lives in `@warden/core` (deterministic file I/O at known path; doesn't violate ADR-0013's I/O-pure stance — it's a one-shot config write at the boundary).
+
+**Why.**
+
+The headline tension in M6 is that ADR-0016 originally sized the storage layer assuming local embeddings (Transformers.js: ~50MB weights, no network), while M6 ships hosted embeddings via Voyage (network-bound, paid). The reasoning chain that produced this:
+
+- *Q1's narrowed scope.* Cramming every gated-on-indexing feature into M6 (cross-repo retrieval, `leverage` category, SAST worker, full async daemon) packs four-plus separable decision clusters into one milestone — the "lands as a mash" failure mode ADR-0018 explicitly cited. Smallest-credible-consumer posture ships the storage discipline first; subsequent slices land with their own ADRs when consumers earn rent.
+
+- *Q2's hosted-over-local pivot.* Voyage `voyage-code-3` is best-in-class for code retrieval, the user has already provisioned the API key, and the cost shape (~$0.83 first-index for a 5k-file dogfood repo, pennies per subsequent review) is acceptable for v0. The data-residency cost (chunks travel to Voyage to be embedded) is real and surfaced in user-facing docs; the BYOEmbedder milestone — deferred per ADR-0006's BYOLLM logic — opens a local-fallback path when sensitive-code use cases earn rent.
+
+- *Q3's depend-don't-build call.* Warden is a *consumer* of focused tools (TSC, ESLint, jscpd, npm-audit, OSV, Anthropic, Voyage). Adding `code-chunk` to that list is consistent; building chunking ourselves duplicates what's already MIT-licensed and benchmarked. Owning every layer is the path to "let's also build our own embedding model, our own LLM, our own static analyzer." Fork only if/when triggers fire.
+
+- *Q4's schema choices.* Content-addressing on `chunk_hash` makes invalidation a non-problem (stale rows become unreachable, never wrong). The `(model_id, model_version)` columns capture our-side change detection; silent provider weight drift is undetectable from our side and ADR-0016 #2's property is degraded but not violated — accepted tradeoff for hosted embeddings.
+
+- *Q5's foreground-init model.* The one-shot non-interactive CLI (ADR-0014) makes background work expensive. `warden init` already exists in scope; giving it a clear contract (foreground, idempotent, resumable on Ctrl-C) is cheap. Embedding cold-start (~5–10 min on a large repo) honestly belongs to `init`, not hidden inside `review` latency.
+
+- *Q6+Q7's UX gradient.* Costs and provider behavior are both legible to the user. Pre-flight estimates make "is this 30 seconds or 30 minutes?" answerable before commit. Locked-model + banner gradient prevents Voyage SKU bumps from being surprise re-embed events. The "this is optional" framing on `--rebuild` is doing real work — it tells the user they don't have to chase every model bump.
+
+- *Q8's deferral of CLI verbs.* The *discipline* ADR-0016 #3 cared about is preserved by the interface shape; the *commands* would be premature scaffolding for a v0 user who can `cp .warden/cache.sqlite` for the same effect. Same logic ADR-0013 used to defer the bot infrastructure: interfaces stay decoupled; CLIs ship when there's a real consumer.
+
+- *Q9's intensity-scaled semantic weight.* Cosine similarity is a calibrated 0–1 number that's already in Voyage's response; ignoring it would throw away information. Cheap signals stay binary because they're inherently binary; semantic gets intensity scaling because the data supports it. Top-50 / threshold-0.5 / max-aggregation / weight-0.9 are tuning constants that mirror M5's hardcoded posture; configurability is BYOEmbedder's problem.
+
+- *Q10+Q11's flat-package shape.* The package boundary table (CLAUDE.md) is honored; `@warden/core` becoming the largest package is intentional and matches Alfred's shape. Splitting prematurely is the failure mode ADR-0013 cautioned against; the surface (~20 files) doesn't earn a workspace package, and naming it (`@warden/context` vs `@warden/index` vs `@warden/embed`) is more profitably decided when full M7+ contents are in view.
+
+**Alternatives considered and rejected.**
+
+- *Local Transformers.js (`bge-small-en-v1.5`) for embeddings.* Best privacy posture, $0 forever, reproducible model_version (weights file hash). Rejected for M6 because the user provisioned the Voyage key and the quality delta on code-retrieval favors hosted. Local re-enters the picture as an M7+ BYOEmbedder impl when sensitive-code use cases earn rent.
+- *OpenAI / Cohere / Gemini for embeddings.* Cheaper than Voyage but not code-specialized; Gemini concentrates dependency on Google (already the LLM fallback per ADR-0017). Voyage's code-retrieval specialty earns the price premium for our task.
+- *Build chunker ourselves on top of M5's `TsCompilerParser`.* TS-only by construction; recreates the multi-ecosystem trap M5 deliberately avoided at the parser layer. `code-chunk`'s six-language coverage matches Warden's roadmap without writing per-language tuning ourselves.
+- *`@langchain/textsplitters`.* Regex-based language-aware separators; ~50% precision penalty on code retrieval per cAST research and Vecta benchmarks. Cheap to integrate but undercuts Voyage's code-specialty embeddings.
+- *Whole-file chunking.* Loses retrieval precision; per-file aggregation is the *selector's* job, not the chunker's. Forecloses M7+ consumers that want chunk-level granularity (e.g., "find the symbol that…" queries, API claim verifier).
+- *`JobRunner` Model B/C in M6.* Review-time incremental embed (B) or background subprocess (C) both fight against ADR-0014's one-shot CLI shape. Both are legitimate M7+ directions if dogfooding shows users skip `init` consistently — defer until evidence.
+- *Interactive cost-confirmation prompt before Phase 3.* Per ADR-0014 — even for the heavyweight `init` verb. `--max-cost <USD>` flag is the non-interactive equivalent.
+- *Auto-rebuild on Voyage SKU bump.* Surprise costs + surprise wait; user agency wins. Soft-notice in `init` only; D-aged banner kicks in at 6mo grace period.
+- *Banner with percentage threshold for staleness (e.g., "if >10% of files changed").* Silent quality loss is worse UX than a one-line dim banner; trigger-eagerly is cheap to relax.
+- *Full CLI `warden index export/import` in M6 per ADR-0016 #3 strict reading.* No concrete v0 consumer; `cp .warden/cache.sqlite` covers the dogfood backup case. Amend ADR-0016 #3 wording rather than ship CLI verbs in advance of need.
+- *Query-embedding cache (`(diff_hash, model_id, model_version) → query_vector`).* Adds a table for ~$0.0001/review savings; M4's `llm_review_cache` already short-circuits on diff-hash hit when it matters. Not worth the surface.
+- *Splitting `@warden/context` or `@warden/index` workspace package now.* Surface (~20 files), single consumer, same release cadence — the four workspace-package justifications don't fire. Documented triggers for revisit at M7+.
+- *Indexing `node_modules` / `.d.ts` / cross-repo source in M6.* Cost spikes on dependency-heavy repos; ROI unclear without a concrete consumer (the `leverage` category is the obvious one but it's deferred). Vulnerability detection in dependencies stays runtime via M3's npm-audit + OSV path — no need to chunk dependency code for that goal. Cross-repo indexing reactivates when `leverage` or API claim verifier earns rent.
+
+**Caveat — silent Voyage weight drift is undetectable from our side.** ADR-0016 #2's "prevents silent corruption when the embedding model is upgraded" property is degraded but not violated. The mitigation is "trust the SKU contract"; if Voyage ever announces a backward-incompatible refresh within a SKU, we add a manual `client_pin` segment to `model_version` and bump it. The locked-model concept (decision 6) confines the blast radius — incremental embeds always match the corpus, so query/corpus asymmetry never leaks into review quality even if Voyage drifts.
+
+**Caveat — `code-chunk` is at v0.1.x with a solo maintainer.** Pin the exact version. Documented fork triggers (abandoned >6mo, blocking bug, Effect dep growth) → fork to `@warden/chunker` from MIT source. The fork is M7+ if-needed work, not M6 if-maybe work. Re-deciding under deadline pressure is worse than re-deciding from documented criteria.
+
+**Caveat — local-vs-remote data flow is load-bearing for trust.** Code chunks travel to Voyage to be embedded; embeddings come back and stay local. Diffs travel to both Voyage (query-side embed, not cached) and Anthropic/Google (review LLM call). The `.warden/cache.sqlite` itself never leaves the machine; M5/M4/M3 caches stay local; API keys are read-only, never logged or persisted. M6 plan + README mirror the data-flow table verbatim. Users with sensitive code (employer NDAs, regulated codebases) get explicit signal about what crosses the wire before they run `warden init`. The local-fallback escape valve (Transformers.js) is named in the BYOEmbedder forward pointer, not blocked by this milestone.
+
+**Caveat — first-Voyage-SKU-bump is a real test of the locked-model design.** Until `voyage-code-3.X` ships, the registry math (`defaultSince` of `CURRENT_DEFAULT`, D-aged 6mo grace, `--rebuild` semantics) is theoretical. Worth dogfooding via a deliberate test (manually flip `CURRENT_DEFAULT` in a dev branch, run `warden init --rebuild`, verify locked-model semantics) before relying on the path in production. Captured as an acceptance smoke test in `m6-plan.md`.
+
+**Caveat — hosted-mode swap point stays open for M7+.** All four ADR-0016 properties (content-addressed, model-versioned, portable, queue-decoupled) are exercised by M6 even with hosted embeddings: `chunk_hash` is content-addressed, embedding rows carry `model_id`+`model_version`, the `IndexExporter` interface preserves portability discipline, and `JobRunner` is decoupled from storage. A future hosted backend (Postgres, KV, vector DB) implements the same interfaces — no rewrite of `@warden/core/indexing/` consumers.
+
+**Caveat — `node_modules` / `.d.ts` chunking explicitly out of M6 scope.** Cost spikes on dependency-heavy repos and the consumer that would need it (the `leverage` category, custom-code SAST worker, API claim verifier) is M7+. Vulnerability detection on dependencies stays runtime via M3's npm-audit + OSV path. When cross-repo retrieval is scheduled, gate on a real consumer per ADR-0013's "interface boundaries crystallize after they're tested against real consumers" caveat.
+
+**Caveat — this ADR amends two earlier ADRs.** ADR-0016 #3 ("Bulk export/import is a first-class operation from day one") softens to "interface-ready from day one; CLI shipping deferred to first concrete consumer" — the discipline survives, the CLI verbs don't ship in M6. ADR-0006's hardcoded-Anthropic-for-LLM stance gains a parallel clause: hardcoded-Voyage for embeddings in M6, with `EmbeddingProvider` interface shaped to accept future BYO impls. Both amendments are scoped: the spirit of the prior ADRs is preserved; only the implementation timing shifts.
+
+**Caveat — this is a *direction*, not a milestone schedule.** M6 is the next milestone, but its acceptance bar is "selector v2 + locked-model + `warden init` + banner + storage interfaces work end-to-end on Alfred / milkpod / blair," not a calendar. Per ADR-0001's single-user-built-right posture, dogfooding pacing dominates artificial deadlines.
 
 ---

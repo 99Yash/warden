@@ -11,6 +11,11 @@ const envSchema = z.object({
   // Google Gemini after Anthropic fails post-retry. When unset, Anthropic
   // failure is hard-fail.
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  // Required for `warden init` and the `warden review` semantic signal
+  // (ADR-0019). Optional at env-validate time so `warden check` (which
+  // never touches the index) doesn't surprise users; the embedding-provider
+  // factory throws fast when consumed without the key.
+  VOYAGE_API_KEY: z.string().min(1).optional(),
   WARDEN_LOG_LEVEL: z
     .enum(['silent', 'error', 'warn', 'info', 'debug'])
     .default('info'),
