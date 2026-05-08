@@ -66,11 +66,10 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     process.stdout.write(pc.dim(`warden ${mode}  ${description}\n`));
   }
 
-  // ADR-0019 #7: limitation banner — printed once before the phase log
-  // when the index is missing / stale / behind. The banner string lives
-  // in `result.metadata.degradedWorkers`; we prefix it visually so users
-  // see it even before the LLM phase starts. (Skipped on --json — JSON
-  // consumers read it from the structured metadata directly.)
+  // ADR-0019 #7: limitation banner — rendered once after `review()` returns,
+  // above the formatted comment set, when the index is missing / stale / behind.
+  // The banner string lives in `result.metadata.degradedWorkers`. (Skipped on
+  // --json — JSON consumers read it from the structured metadata directly.)
   const renderer = !opts.json && mode === "review" ? createPhaseRenderer() : undefined;
 
   const emit = renderer

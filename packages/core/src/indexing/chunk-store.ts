@@ -1,4 +1,4 @@
-import { chunks as chunksTable, db, eq, inArray } from "@warden/db";
+import { and, chunks as chunksTable, count, db, eq, inArray } from "@warden/db";
 import type { ChunkRecord, ChunkStore } from "./interfaces.js";
 
 /**
@@ -60,14 +60,14 @@ export class SqliteChunkStore implements ChunkStore {
     const rows = db()
       .select()
       .from(chunksTable)
-      .where(eq(chunksTable.filePath, filePath))
+      .where(and(eq(chunksTable.filePath, filePath), eq(chunksTable.fileSha, fileSha)))
       .all();
-    return rows.filter((r) => r.fileSha === fileSha).map(rowToRecord);
+    return rows.map(rowToRecord);
   }
 
   async count(): Promise<number> {
-    const rows = db().select({ chunkHash: chunksTable.chunkHash }).from(chunksTable).all();
-    return rows.length;
+    const row = db().select({ value: count() }).from(chunksTable).get();
+    return row?.value ?? 0;
   }
 }
 

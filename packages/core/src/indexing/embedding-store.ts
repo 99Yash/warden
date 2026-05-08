@@ -1,4 +1,4 @@
-import { and, db, embeddings as embeddingsTable, eq, inArray } from "@warden/db";
+import { and, count, db, embeddings as embeddingsTable, eq, inArray } from "@warden/db";
 import type { EmbeddingRecord, EmbeddingStore } from "./interfaces.js";
 
 /**
@@ -101,14 +101,14 @@ export class SqliteEmbeddingStore implements EmbeddingStore {
   }
 
   async count(modelId: string, modelVersion: string): Promise<number> {
-    const rows = db()
-      .select({ chunkHash: embeddingsTable.chunkHash })
+    const row = db()
+      .select({ value: count() })
       .from(embeddingsTable)
       .where(
         and(eq(embeddingsTable.modelId, modelId), eq(embeddingsTable.modelVersion, modelVersion)),
       )
-      .all();
-    return rows.length;
+      .get();
+    return row?.value ?? 0;
   }
 
   async deleteByModel(modelId: string, modelVersion: string): Promise<number> {

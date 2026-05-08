@@ -101,12 +101,16 @@ function truncate(s: string, max: number): string {
  * suppressible — banner reflects the state of the index, fixing it means
  * fixing the cause (`warden init` / `warden init --rebuild`).
  */
+const BANNER_PREFIXES = [
+  "context: no index",
+  "context: index stale",
+  "context: locked model",
+  "context: no embeddings yet",
+];
+
 export function renderBannerLine(degraded: string[]): string | null {
   for (const entry of degraded) {
-    if (entry.startsWith("context: no index") || entry.startsWith("context: index stale")) {
-      return pc.yellow(`! ${entry.replace(/^context:\s*/, "")}`);
-    }
-    if (entry.startsWith("context: locked model")) {
+    if (BANNER_PREFIXES.some((p) => entry.startsWith(p))) {
       return pc.yellow(`! ${entry.replace(/^context:\s*/, "")}`);
     }
   }

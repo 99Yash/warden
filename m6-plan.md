@@ -753,3 +753,39 @@ After adding a payment method, re-running `pnpm warden init` on `../blair` produ
 - Finding 5 (the "319 cached" wording bug) is now visible in vivid form: post-success, the summary still says `"319 cached · 319 newly embedded"`. A fresh re-run would say `"319 cached · 0 newly embedded"` — visually identical to a wholesale-failed run. This is a real ambiguity, not a theoretical one.
 
 So: the M6 happy path works. Items 1–13 above are still M7's job; the validation just confirms the engine is actually doing what it claims when nothing's blocking it.
+
+### Addendum: Copilot reviewed PR #3 and warden missed 6 of 9 findings
+
+After warden self-reviewed PR #3, Copilot also reviewed it. 9 inline comments from Copilot; 3 of them are the same things we'd already captured (their #2 / #3 / #5 ≈ our #6 / #2 / #1). The other 6 are real gaps warden's pipeline didn't surface, and they group into four reviewable *categories* — worth recording at category level so M7+ can target the engine, not just the symptoms.
+
+**A. "Load-then-filter / load-then-count" smell (Copilot #6, #7, #8).**
+
+Three of nine comments are the same bug shape: `db.select(...).from(table).where(eq(filePath, p)).all()` followed by either a JS `.filter(...)` on `fileSha` (#6) or `.length` for a count (#7, #8). The right SQL adds the predicate to the `WHERE` clause or uses `count(*)`. This is a textbook performance smell that doesn't need cross-file reasoning — it's local pattern recognition on a single function. The semantic signal *did* pull these files close (they were in the diff), and the LLM had them in context, but flagging "select-all-then-filter / select-all-then-length" was not on the LLM's radar.
+
+The fix is not "add a regex" — it's that warden's review priority order (correctness → clarity → style → dedup → tests) doesn't have a slot for "scalability smell." Today such findings would land under "correctness" if at all, and the LLM defers them to vulnerabilities. M7 candidate: a **leverage-adjacent "scalability" category** that surfaces query-shape patterns where a 10× data growth would change the asymptotics. Cheap to recognize, expensive to ignore.
+
+**B. Doc-code consistency (Copilot #9).**
+
+README says `VOYAGE_API_KEY` is required for `warden review`. Code degrades gracefully: missing key disables semantic signal but cheap signals carry the review. Copilot crossed README → code and flagged the divergence. Warden didn't.
+
+This is the same shape as ADR-0008's citation discipline — a claim with no verifiable source — applied internally instead of to advisories. M5 already proved the engine can pull adjacent files into context (it pulled banner code adjacent to selector code via cheap signals). The gap is intent: warden treats README as evidence *to cite*, not as a *claim to verify*. M7 candidate: when a diff touches a code path documented in README/CLAUDE.md, mirror the verifier discipline — does the doc still describe what the code does? Same machinery, different direction of audit.
+
+**C. Dead-from-callsites branch detection (Copilot #4).**
+
+`computeBannerState`'s `stale` branch only fires when `inputs.currentHashes` is supplied. The single review() callsite never supplies it. So the entire `stale` banner state is dead from review's perspective — yet acceptance criterion 6.3 explicitly tested it. The function looks reachable in isolation; the deadness only shows up when you cross-read the function and its sole caller.
+
+Warden's M5 selector pulled both files close (banner/index.ts is imported from the modified core/index.ts), and the LLM saw both. But "this branch needs a parameter no caller passes" requires a specific kind of trace that the prompt didn't structure. M7 candidate: when a function's parameter is optional *and* a code path branches on its presence, flag callsites that never pass it. Same mechanism as the import-graph signal but inverted: instead of "who imports this," "who passes this argument." Static, cheap, high-signal.
+
+**D. Committed dev-only / bootstrap scripts with hardcoded paths (Copilot #1).**
+
+`packages/db/scripts-bootstrap-blair.mts` (which I created mid-session and the user committed before cleanup) hardcodes `/Users/yash/Developer/self/blair/.warden/cache.sqlite`. Copilot flagged it on filename + content shape: directory contains `scripts`, filename contains `bootstrap`, body contains absolute developer-machine paths. This is the same heuristic M3's npm-audit uses but inverted into a "smells like dev junk" detector.
+
+Warden's review treats the diff as authoritative scope; it doesn't ask "should this file have been committed at all?" That question requires looking at *meta-properties* of the file: filename pattern, location in tree, content shape. M7 candidate (or earlier): a **provenance / committability check** that runs over added files and flags ones matching dev-script patterns (hardcoded absolute paths, `scripts-*`, `bootstrap-*`, `tmp-*`, files outside the standard package layout). This is also where "TODO before merge" / "DO NOT MERGE" markers naturally live.
+
+**Meta-lesson.**
+
+Warden reviewed its own diff and missed 6 of 9 things Copilot caught. The miss rate isn't the story — the *shape* of the misses is. All four categories above are pattern-recognition tasks that the LLM is competent at when prompted for them; the gap is that warden's prompt structure (and its review-priority order) doesn't carve out slots for them. ADR-0012's "correctness → clarity → style → dedup → tests" was right at M4 but is now the bottleneck — three of the four missed categories don't fit cleanly into any of those buckets, so the LLM either downgrades them or skips them entirely.
+
+M7 should treat the priority order as a thing to extend, not as a thing to defend. Concrete additions that earn their slot: **scalability** (A), **doc-code consistency** (B), **dead-branch / unused-parameter** (C), and **committability** (D). Each is locally cheap to detect once the LLM is told to look for it; what's expensive is the *naming* of the category, since that's what makes the LLM look.
+
+The corollary discipline: every time another reviewer (Copilot, a human, a future tool) catches something warden missed, ask "what's the *category* I missed?", not "what's the *bug* I missed." The category answer is the only one that informs future runs; the bug answer is just this PR's diff.

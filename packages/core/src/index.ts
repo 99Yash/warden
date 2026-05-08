@@ -14,6 +14,7 @@ import {
 import { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 import { detectEcosystem } from "./ecosystem/index.js";
 import { ensureGitignore } from "./init/ensure-gitignore.js";
+import { walkRepo } from "./init/walk.js";
 import {
   SqliteChunkStore,
   SqliteEmbeddingStore,
@@ -147,12 +148,19 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
 
   // M6 (ADR-0019 #7): banner state is computed *before* the selector runs,
   // off the index's current state. `check` skips it — deterministic-only verb.
+  // Walk the repo to feed `currentHashes` so the `stale` banner can fire when
+  // the working tree has drifted from the merkle snapshot. Sharing this walk
+  // with the selector's own incremental hash pass is a M7+ optimization.
   let bannerState: BannerState = { kind: "no-banner" };
   if (input.config.mode === "review") {
     try {
+      const walk = await walkRepo(input.repoRoot);
+      const currentHashes = new Map<string, string>();
+      for (const f of walk.files.values()) currentHashes.set(f.path, f.fileSha);
       bannerState = await computeBannerState({
         repoRoot: input.repoRoot,
         currentDefault: CURRENT_DEFAULT,
+        currentHashes,
       });
     } catch (err) {
       bannerState = { kind: "no-banner" };

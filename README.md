@@ -51,7 +51,7 @@ pnpm warden review      # full pipeline including LLM triage and formatter
 | Var                            | Purpose                                                                                                            |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `ANTHROPIC_API_KEY`            | Required. Primary LLM provider for the review formatter (ADR-0006).                                               |
-| `VOYAGE_API_KEY`               | Required for `warden init` and `warden review`. Embedding provider for the semantic context selector (ADR-0019). |
+| `VOYAGE_API_KEY`               | Required for `warden init`. Enables the semantic context selector in `warden review` (ADR-0019); when unset, review falls back to cheap signals only. |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Optional. Enables the Anthropic → retry → Google fallback (ADR-0017). When unset, Anthropic failure is hard-fail. |
 | `WARDEN_THINKING_BUDGET`       | Optional. Anthropic extended-thinking budget in tokens. Default 4096.                                             |
 | `WARDEN_LOG_LEVEL`             | Optional. `silent` / `error` / `warn` / `info` (default) / `debug`.                                               |
