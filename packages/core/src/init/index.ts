@@ -255,24 +255,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
 
   // Dry-run: skip Phase 3.
   if (opts.dryRun) {
-    emit({
-      type: "complete",
-      durationMs: Date.now() - startedAt,
-      summary: finishSummary({
-        startedAt,
-        walked,
-        cachedChunks: cachedChunkCountBefore,
-        chunks: allChunks.length,
-        newlyEmbedded: 0,
-        failedEmbeds: 0,
-        promptTokens: 0,
-        estimatedUsd: initialEstimate.estimatedUsd,
-        dryRun: true,
-        abortedForCost: false,
-        rebuilt,
-      }),
-    });
-    return finishSummary({
+    const summary = finishSummary({
       startedAt,
       walked,
       cachedChunks: cachedChunkCountBefore,
@@ -285,6 +268,8 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
       abortedForCost: false,
       rebuilt,
     });
+    emit({ type: "complete", durationMs: summary.durationMs, summary });
+    return summary;
   }
 
   if (!provider) {
