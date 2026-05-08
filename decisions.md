@@ -27,7 +27,7 @@ Companion doc: `vision.md` (the long-form thinking framework, preserved from the
 | Pattern engine       | ESLint (TS-only); Semgrep deferred to multi-ecosystem milestone                       |
 | Output formats       | Pretty CLI (default) + `--json`; PR-comment / SARIF deferred                          |
 | CLI verbs            | `warden check` (fast, deterministic only) + `warden review` (full); `patrol` parked  |
-| Comment ordering     | Correctness → Clarity → Style → Dedup → Tests (ADR-0012); orthogonal to severity tier |
+| Comment ordering     | Correctness → Clarity → Style → Dedup → Tests (ADR-0012); extended with scalability / consistency / deadcode / committability between correctness and clarity (ADR-0020); orthogonal to severity tier |
 | Roadmap (post-v0)    | GitHub PR bot → Slack bot → ClickUp integration (ADR-0013); architecture stays bot-ready |
 | CLI UX paradigm      | One-shot non-interactive CLI (ADR-0014); no TUI; interactive triage deferred to a future web app |
 | Prior-art posture    | DeepSec study (ADR-0015): borrow pipeline shape + plugin slots; reject free-form findings + 2-agent revalidation; prompts-as-files from M4 |
@@ -560,5 +560,39 @@ The headline tension in M6 is that ADR-0016 originally sized the storage layer a
 **Caveat — this ADR amends two earlier ADRs.** ADR-0016 #3 ("Bulk export/import is a first-class operation from day one") softens to "interface-ready from day one; CLI shipping deferred to first concrete consumer" — the discipline survives, the CLI verbs don't ship in M6. ADR-0006's hardcoded-Anthropic-for-LLM stance gains a parallel clause: hardcoded-Voyage for embeddings in M6, with `EmbeddingProvider` interface shaped to accept future BYO impls. Both amendments are scoped: the spirit of the prior ADRs is preserved; only the implementation timing shifts.
 
 **Caveat — this is a *direction*, not a milestone schedule.** M6 is the next milestone, but its acceptance bar is "selector v2 + locked-model + `warden init` + banner + storage interfaces work end-to-end on Alfred / milkpod / blair," not a calendar. Per ADR-0001's single-user-built-right posture, dogfooding pacing dominates artificial deadlines.
+
+---
+
+## ADR-0020 — Review priority order extension: scalability, consistency, deadcode, committability
+
+**Decision.** Extend ADR-0012's five-category priority order with four new categories the LLM can emit *as questions only*:
+
+1. Correctness
+2. **Scalability** *(new)* — query / loop shapes whose asymptotics break under 10× growth.
+3. **Consistency** *(new)* — README / ADR / doc claims the diff makes false.
+4. **Deadcode** *(new)* — branches gated on params no caller passes; functions whose only callsites all skip them.
+5. **Committability** *(new)* — added files whose name, location, or content shape says "shouldn't be committed" (hardcoded absolute paths, `scripts-bootstrap-*`, `tmp-*`, debug `console.log`, `DO NOT MERGE` markers).
+6. Clarity
+7. Style / conventions
+8. Deduplication
+9. Tests
+
+`security` and `vulnerability` continue to share the top tier with `correctness` per ADR-0012's tier-mapping rule.
+
+The four new categories are added to `CategoryEnum`, slotted into `PRIORITY_ORDER` in both `@warden/core` and `@warden/cli`'s formatter, and surfaced in the LLM system prompt's "Pattern shapes worth asking about" section. The hard rule that the LLM cannot author assertions without a tool source (ADR-0008's citation thesis) is unchanged: these new categories are emitted via the existing `questions[]` lane, which has empty `sources[]` by design and asks rather than asserts.
+
+**Why.** Captured during PR #3 dogfooding: Copilot's review of the same PR caught 6 things warden missed, and 4 of those 6 cluster into shapes that don't fit any existing category — the LLM had the relevant files in context (M5 selector pulled them in), but the prompt structure didn't carve out slots for these patterns, so the LLM either downgraded them to "clarity" or dropped them. The corollary discipline from `m6-plan.md` §"Copilot review delta": *"every time another reviewer catches something warden missed, ask what category I missed, not what bug I missed."* The category answer is what makes the LLM look on future runs.
+
+These four are locally cheap to recognize from the diff plus its adjacent context — no cross-repo work, no new tools, no embedding query. The expensive part is the *naming*; once named, the LLM is competent at the pattern-match.
+
+**Why questions, not assertions.** ADR-0008 is non-negotiable: every assertion needs a verifiable source. None of the four new categories has a deterministic producer in M6. Routing them through the questions lane preserves citation discipline — *asking is not claiming* — while still surfacing the pattern to the human reviewer. M7+ may upgrade individual categories from "LLM asks" to "deterministic detector asserts" once the producing tool exists; the schema doesn't change when that happens.
+
+**Alternatives.** (1) Build deterministic detectors for all four in M6 (rejected — meaningful scope creep on top of M6's embedding/indexing/banner work; each category needs its own producer with non-trivial parsing). (2) Add only `scalability` since it's the most code-pattern-shaped (rejected — half-measure; the four-category bundle is the unit the dogfood evidence pointed at). (3) Add the categories without prompt instructions, expecting the LLM to discover them (rejected — the dogfood lesson explicitly was that the LLM needs the *naming* to look). (4) Inline-amend ADR-0012 instead of writing a new ADR (rejected — separating the original five from the four extensions makes both ADRs easier to reason about; the original priority order is the v0 thesis, the extension is a learned-after-shipping correction).
+
+**Caveat — `committability` requires an *added*-file detector.** "Added file" means `+++ b/path` with no `--- a/path` counterpart. The LLM has the diff, so this is observable from the prompt input alone — no new schema field needed. The `committability` category is meaningless on modified-only files; the prompt instructs the LLM to gate on the added-file marker. False positives (legitimate new scripts) are tolerable because the output is a *question*, not a block.
+
+**Caveat — `consistency` is the inverse of ADR-0008's citation discipline.** Citation discipline says *"if you make a claim, cite a source."* Consistency-as-question says *"if a doc makes a claim that the diff invalidates, flag it."* Same machinery, opposite direction. M5's selector already pulls README and `CLAUDE.md` into context for files that touch them; the LLM just needs to be told that's also a verification axis, not just a citation-source axis. M7 may add a dedicated `doc-verifier` worker that asserts these as findings rather than asking; until then, the LLM-asks-question form keeps the citation invariant intact.
+
+**Caveat — drop-in replacement, not a breaking change.** Existing consumers of `Category` (CLI formatter, JSON output, future bots) keep working: the four new values are appended to the enum, so old serialized payloads still validate. PRIORITY_ORDER lookups for the new categories simply move them to their slot; lookups for the original eight categories are unchanged.
 
 ---

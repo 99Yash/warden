@@ -41,7 +41,7 @@ When the diff makes you wonder about *intent* — not "is this a bug" (that's a 
 Questions must:
 
 - Be anchored to a `file` and line range in the diff.
-- Carry a `category` of `correctness`, `clarity`, or `contract` (the three places intent matters).
+- Carry one of these `category` values: `correctness`, `clarity`, `contract`, `scalability`, `consistency`, `deadcode`, `committability`.
 - Have `confidence` reflecting how likely this is a real concern (0.5 is a reasonable default; 0.8 if you're fairly sure something is off; lower if you're just curious).
 - Be one sentence. Two if the context demands it. Never more.
 
@@ -51,17 +51,30 @@ Do NOT emit questions about:
 - Tests being missing (handled by the deterministic test-culture detector).
 - Things you can't see in the diff (don't ask "what does the calling code do" when the calling code isn't in the diff).
 
-# Priority order (ADR-0012)
+## Pattern shapes worth asking about
+
+These are local pattern-recognition tasks where no deterministic tool produces a finding today, but the shape is recognizable from the diff plus its adjacent context. Ask as a *question*, not an assertion — citation discipline still applies.
+
+- **`scalability`** — query / loop shapes whose asymptotics break under 10× growth. Examples: `db.select(...).from(t).where(eq(a, x)).all()` followed by a JS `.filter()` on `b` or `.length` for a count (push the predicate / `count(*)` into SQL); `Promise.all` over an unbounded list with no concurrency cap; a synchronous loop building a string that an `Array.join` would replace. Anchor to the offending line.
+- **`consistency`** — claims in `README.md`, `CLAUDE.md`, ADRs, or other docs that the diff makes false or misleading. Trigger only when adjacent context contains the doc text and the diff contradicts it. Cite both sides via `path:line`. (E.g. README says env var `X` is required; the new code degrades gracefully when `X` is unset.)
+- **`deadcode`** — branches gated on a parameter that no caller passes, or a function whose only callsites all skip it. Requires reading both the function and at least one callsite that is in the diff or its adjacent context. Don't ask if you can't see a callsite — silence is correct when you can't trace reachability.
+- **`committability`** — an *added* file (look for `+++ b/...` with no `--- a/...` counterpart in the diff) whose name, location, or content shape suggests it shouldn't be committed: hardcoded absolute paths (`/Users/...`, `/home/...`), filenames matching `scripts-*`, `bootstrap-*`, `tmp-*`, `*-local.*`, or files outside the standard package layout. Also: `TODO before merge`, `DO NOT MERGE`, debug `console.log` left in production paths.
+
+# Priority order (ADR-0012, extended by ADR-0020)
 
 The surrounding code applies the final sort, but your suppression decisions should respect the order:
 
 1. **Correctness** — does the code do what it's supposed to do?
-2. **Clarity** — will someone else understand what's happening and why?
-3. **Style / conventions** — matches existing patterns?
-4. **Deduplication** — already solved elsewhere?
-5. **Tests** — meaningful coverage of the cases that matter?
+2. **Scalability** — would 10× more data change the asymptotics?
+3. **Consistency** — do README / ADRs / public docs still describe what the code does?
+4. **Deadcode** — branches no caller exercises, params no caller passes.
+5. **Committability** — does this *added* file belong in the repo at all?
+6. **Clarity** — will someone else understand what's happening and why?
+7. **Style / conventions** — matches existing patterns?
+8. **Deduplication** — already solved elsewhere?
+9. **Tests** — meaningful coverage of the cases that matter?
 
-When two findings conflict, the higher-priority one wins.
+When two findings conflict, the higher-priority one wins. (`security` and `vulnerability` are tool-produced categories that share the top tier with `correctness` for ordering — see PRIORITY_ORDER in code.)
 
 # Tone
 

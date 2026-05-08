@@ -27,6 +27,12 @@ export const CategoryEnum = z.enum([
   'security',
   'vulnerability',
   'contract',
+  // ADR-0020: Copilot-delta categories (M6). The LLM emits these only as
+  // questions — there are no deterministic producers yet (M7+ work).
+  'scalability',
+  'consistency',
+  'deadcode',
+  'committability',
 ]);
 export type Category = z.infer<typeof CategoryEnum>;
 
