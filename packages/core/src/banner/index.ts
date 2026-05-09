@@ -6,6 +6,7 @@ import {
   readLockedModel,
 } from "../indexing/index.js";
 import type { ChunkStore, EmbeddingStore, MerkleStore } from "../indexing/index.js";
+import type { DegradedEntry } from "../schema.js";
 
 /**
  * Limitation banner state (ADR-0019 #7). Computed before the selector runs
@@ -121,26 +122,58 @@ export async function computeSoftNotice(inputs: BannerInputs): Promise<SoftNotic
   return { kind: "model-soft", indexedModel: locked.modelId, currentDefault };
 }
 
-/** Translate banner state to structured `degradedWorkers` strings. */
-export function bannerStateToDegraded(state: BannerState): string[] {
+/**
+ * Translate banner state to discriminated `degradedWorkers` entries
+ * (ADR-0021 #7). All banner states are `kind: "actionable"` — the banner
+ * surfaces precisely the entries the user can fix; non-actionable banner
+ * states don't exist by construction. The renderer reads `kind` instead
+ * of substring-matching on message prefixes.
+ */
+export function bannerStateToDegraded(state: BannerState): DegradedEntry[] {
   switch (state.kind) {
     case "no-banner":
       return [];
     case "no-index":
-      return ["context: no index — run `warden init` once for context-aware findings"];
+      return [
+        {
+          kind: "actionable",
+          topic: "context",
+          message:
+            "context: no index — run `warden init` once for context-aware findings",
+        },
+      ];
     case "no-embeddings":
-      return ["context: no embeddings yet — re-run `warden init` to complete indexing"];
+      return [
+        {
+          kind: "actionable",
+          topic: "embeddings",
+          message:
+            "context: no embeddings yet — re-run `warden init` to complete indexing",
+        },
+      ];
     case "stale":
       return [
-        `context: index stale — ${state.filesChanged} file${state.filesChanged === 1 ? "" : "s"} changed since last init`,
+        {
+          kind: "actionable",
+          topic: "context",
+          message: `context: index stale — ${state.filesChanged} file${state.filesChanged === 1 ? "" : "s"} changed since last init`,
+        },
       ];
     case "model-aged":
       return [
-        `context: locked model ${state.indexedModel} is >6mo behind current ${state.currentDefault} (age ${state.ageDays}d) — \`warden init --rebuild\` to upgrade`,
+        {
+          kind: "actionable",
+          topic: "context",
+          message: `context: locked model ${state.indexedModel} is >6mo behind current ${state.currentDefault} (age ${state.ageDays}d) — \`warden init --rebuild\` to upgrade`,
+        },
       ];
     case "model-deprecated":
       return [
-        `context: locked model ${state.indexedModel} deprecated as of ${state.deprecatedAfter} — \`warden init --rebuild\` to switch`,
+        {
+          kind: "actionable",
+          topic: "context",
+          message: `context: locked model ${state.indexedModel} deprecated as of ${state.deprecatedAfter} — \`warden init --rebuild\` to switch`,
+        },
       ];
   }
 }

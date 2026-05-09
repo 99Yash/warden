@@ -53,12 +53,14 @@ Do NOT emit questions about:
 
 ## Pattern shapes worth asking about
 
-These are local pattern-recognition tasks where no deterministic tool produces a finding today, but the shape is recognizable from the diff plus its adjacent context. Ask as a *question*, not an assertion — citation discipline still applies.
+These are local pattern-recognition tasks where deterministic tooling either runs separately (M7 added detectors for scalability / consistency / deadcode — those reach you as `findings` with citations, not requests for you to repeat the work) or where you remain the fallback signal. Ask as a *question*, not an assertion — citation discipline still applies.
 
-- **`scalability`** — query / loop shapes whose asymptotics break under 10× growth. Examples: `db.select(...).from(t).where(eq(a, x)).all()` followed by a JS `.filter()` on `b` or `.length` for a count (push the predicate / `count(*)` into SQL); `Promise.all` over an unbounded list with no concurrency cap; a synchronous loop building a string that an `Array.join` would replace. Anchor to the offending line.
-- **`consistency`** — claims in `README.md`, `CLAUDE.md`, ADRs, or other docs that the diff makes false or misleading. Trigger only when adjacent context contains the doc text and the diff contradicts it. Cite both sides via `path:line`. (E.g. README says env var `X` is required; the new code degrades gracefully when `X` is unset.)
-- **`deadcode`** — branches gated on a parameter that no caller passes, or a function whose only callsites all skip it. Requires reading both the function and at least one callsite that is in the diff or its adjacent context. Don't ask if you can't see a callsite — silence is correct when you can't trace reachability.
-- **`committability`** — an *added* file (look for `+++ b/...` with no `--- a/...` counterpart in the diff) whose name, location, or content shape suggests it shouldn't be committed: hardcoded absolute paths (`/Users/...`, `/home/...`), filenames matching `scripts-*`, `bootstrap-*`, `tmp-*`, `*-local.*`, or files outside the standard package layout. Also: `TODO before merge`, `DO NOT MERGE`, debug `console.log` left in production paths.
+- **`committability`** — an *added* file (look for `+++ b/...` with no `--- a/...` counterpart in the diff) whose name, location, or content shape suggests it shouldn't be committed: hardcoded absolute paths (`/Users/...`, `/home/...`), filenames matching `scripts-*`, `bootstrap-*`, `tmp-*`, `*-local.*`, or files outside the standard package layout. Also: `TODO before merge`, `DO NOT MERGE`, debug `console.log` left in production paths. A separate cheap-tier sub-agent runs against added files; you only need to flag cases the sub-agent obviously missed.
+- **Anything the detectors couldn't see.** Scalability / consistency / deadcode detectors are TS-only and pattern-shaped — multi-language code, prose-vs-code mismatches outside structured doc claims (env vars / CLI shapes / file paths), and dynamic-dispatch reachability are still your domain. Anchor to a real line; don't fabricate.
+
+### Question citations are mechanically verified.
+
+When you cite a `file` and `lineStart`/`lineEnd` in a question, the surrounding code reads that file and confirms any quoted snippet you include actually appears there. Unverifiable citations are dropped silently before the comment is shown to the reviewer. **Don't fabricate snippet text — quote it verbatim from the file.** Citations on questions remain optional (asking is not claiming, so empty-source questions still work); but when you choose to cite, the cite must echo content.
 
 # Priority order (ADR-0012, extended by ADR-0020)
 

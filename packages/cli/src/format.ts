@@ -1,4 +1,4 @@
-import type { Category, CommentSet, ReviewInput, Tier } from "@warden/core";
+import type { Category, CommentSet, DegradedEntry, ReviewInput, Tier } from "@warden/core";
 import pc from "picocolors";
 
 const PRIORITY_ORDER: Category[] = [
@@ -45,8 +45,15 @@ export function formatCommentSet(
   }
 
   lines.push(pc.dim(`  duration: ${result.metadata.durationMs}ms`));
-  if (result.metadata.degradedWorkers.length > 0) {
-    lines.push(pc.yellow(`  degraded: ${result.metadata.degradedWorkers.join(", ")}`));
+  // ADR-0021 #7: default mode shows only `actionable`-kind entries (the user
+  // can fix these); `--verbose` (handled in CLI before constructing args)
+  // would surface warning + info. The CLI passes the full list; we filter
+  // here so JSON consumers see the unfiltered metadata.
+  const actionable = result.metadata.degradedWorkers.filter(
+    (e: DegradedEntry) => e.kind === "actionable",
+  );
+  if (actionable.length > 0) {
+    lines.push(pc.yellow(`  degraded: ${actionable.map((e) => e.message).join(", ")}`));
   }
 
   return lines.join("\n");

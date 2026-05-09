@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
+import type { DegradedEntry } from "../schema.js";
 import type { ToolFinding } from "./types.js";
 
 export interface TscRunResult {
   findings: ToolFinding[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise<TscRunResult> {
@@ -18,7 +19,7 @@ export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise
 
   const seen = new Set<string>();
   const findings: ToolFinding[] = [];
-  const degraded: string[] = [];
+  const degraded: DegradedEntry[] = [];
 
   for (const r of results) {
     if (r.degraded) degraded.push(r.degraded);
@@ -35,7 +36,7 @@ export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise
 
 interface OneResult {
   findings: ToolFinding[];
-  degraded?: string;
+  degraded?: DegradedEntry;
 }
 
 function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
@@ -58,7 +59,11 @@ function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
     child.on("error", () => {
       resolveP({
         findings: [],
-        degraded: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
+        degraded: {
+          kind: "warning",
+          topic: "tsc",
+          message: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
+        },
       });
     });
 

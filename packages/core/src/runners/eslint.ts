@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
+import type { DegradedEntry } from "../schema.js";
 import type { ToolFinding } from "./types.js";
 
 export interface EslintRunResult {
   findings: ToolFinding[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 const LINT_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -39,7 +40,10 @@ export async function runEslint(
     });
 
     child.on("error", () => {
-      resolveP({ findings: [], degraded: ["eslint: spawn failed"] });
+      resolveP({
+        findings: [],
+        degraded: [{ kind: "warning", topic: "eslint", message: "eslint: spawn failed" }],
+      });
     });
 
     child.on("close", (code) => {
@@ -48,9 +52,15 @@ export async function runEslint(
       // out, parsing is the source of truth. Otherwise non-zero exit means
       // the runner failed to execute (npx fetch error, missing binary, etc.).
       const sawJson = stdout.includes("[") && findings.length >= 0 && parsedOk(stdout);
-      const degraded =
+      const degraded: DegradedEntry[] =
         !sawJson && code !== 0
-          ? [`eslint: exit ${code ?? "?"} ${stderr.trim().slice(0, 200)}`]
+          ? [
+              {
+                kind: "warning",
+                topic: "eslint",
+                message: `eslint: exit ${code ?? "?"} ${stderr.trim().slice(0, 200)}`,
+              },
+            ]
           : [];
       resolveP({ findings, degraded });
     });

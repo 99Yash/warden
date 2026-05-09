@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Lockfile } from "../ecosystem/index.js";
+import type { DegradedEntry } from "../schema.js";
 
 export type AuditSeverity = "info" | "low" | "moderate" | "high" | "critical";
 
@@ -20,7 +21,7 @@ export interface AuditAdvisory {
 
 export interface AuditRunResult {
   advisories: AuditAdvisory[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 export async function runAudit(repoRoot: string, lockfile: Lockfile): Promise<AuditRunResult> {
@@ -28,7 +29,16 @@ export async function runAudit(repoRoot: string, lockfile: Lockfile): Promise<Au
     // yarn audit's JSON shape is line-delimited and differs from npm/pnpm; it's
     // not worth supporting in M3. When a real yarn project shows up, lift the
     // parser out separately.
-    return { advisories: [], degraded: ["audit: yarn lockfiles are not supported in v0"] };
+    return {
+      advisories: [],
+      degraded: [
+        {
+          kind: "info",
+          topic: "audit",
+          message: "audit: yarn lockfiles are not supported in v0",
+        },
+      ],
+    };
   }
 
   return new Promise((resolveP) => {
@@ -49,7 +59,12 @@ export async function runAudit(repoRoot: string, lockfile: Lockfile): Promise<Au
     });
 
     child.on("error", () => {
-      resolveP({ advisories: [], degraded: [`audit(${cmd}): spawn failed`] });
+      resolveP({
+        advisories: [],
+        degraded: [
+          { kind: "warning", topic: "audit", message: `audit(${cmd}): spawn failed` },
+        ],
+      });
     });
 
     child.on("close", (code) => {
@@ -60,7 +75,13 @@ export async function runAudit(repoRoot: string, lockfile: Lockfile): Promise<Au
         const tail = stderr.trim().slice(-200);
         return resolveP({
           advisories: [],
-          degraded: [`audit(${cmd}): exit ${code ?? "?"} — could not parse JSON${tail ? `: ${tail}` : ""}`],
+          degraded: [
+            {
+              kind: "warning",
+              topic: "audit",
+              message: `audit(${cmd}): exit ${code ?? "?"} — could not parse JSON${tail ? `: ${tail}` : ""}`,
+            },
+          ],
         });
       }
       resolveP({ advisories: parsed, degraded: [] });

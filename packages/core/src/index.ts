@@ -22,11 +22,20 @@ import {
 } from "./indexing/index.js";
 import { formatReview } from "./llm/index.js";
 import type { FormatterListener } from "./llm/index.js";
+import { runDeadcode } from "./runners/deadcode.js";
 import { runEslint } from "./runners/eslint.js";
 import { runJscpd } from "./runners/jscpd.js";
+import { runScalability } from "./runners/scalability.js";
 import { runTsc } from "./runners/tsc.js";
 import type { ToolFinding } from "./runners/types.js";
-import type { Category, Comment, CommentSet, RetrievedContext, Tier } from "./schema.js";
+import type {
+  Category,
+  Comment,
+  CommentSet,
+  DegradedEntry,
+  RetrievedContext,
+  Tier,
+} from "./schema.js";
 import { runVulnerabilityCheck } from "./vuln/index.js";
 
 export * from "./schema.js";
@@ -128,19 +137,34 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
       comments: [],
       metadata: {
         durationMs: Date.now() - startedAt,
-        degradedWorkers: ["ecosystem: no package.json at repoRoot — TS/JS only in v0"],
+        degradedWorkers: [
+          {
+            kind: "info",
+            topic: "ecosystem",
+            message: "ecosystem: no package.json at repoRoot — TS/JS only in v0",
+          },
+        ],
       },
     };
   }
 
   // ADR-0019 #12: ensure `.warden/` lives in `.gitignore` before any cache
   // write — first verb a user runs in a fresh repo gets the entry.
-  const gitignoreDegraded: string[] = [];
+  const gitignoreDegraded: DegradedEntry[] = [];
   try {
     const gitignore = await ensureGitignore(input.repoRoot);
-    if (gitignore.added) gitignoreDegraded.push("gitignore: added .warden/ entry");
+    if (gitignore.added)
+      gitignoreDegraded.push({
+        kind: "info",
+        topic: "gitignore",
+        message: "gitignore: added .warden/ entry",
+      });
   } catch (err) {
-    gitignoreDegraded.push(`gitignore: failed to ensure entry (${formatErr(err)})`);
+    gitignoreDegraded.push({
+      kind: "warning",
+      topic: "gitignore",
+      message: `gitignore: failed to ensure entry (${formatErr(err)})`,
+    });
   }
 
   const changed = input.diff ? parseUnifiedDiff(input.diff) : undefined;
@@ -164,7 +188,11 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
       });
     } catch (err) {
       bannerState = { kind: "no-banner" };
-      gitignoreDegraded.push(`banner: state lookup failed (${formatErr(err)})`);
+      gitignoreDegraded.push({
+        kind: "warning",
+        topic: "banner",
+        message: `banner: state lookup failed (${formatErr(err)})`,
+      });
     }
   }
 
@@ -203,9 +231,11 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         };
       }
     } catch (err) {
-      gitignoreDegraded.push(
-        `context: semantic signal disabled (${formatErr(err)}) — falling back to cheap signals`,
-      );
+      gitignoreDegraded.push({
+        kind: "warning",
+        topic: "context",
+        message: `context: semantic signal disabled (${formatErr(err)}) — falling back to cheap signals`,
+      });
     }
   }
 
@@ -225,31 +255,79 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
 
   const emptySelectorResult: SelectorOutput = { candidates: [], degraded: [] };
 
-  const [tscResult, eslintResult, vulnResult, selectorResult] = await Promise.all([
-    runTsc(input.repoRoot, ecosystem.tsconfigPaths),
-    ecosystem.hasEslint && changedPaths && changedPaths.length > 0
-      ? runEslint(input.repoRoot, changedPaths)
-      : Promise.resolve({ findings: [], degraded: [] as string[] }),
-    ecosystem.lockfile
-      ? runVulnerabilityCheck(input.repoRoot, ecosystem.lockfile)
-      : Promise.resolve({
-          comments: [] as Comment[],
-          degraded: ["audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan"],
-        }),
-    selector
-      ? selector
-          .select({
-            repoRoot: input.repoRoot,
-            changed: changed ?? [],
-            ecosystem,
-            diff: input.diff,
-          })
-          .catch((err: unknown) => ({
-            candidates: [],
-            degraded: [`context: selector failed (${formatErr(err)})`],
-          }) satisfies SelectorOutput)
-      : Promise.resolve(emptySelectorResult),
-  ]);
+  const [
+    tscResult,
+    eslintResult,
+    vulnResult,
+    selectorResult,
+    scalabilityResult,
+    deadcodeResult,
+  ] = await Promise.all([
+      runTsc(input.repoRoot, ecosystem.tsconfigPaths),
+      ecosystem.hasEslint && changedPaths && changedPaths.length > 0
+        ? runEslint(input.repoRoot, changedPaths)
+        : Promise.resolve({ findings: [], degraded: [] as DegradedEntry[] }),
+      ecosystem.lockfile
+        ? runVulnerabilityCheck(input.repoRoot, ecosystem.lockfile)
+        : Promise.resolve({
+            comments: [] as Comment[],
+            degraded: [
+              {
+                kind: "info",
+                topic: "audit",
+                message:
+                  "audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan",
+              },
+            ] as DegradedEntry[],
+          }),
+      selector
+        ? selector
+            .select({
+              repoRoot: input.repoRoot,
+              changed: changed ?? [],
+              ecosystem,
+              diff: input.diff,
+            })
+            .catch((err: unknown) => ({
+              candidates: [],
+              degraded: [
+                {
+                  kind: "warning",
+                  topic: "context",
+                  message: `context: selector failed (${formatErr(err)})`,
+                },
+              ],
+            }) satisfies SelectorOutput)
+        : Promise.resolve(emptySelectorResult),
+      // ADR-0021 #1: scalability detector — direct findings from AST patterns
+      // touching diff-added lines. Skipped when there's nothing to inspect.
+      changed && changed.length > 0
+        ? runScalability({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
+            findings: [] as ToolFinding[],
+            degraded: [
+              {
+                kind: "warning",
+                topic: "scalability",
+                message: `scalability: detector failed (${formatErr(err)})`,
+              },
+            ] as DegradedEntry[],
+          }))
+        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
+      // ADR-0021 #1: deadcode detector — diff-touched exported fns + 1-hop
+      // reverse `import_graph` for caller arity inspection.
+      changed && changed.length > 0
+        ? runDeadcode({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
+            findings: [] as ToolFinding[],
+            degraded: [
+              {
+                kind: "warning",
+                topic: "deadcode",
+                message: `deadcode: detector failed (${formatErr(err)})`,
+              },
+            ] as DegradedEntry[],
+          }))
+        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
+    ]);
 
   // jscpd runs sequentially after the selector — it consumes the candidate
   // path set per ADR-0018. Skipped when there's nothing scoped to look at.
@@ -262,21 +340,35 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
           scopedForJscpd,
           new Set(changedPaths ?? []),
         )
-      : { findings: [] as ToolFinding[], degraded: [] as string[] };
+      : { findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] };
 
   const allFindings = [
     ...tscResult.findings,
     ...eslintResult.findings,
     ...jscpdResult.findings,
+    ...scalabilityResult.findings,
+    ...deadcodeResult.findings,
   ];
   // Tool findings are file/line-anchored, so they get diff-scoped. Vulnerability
   // findings live in package.json and surface across the whole tree — a CVE in
   // an existing dep is still a CVE even if this PR didn't touch the lockfile.
+  // (Scalability findings are already diff-scoped by the detector itself, but
+  // re-scoping is idempotent.)
   const scoped = changed ? scopeToDiff(allFindings, changed) : allFindings;
   const toolComments = scoped.map(toComment);
-  const vulnComments = vulnResult.comments;
+  // ADR-0021 #8: when the diff doesn't touch a manifest / lockfile, collapse
+  // npm-audit findings into a single summary comment. The full per-advisory
+  // list is still surfaced in `--verbose` mode and whenever the user is
+  // actually editing dependency wiring (manifest-touched). Verifier discipline
+  // (OSV citation, ADR-0008) is unchanged — this only changes aggregation.
+  const manifestTouched = (changedPaths ?? []).some(isManifestPath);
+  const verboseMode = input.config.verbose === true;
+  const vulnComments =
+    manifestTouched || verboseMode
+      ? vulnResult.comments
+      : collapseVulnComments(vulnResult.comments);
 
-  const degraded = [
+  const degraded: DegradedEntry[] = [
     ...gitignoreDegraded,
     ...bannerStateToDegraded(bannerState),
     ...tscResult.degraded,
@@ -284,6 +376,8 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     ...vulnResult.degraded,
     ...jscpdResult.degraded,
     ...selectorResult.degraded,
+    ...scalabilityResult.degraded,
+    ...deadcodeResult.degraded,
   ];
 
   // Mode branch per ADR-0011 + grilling Q12-D: `check` is deterministic-only;
@@ -303,7 +397,11 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         // Mirrors the selector's own `.catch()` — prompt-assembly failures
         // (e.g. a candidate file disappearing between selection and read)
         // shouldn't abort the LLM pass; degrade to diff-only context.
-        degraded.push(`context: prompt-assembly failed (${formatErr(err)})`);
+        degraded.push({
+          kind: "warning",
+          topic: "context",
+          message: `context: prompt-assembly failed (${formatErr(err)})`,
+        });
       }
     }
     const formatted = await formatReview({
@@ -405,6 +503,17 @@ function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } {
   if (f.source === "jscpd") {
     return { tier: 3, category: "dedup" };
   }
+  // ADR-0021 #1: M7 detector outputs. Each maps to its named category at
+  // tier 2 — assertions with grounded citations from AST evidence.
+  if (f.source === "scalability") {
+    return { tier: 2, category: "scalability" };
+  }
+  if (f.source === "deadcode") {
+    return { tier: 2, category: "deadcode" };
+  }
+  if (f.source === "consistency") {
+    return { tier: 2, category: "consistency" };
+  }
   return f.severity === "error"
     ? { tier: 2, category: "style" }
     : { tier: 3, category: "style" };
@@ -419,6 +528,44 @@ function uniqStrings(items: string[]): string[] {
     out.push(item);
   }
   return out;
+}
+
+const MANIFEST_BASENAMES: ReadonlySet<string> = new Set([
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+]);
+
+function isManifestPath(path: string): boolean {
+  const segments = path.split("/");
+  const base = segments[segments.length - 1];
+  return base !== undefined && MANIFEST_BASENAMES.has(base);
+}
+
+/**
+ * Collapse per-advisory vuln comments to a single summary line per ADR-0021
+ * #8. `package.json:1` is the canonical anchor — every per-advisory comment
+ * already pinned there. Returns `[]` when the input is empty.
+ */
+function collapseVulnComments(comments: Comment[]): Comment[] {
+  if (comments.length === 0) return [];
+  const total = comments.length;
+  const file = comments[0]?.file ?? "package.json";
+  const summary: Comment = {
+    id: stableCommentId(`vuln-summary:${file}:${total}`),
+    file,
+    lineStart: 1,
+    lineEnd: 1,
+    tier: 3,
+    category: "vulnerability",
+    kind: "assertion",
+    claim: `Repo has ${total} known ${total === 1 ? "vulnerability" : "vulnerabilities"}; none introduced by this diff.`,
+    explanation: `Run \`pnpm audit\` (or your package manager's equivalent) for per-advisory detail. Re-run with --verbose to surface them inline.`,
+    sources: [],
+    confidence: 1,
+  };
+  return [summary];
 }
 
 function formatErr(err: unknown): string {

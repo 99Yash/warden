@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
+import type { DegradedEntry } from "../schema.js";
 import type { ToolFinding } from "./types.js";
 
 // jscpd's `dist/index.mjs` uses ESM-style named imports from the `colors/safe`
@@ -36,7 +37,7 @@ interface JscpdClone {
 
 export interface JscpdRunResult {
   findings: ToolFinding[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 export async function runJscpd(
@@ -56,7 +57,9 @@ export async function runJscpd(
   } catch (err) {
     return {
       findings: [],
-      degraded: [`jscpd: load failed (${formatError(err)})`],
+      degraded: [
+        { kind: "warning", topic: "jscpd", message: `jscpd: load failed (${formatError(err)})` },
+      ],
     };
   }
 
@@ -73,7 +76,13 @@ export async function runJscpd(
   } catch (err) {
     return {
       findings: [],
-      degraded: [`jscpd: detector failed (${formatError(err)})`],
+      degraded: [
+        {
+          kind: "warning",
+          topic: "jscpd",
+          message: `jscpd: detector failed (${formatError(err)})`,
+        },
+      ],
     };
   }
 

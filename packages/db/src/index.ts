@@ -5,6 +5,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCachePath } from "./path.js";
 
+// `import.meta.url`-relative resolution finds migrations in the workspace
+// (`packages/db/src/migrations/`) and in published builds
+// (`packages/db/dist/migrations/` — see tsdown.config.ts copy entry).
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "migrations");
 
 let _sqlite: Database.Database | undefined;
@@ -14,7 +17,8 @@ let _db: ReturnType<typeof drizzle> | undefined;
  * Returns the singleton Drizzle handle backed by `.warden/cache.sqlite`.
  * Creates the file (and the `.warden/` directory) on first use, then
  * applies any pending migrations so the very first call from any package
- * sees a fully-initialized schema.
+ * sees a fully-initialized schema. A schema newer than the bundled migrations
+ * (cache survived a warden downgrade) hard-fails with a clear remediation.
  */
 export function db() {
   if (!_db) {
@@ -22,7 +26,14 @@ export function db() {
     _sqlite.pragma("journal_mode = WAL");
     _sqlite.pragma("foreign_keys = ON");
     _db = drizzle(_sqlite);
-    migrate(_db, { migrationsFolder: MIGRATIONS_DIR });
+    try {
+      migrate(_db, { migrationsFolder: MIGRATIONS_DIR });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Cache schema migration failed (${message}). If the cache is newer than this warden version, upgrade warden or delete \`.warden/cache.sqlite\` to recreate.`,
+      );
+    }
   }
   return _db;
 }

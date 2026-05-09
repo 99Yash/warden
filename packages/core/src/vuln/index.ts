@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { stableCommentId } from "../comment-id.js";
 import type { Lockfile } from "../ecosystem/index.js";
 import { runAudit, type AuditAdvisory, type AuditSeverity } from "../runners/audit.js";
-import type { Comment, Source, Tier } from "../schema.js";
+import type { Comment, DegradedEntry, Source, Tier } from "../schema.js";
 import { verifyOsv, type VerifiedAdvisory } from "../verify/osv.js";
 
 export interface VulnerabilityResult {
   comments: Comment[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 /**
@@ -53,11 +53,13 @@ export async function runVulnerabilityCheck(
     toComment(advisory, verified, pkgLines),
   );
 
-  const degraded = [...audit.degraded];
+  const degraded: DegradedEntry[] = [...audit.degraded];
   if (droppedUnverified > 0) {
-    degraded.push(
-      `osv: dropped ${droppedUnverified} unverified ${droppedUnverified === 1 ? "advisory" : "advisories"} (citation discipline)`,
-    );
+    degraded.push({
+      kind: "info",
+      topic: "osv",
+      message: `osv: dropped ${droppedUnverified} unverified ${droppedUnverified === 1 ? "advisory" : "advisories"} (citation discipline)`,
+    });
   }
 
   return { comments, degraded };
