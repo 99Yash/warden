@@ -22,7 +22,8 @@ let _db: ReturnType<typeof drizzle> | undefined;
  */
 export function db() {
   if (!_db) {
-    _sqlite = new Database(resolveCachePath());
+    const cachePath = resolveCachePath();
+    _sqlite = new Database(cachePath);
     _sqlite.pragma("journal_mode = WAL");
     _sqlite.pragma("foreign_keys = ON");
     _db = drizzle(_sqlite);
@@ -31,7 +32,7 @@ export function db() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `Cache schema migration failed (${message}). If the cache is newer than this warden version, upgrade warden or delete \`.warden/cache.sqlite\` to recreate.`,
+        `Cache schema migration failed (${message}). If the cache is newer than this warden version, upgrade warden or delete \`${cachePath}\` to recreate.`,
       );
     }
   }

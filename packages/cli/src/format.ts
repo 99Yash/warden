@@ -19,6 +19,7 @@ const PRIORITY_ORDER: Category[] = [
 export function formatCommentSet(
   result: CommentSet,
   mode: ReviewInput["config"]["mode"],
+  verbose = false,
 ): string {
   const lines: string[] = [];
 
@@ -46,14 +47,14 @@ export function formatCommentSet(
 
   lines.push(pc.dim(`  duration: ${result.metadata.durationMs}ms`));
   // ADR-0021 #7: default mode shows only `actionable`-kind entries (the user
-  // can fix these); `--verbose` (handled in CLI before constructing args)
-  // would surface warning + info. The CLI passes the full list; we filter
-  // here so JSON consumers see the unfiltered metadata.
-  const actionable = result.metadata.degradedWorkers.filter(
-    (e: DegradedEntry) => e.kind === "actionable",
-  );
-  if (actionable.length > 0) {
-    lines.push(pc.yellow(`  degraded: ${actionable.map((e) => e.message).join(", ")}`));
+  // can fix these); `--verbose` surfaces warning + info as well. Filtering
+  // happens here, not at the core boundary, so JSON consumers always see the
+  // unfiltered metadata.
+  const visible = verbose
+    ? result.metadata.degradedWorkers
+    : result.metadata.degradedWorkers.filter((e: DegradedEntry) => e.kind === "actionable");
+  if (visible.length > 0) {
+    lines.push(pc.yellow(`  degraded: ${visible.map((e) => e.message).join(", ")}`));
   }
 
   return lines.join("\n");

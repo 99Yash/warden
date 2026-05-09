@@ -352,8 +352,6 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   // Tool findings are file/line-anchored, so they get diff-scoped. Vulnerability
   // findings live in package.json and surface across the whole tree — a CVE in
   // an existing dep is still a CVE even if this PR didn't touch the lockfile.
-  // (Scalability findings are already diff-scoped by the detector itself, but
-  // re-scoping is idempotent.)
   const scoped = changed ? scopeToDiff(allFindings, changed) : allFindings;
   const toolComments = scoped.map(toComment);
   // ADR-0021 #8: when the diff doesn't touch a manifest / lockfile, collapse
@@ -466,7 +464,16 @@ function scopeToDiff(findings: ToolFinding[], changed: ChangedFile[]): ToolFindi
   return findings.filter((f) => {
     const lines = byPath.get(f.file);
     if (!lines) return false;
-    return lines.has(f.line);
+    // Range-overlap, not point-match: detectors like scalability/deadcode
+    // anchor `line` to a construct's start (function signature, first
+    // statement) and only fire when an added line is somewhere inside
+    // `[line, endLine]`. A point-match here would drop those findings when
+    // the diff touched a middle/late line of the construct.
+    const end = f.endLine ?? f.line;
+    for (let l = f.line; l <= end; l++) {
+      if (lines.has(l)) return true;
+    }
+    return false;
   });
 }
 
@@ -562,7 +569,18 @@ function collapseVulnComments(comments: Comment[]): Comment[] {
     kind: "assertion",
     claim: `Repo has ${total} known ${total === 1 ? "vulnerability" : "vulnerabilities"}; none introduced by this diff.`,
     explanation: `Run \`pnpm audit\` (or your package manager's equivalent) for per-advisory detail. Re-run with --verbose to surface them inline.`,
-    sources: [],
+    // The summary is a real claim ("repo has N vulns") and must carry a
+    // citation per ADR-0008 — the per-advisory OSV records collapse into a
+    // single audit-tool source so auditors can trace the count back to its
+    // generator.
+    sources: [
+      {
+        type: "tool",
+        id: "audit",
+        title: "npm audit",
+        retrievedAt: new Date().toISOString(),
+      },
+    ],
     confidence: 1,
   };
   return [summary];

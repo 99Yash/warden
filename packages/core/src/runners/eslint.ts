@@ -51,7 +51,7 @@ export async function runEslint(
       // ESLint exits 0 (clean), 1 (findings), 2 (fatal). If we got valid JSON
       // out, parsing is the source of truth. Otherwise non-zero exit means
       // the runner failed to execute (npx fetch error, missing binary, etc.).
-      const sawJson = stdout.includes("[") && findings.length >= 0 && parsedOk(stdout);
+      const sawJson = stdout.includes("[") && parsedOk(stdout);
       const degraded: DegradedEntry[] =
         !sawJson && code !== 0
           ? [
