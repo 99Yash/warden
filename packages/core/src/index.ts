@@ -11,7 +11,7 @@ import {
   type ContextSelector,
   type SelectorOutput,
 } from "./context/index.js";
-import { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
+import { parseUnifiedDiff } from "./diff/index.js";
 import { detectEcosystem, type Lockfile } from "./ecosystem/index.js";
 import { ensureGitignore } from "./init/ensure-gitignore.js";
 import { walkRepo } from "./init/walk.js";
@@ -20,12 +20,20 @@ import {
   SqliteEmbeddingStore,
   readLockedModel,
 } from "./indexing/index.js";
-import { formatReview } from "./llm/index.js";
 import type { FormatterListener } from "./llm/index.js";
+import {
+  Scratchpad,
+  deterministicSynthesize,
+  dispatch,
+  synthesize,
+  type Runner,
+  type RunnerInput,
+} from "./orchestration/index.js";
+import { committabilityRunner } from "./runners/committability.js";
 import { runDeadcode } from "./runners/deadcode.js";
 import { runEslint } from "./runners/eslint.js";
 import { runJscpd } from "./runners/jscpd.js";
-import { runScalability } from "./runners/scalability.js";
+import { scalabilityRunner } from "./runners/scalability.js";
 import { runTsc } from "./runners/tsc.js";
 import type { ToolFinding } from "./runners/types.js";
 import type {
@@ -34,7 +42,6 @@ import type {
   CommentSet,
   DegradedEntry,
   RetrievedContext,
-  Tier,
 } from "./schema.js";
 import { runVulnerabilityCheck } from "./vuln/index.js";
 
@@ -65,6 +72,18 @@ export {
   type BannerState,
   type SoftNotice,
 } from "./banner/index.js";
+export {
+  Scratchpad,
+  deterministicSynthesize,
+  dispatch,
+  synthesize,
+  type DeterministicSynthesizeInput,
+  type Runner,
+  type RunnerInput,
+  type RunnerOutput,
+  type SynthesizeInput,
+  type SynthesizeOutput,
+} from "./orchestration/index.js";
 export { ensureGitignore } from "./init/ensure-gitignore.js";
 export {
   estimateInit,
@@ -255,12 +274,19 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
 
   const emptySelectorResult: SelectorOutput = { candidates: [], degraded: [] };
 
+  // M8 (ADR-0023): scratchpad is the single sink for runner outputs. Inline
+  // runners (TSC, ESLint, jscpd, deadcode) record into it directly; the two
+  // contract-migrated runners (committability, scalability) flow through
+  // dispatch(). Vuln stays inline outside the scratchpad — its already-mapped
+  // `Comment[]` shape doesn't fit `RunnerOutput.findings: ToolFinding[]`
+  // cleanly; M9+ may revisit when the noise filter touches that surface.
+  const scratchpad = new Scratchpad();
+
   const [
     tscResult,
     eslintResult,
     vulnResult,
     selectorResult,
-    scalabilityResult,
     deadcodeResult,
   ] = await Promise.all([
       runTsc(input.repoRoot, ecosystem.tsconfigPaths),
@@ -299,22 +325,9 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
               ],
             }) satisfies SelectorOutput)
         : Promise.resolve(emptySelectorResult),
-      // ADR-0021 #1: scalability detector — direct findings from AST patterns
-      // touching diff-added lines. Skipped when there's nothing to inspect.
-      changed && changed.length > 0
-        ? runScalability({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
-            findings: [] as ToolFinding[],
-            degraded: [
-              {
-                kind: "warning",
-                topic: "scalability",
-                message: `scalability: detector failed (${formatErr(err)})`,
-              },
-            ] as DegradedEntry[],
-          }))
-        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
       // ADR-0021 #1: deadcode detector — diff-touched exported fns + 1-hop
-      // reverse `import_graph` for caller arity inspection.
+      // reverse `import_graph` for caller arity inspection. Stays inline in
+      // M8; M9 likely migrates it through the contract.
       changed && changed.length > 0
         ? runDeadcode({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
             findings: [] as ToolFinding[],
@@ -342,18 +355,55 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         )
       : { findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] };
 
-  const allFindings = [
-    ...tscResult.findings,
-    ...eslintResult.findings,
-    ...jscpdResult.findings,
-    ...scalabilityResult.findings,
-    ...deadcodeResult.findings,
-  ];
-  // Tool findings are file/line-anchored, so they get diff-scoped. Vulnerability
-  // findings live in package.json and surface across the whole tree — a CVE in
-  // an existing dep is still a CVE even if this PR didn't touch the lockfile.
-  const scoped = changed ? scopeToDiff(allFindings, changed) : allFindings;
-  const toolComments = scoped.map(toComment);
+  // Record inline-runner outputs into the scratchpad. Findings stay raw here;
+  // synthesis applies `scopeToDiff` uniformly across the whole scratchpad,
+  // which is a no-op on detectors that already filter against `addedLines`.
+  scratchpad.record({
+    name: "tsc",
+    findings: tscResult.findings,
+    degraded: tscResult.degraded,
+    durationMs: 0,
+  });
+  scratchpad.record({
+    name: "eslint",
+    findings: eslintResult.findings,
+    degraded: eslintResult.degraded,
+    durationMs: 0,
+  });
+  scratchpad.record({
+    name: "jscpd",
+    findings: jscpdResult.findings,
+    degraded: jscpdResult.degraded,
+    durationMs: 0,
+  });
+  scratchpad.record({
+    name: "deadcode",
+    findings: deadcodeResult.findings,
+    degraded: deadcodeResult.degraded,
+    durationMs: 0,
+  });
+
+  // Orchestration-tier runners through dispatch(). Skipped when there's no
+  // diff to inspect — the contract still requires non-empty input semantics
+  // for the migrated runners (both consume `changed` directly).
+  const orchestrationRunners: Runner[] = [];
+  if (changed && changed.length > 0) {
+    orchestrationRunners.push(scalabilityRunner);
+    // Committability fires only in `review` mode. `check` is deterministic-only
+    // per ADR-0011 — no LLM calls — and the sub-agent is a cheap-tier LLM.
+    if (input.config.mode === "review") {
+      orchestrationRunners.push(committabilityRunner);
+    }
+  }
+  if (orchestrationRunners.length > 0) {
+    const runnerInput: RunnerInput = {
+      repoRoot: input.repoRoot,
+      changed: changed ?? [],
+      changedPaths: changedPaths ?? [],
+    };
+    await dispatch(orchestrationRunners, runnerInput, scratchpad);
+  }
+
   // ADR-0021 #8: when the diff doesn't touch a manifest / lockfile, collapse
   // npm-audit findings into a single summary comment. The full per-advisory
   // list is still surfaced in `--verbose` mode and whenever the user is
@@ -366,22 +416,26 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
       ? vulnResult.comments
       : collapseVulnComments(vulnResult.comments, ecosystem.lockfile);
 
-  const degraded: DegradedEntry[] = [
+  // Aggregate environmental degraded entries (those not produced by runners
+  // recorded in the scratchpad). Runner-produced degraded entries flow
+  // through `scratchpad.flattenDegraded()`.
+  const environmentalDegraded: DegradedEntry[] = [
     ...gitignoreDegraded,
     ...bannerStateToDegraded(bannerState),
-    ...tscResult.degraded,
-    ...eslintResult.degraded,
     ...vulnResult.degraded,
-    ...jscpdResult.degraded,
     ...selectorResult.degraded,
-    ...scalabilityResult.degraded,
-    ...deadcodeResult.degraded,
   ];
 
-  // Mode branch per ADR-0011 + grilling Q12-D: `check` is deterministic-only;
-  // `review` adds the LLM triage + clarification-question pass per Q1 (A+C).
-  let comments: Comment[] = [...toolComments, ...vulnComments];
-  if (input.config.mode === "review" && comments.length > 0) {
+  // Synthesis ending diverges per ADR-0023 #7. `check` is deterministic-only;
+  // `review` runs the M4 formatter cascade through the synthesizer.
+  let synthOutput: { comments: Comment[]; degraded: DegradedEntry[] };
+  if (input.config.mode === "check") {
+    synthOutput = deterministicSynthesize({
+      scratchpad,
+      vulnComments,
+      changed,
+    });
+  } else {
     let ctxFromSelector: RetrievedContext = { chunks: [], sameFolderPaths: [] };
     if (input.retrievedContext) {
       ctxFromSelector = input.retrievedContext;
@@ -395,34 +449,37 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         // Mirrors the selector's own `.catch()` — prompt-assembly failures
         // (e.g. a candidate file disappearing between selection and read)
         // shouldn't abort the LLM pass; degrade to diff-only context.
-        degraded.push({
+        environmentalDegraded.push({
           kind: "warning",
           topic: "context",
           message: `context: prompt-assembly failed (${formatErr(err)})`,
         });
       }
     }
-    const formatted = await formatReview({
-      diff: input.diff,
-      toolComments,
+    synthOutput = await synthesize({
+      scratchpad,
       vulnComments,
+      diff: input.diff,
       retrievedContext: ctxFromSelector,
+      changed,
       emit: input.emit,
     });
-    comments = formatted.comments;
-    degraded.push(...formatted.degraded);
   }
 
   // Hard rules in code per grilling Q11 (P3): final priority sort + tier-3
   // verbose-gate. Soft rules (judgment-driven suppression) live in the LLM
   // prompt and have already been applied above.
-  const finalComments = applyHardRules(comments, input.config);
+  const finalComments = applyHardRules(synthOutput.comments, input.config);
 
   return {
     comments: finalComments,
     metadata: {
       durationMs: Date.now() - startedAt,
-      degradedWorkers: degraded,
+      degradedWorkers: [
+        ...environmentalDegraded,
+        ...scratchpad.flattenDegraded(),
+        ...synthOutput.degraded,
+      ],
     },
   };
 }
@@ -456,74 +513,6 @@ function applyHardRules(comments: Comment[], config: ReviewConfig): Comment[] {
     if (a.tier !== b.tier) return a.tier - b.tier;
     return b.confidence - a.confidence;
   });
-}
-
-function scopeToDiff(findings: ToolFinding[], changed: ChangedFile[]): ToolFinding[] {
-  const byPath = new Map<string, Set<number>>();
-  for (const f of changed) byPath.set(f.path, new Set(f.addedLines));
-  return findings.filter((f) => {
-    const lines = byPath.get(f.file);
-    if (!lines) return false;
-    // Range-overlap, not point-match: detectors like scalability/deadcode
-    // anchor `line` to a construct's start (function signature, first
-    // statement) and only fire when an added line is somewhere inside
-    // `[line, endLine]`. A point-match here would drop those findings when
-    // the diff touched a middle/late line of the construct.
-    const end = f.endLine ?? f.line;
-    for (let l = f.line; l <= end; l++) {
-      if (lines.has(l)) return true;
-    }
-    return false;
-  });
-}
-
-function toComment(f: ToolFinding): Comment {
-  const { tier, category } = mapSeverity(f);
-  return {
-    id: stableCommentId(`tool:${f.source}:${f.file}:${f.line}:${f.ruleId ?? ""}:${f.message}`),
-    file: f.file,
-    lineStart: f.line,
-    lineEnd: f.endLine ?? f.line,
-    tier,
-    category,
-    kind: "assertion",
-    claim: f.ruleId ? `${f.source} ${f.ruleId}: ${f.message}` : `${f.source}: ${f.message}`,
-    explanation: f.message,
-    sources: [
-      {
-        type: "tool",
-        id: f.ruleId ?? f.source,
-        title: f.source,
-        retrievedAt: new Date().toISOString(),
-      },
-    ],
-    confidence: 1,
-  };
-}
-
-function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } {
-  if (f.source === "tsc") {
-    return f.severity === "error"
-      ? { tier: 1, category: "correctness" }
-      : { tier: 2, category: "correctness" };
-  }
-  if (f.source === "jscpd") {
-    return { tier: 3, category: "dedup" };
-  }
-  // ADR-0021 #1: M7 detector outputs. Each maps to its named category at
-  // tier 2 — assertions with grounded citations from AST evidence.
-  if (f.source === "scalability") {
-    return { tier: 2, category: "scalability" };
-  }
-  if (f.source === "deadcode") {
-    return { tier: 2, category: "deadcode" };
-  }
-  if (f.source === "consistency") {
-    return { tier: 2, category: "consistency" };
-  }
-  return f.severity === "error"
-    ? { tier: 2, category: "style" }
-    : { tier: 3, category: "style" };
 }
 
 function uniqStrings(items: string[]): string[] {

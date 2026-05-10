@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
+import type { Runner, RunnerInput, RunnerOutput } from "../orchestration/runner.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, parseChangedSourceFile } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
@@ -75,6 +76,28 @@ export async function runScalability(
 
   return { findings, degraded };
 }
+
+/**
+ * `Runner`-contract wrapper (ADR-0023 #3). Internal AST-traversal logic is
+ * unchanged — the wrapper just adapts I/O shapes. `RunnerOutput.findings` is
+ * the AST-pattern findings; `questions` is undefined (scalability is a
+ * deterministic detector, not a sub-agent).
+ */
+export const scalabilityRunner: Runner = {
+  name: "scalability",
+  async run(input: RunnerInput): Promise<RunnerOutput> {
+    const result = await runScalability({
+      repoRoot: input.repoRoot,
+      changed: input.changed,
+    });
+    return {
+      name: "scalability",
+      findings: result.findings,
+      degraded: result.degraded,
+      durationMs: 0, // dispatcher overrides
+    };
+  },
+};
 
 function findLoadThenNarrow(
   sf: ts.SourceFile,
