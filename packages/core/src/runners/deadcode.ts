@@ -54,6 +54,12 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
   const findings: ToolFinding[] = [];
   const degraded: DegradedEntry[] = [];
 
+  // Build the reverse import-graph index once on first need. Repeating
+  // `import_graph.all()` per changed file blows up with cache size; one pass
+  // + an in-memory Map<targetAbs, callers[]> keeps deadcode O(rows + changed).
+  let reverseIndex: Map<string, CallerEntry[]> | undefined;
+  let indexFailed = false;
+
   for (const cf of input.changed) {
     const parseResult = await parseChangedSourceFile(input.repoRoot, cf, "deadcode");
     if (parseResult.kind === "skip") continue;
@@ -65,17 +71,21 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
     const candidates = collectOptionalParamCandidates(sf, addedLines);
     if (candidates.length === 0) continue;
 
-    let callers: { path: string; abs: string }[];
-    try {
-      callers = await findCallers(input.repoRoot, abs);
-    } catch (err) {
-      degraded.push({
-        kind: "info",
-        topic: "deadcode",
-        message: `deadcode: caller lookup failed for ${cf.path} (${formatErr(err)})`,
-      });
-      continue;
+    if (!reverseIndex && !indexFailed) {
+      try {
+        reverseIndex = buildReverseImportIndex(input.repoRoot);
+      } catch (err) {
+        indexFailed = true;
+        degraded.push({
+          kind: "info",
+          topic: "deadcode",
+          message: `deadcode: import-graph lookup failed (${formatErr(err)})`,
+        });
+      }
     }
+    if (!reverseIndex) continue;
+    const callers = reverseIndex.get(abs) ?? [];
+    if (callers.length === 0) continue;
 
     for (const cand of candidates) {
       const callsites = await collectCallsites(callers, cand.fnName, cand.paramIndex);
@@ -227,7 +237,12 @@ interface CallerEntry {
   abs: string;
 }
 
-async function findCallers(repoRoot: string, targetAbs: string): Promise<CallerEntry[]> {
+/**
+ * One-pass scan of `import_graph` keyed by resolved import target. Caller
+ * lookup per changed file collapses to a single Map.get() instead of
+ * re-scanning the table.
+ */
+function buildReverseImportIndex(repoRoot: string): Map<string, CallerEntry[]> {
   const rows = db()
     .select({
       filePath: importGraph.filePath,
@@ -235,19 +250,31 @@ async function findCallers(repoRoot: string, targetAbs: string): Promise<CallerE
     })
     .from(importGraph)
     .all();
-  const out: CallerEntry[] = [];
-  const seen = new Set<string>();
+  const out = new Map<string, CallerEntry[]>();
+  const seenPerTarget = new Map<string, Set<string>>();
   for (const row of rows) {
-    if (seen.has(row.filePath)) continue;
     let imports: { resolved?: string }[];
     try {
       imports = JSON.parse(row.importsJson) as { resolved?: string }[];
     } catch {
       continue;
     }
-    if (imports.some((i) => i.resolved && resolvePath(i.resolved) === targetAbs)) {
+    for (const imp of imports) {
+      if (!imp.resolved) continue;
+      const targetAbs = resolvePath(imp.resolved);
+      let seen = seenPerTarget.get(targetAbs);
+      if (!seen) {
+        seen = new Set();
+        seenPerTarget.set(targetAbs, seen);
+      }
+      if (seen.has(row.filePath)) continue;
       seen.add(row.filePath);
-      out.push({ path: row.filePath, abs: resolvePath(repoRoot, row.filePath) });
+      let entries = out.get(targetAbs);
+      if (!entries) {
+        entries = [];
+        out.set(targetAbs, entries);
+      }
+      entries.push({ path: row.filePath, abs: resolvePath(repoRoot, row.filePath) });
     }
   }
   return out;

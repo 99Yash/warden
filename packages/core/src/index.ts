@@ -12,7 +12,7 @@ import {
   type SelectorOutput,
 } from "./context/index.js";
 import { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
-import { detectEcosystem } from "./ecosystem/index.js";
+import { detectEcosystem, type Lockfile } from "./ecosystem/index.js";
 import { ensureGitignore } from "./init/ensure-gitignore.js";
 import { walkRepo } from "./init/walk.js";
 import {
@@ -364,7 +364,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   const vulnComments =
     manifestTouched || verboseMode
       ? vulnResult.comments
-      : collapseVulnComments(vulnResult.comments);
+      : collapseVulnComments(vulnResult.comments, ecosystem.lockfile);
 
   const degraded: DegradedEntry[] = [
     ...gitignoreDegraded,
@@ -555,10 +555,15 @@ function isManifestPath(path: string): boolean {
  * #8. `package.json:1` is the canonical anchor — every per-advisory comment
  * already pinned there. Returns `[]` when the input is empty.
  */
-function collapseVulnComments(comments: Comment[]): Comment[] {
+function collapseVulnComments(comments: Comment[], lockfile: Lockfile | undefined): Comment[] {
   if (comments.length === 0) return [];
   const total = comments.length;
   const file = comments[0]?.file ?? "package.json";
+  // Cite the actual auditor that ran. The audit runner only emits advisories
+  // for npm/pnpm lockfiles, so `yarn`/`undefined` shouldn't reach here in
+  // practice — keep the neutral fallback for type safety anyway.
+  const auditorTitle =
+    lockfile === "pnpm" ? "pnpm audit" : lockfile === "npm" ? "npm audit" : "npm/pnpm audit";
   const summary: Comment = {
     id: stableCommentId(`vuln-summary:${file}:${total}`),
     file,
@@ -568,7 +573,7 @@ function collapseVulnComments(comments: Comment[]): Comment[] {
     category: "vulnerability",
     kind: "assertion",
     claim: `Repo has ${total} known ${total === 1 ? "vulnerability" : "vulnerabilities"}; none introduced by this diff.`,
-    explanation: `Run \`pnpm audit\` (or your package manager's equivalent) for per-advisory detail. Re-run with --verbose to surface them inline.`,
+    explanation: `Run \`${auditorTitle}\` for per-advisory detail. Re-run with --verbose to surface them inline.`,
     // The summary is a real claim ("repo has N vulns") and must carry a
     // citation per ADR-0008 — the per-advisory OSV records collapse into a
     // single audit-tool source so auditors can trace the count back to its
@@ -577,7 +582,7 @@ function collapseVulnComments(comments: Comment[]): Comment[] {
       {
         type: "tool",
         id: "audit",
-        title: "npm audit",
+        title: auditorTitle,
         retrievedAt: new Date().toISOString(),
       },
     ],
