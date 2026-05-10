@@ -1,10 +1,11 @@
-import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
+import type { DegradedEntry } from "../schema.js";
+import { spawnCapture } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
 
 export interface EslintRunResult {
   findings: ToolFinding[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 const LINT_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -22,39 +23,35 @@ export async function runEslint(
     return { findings: [], degraded: [] };
   }
 
-  return new Promise((resolveP) => {
-    const child = spawn(
-      "npx",
-      ["--no-install", "eslint", "--format", "json", "--no-error-on-unmatched-pattern", ...targets],
-      { cwd: repoRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
-    );
+  const result = await spawnCapture(
+    "npx",
+    ["--no-install", "eslint", "--format", "json", "--no-error-on-unmatched-pattern", ...targets],
+    { cwd: repoRoot },
+  );
 
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString();
-    });
+  if (!result.ok) {
+    return {
+      findings: [],
+      degraded: [{ kind: "warning", topic: "eslint", message: "eslint: spawn failed" }],
+    };
+  }
 
-    child.on("error", () => {
-      resolveP({ findings: [], degraded: ["eslint: spawn failed"] });
-    });
-
-    child.on("close", (code) => {
-      const findings = parseEslintOutput(stdout, repoRoot);
-      // ESLint exits 0 (clean), 1 (findings), 2 (fatal). If we got valid JSON
-      // out, parsing is the source of truth. Otherwise non-zero exit means
-      // the runner failed to execute (npx fetch error, missing binary, etc.).
-      const sawJson = stdout.includes("[") && findings.length >= 0 && parsedOk(stdout);
-      const degraded =
-        !sawJson && code !== 0
-          ? [`eslint: exit ${code ?? "?"} ${stderr.trim().slice(0, 200)}`]
-          : [];
-      resolveP({ findings, degraded });
-    });
-  });
+  const findings = parseEslintOutput(result.stdout, repoRoot);
+  // ESLint exits 0 (clean), 1 (findings), 2 (fatal). If we got valid JSON
+  // out, parsing is the source of truth. Otherwise non-zero exit means
+  // the runner failed to execute (npx fetch error, missing binary, etc.).
+  const sawJson = result.stdout.includes("[") && parsedOk(result.stdout);
+  const degraded: DegradedEntry[] =
+    !sawJson && result.exitCode !== 0
+      ? [
+          {
+            kind: "warning",
+            topic: "eslint",
+            message: `eslint: exit ${result.exitCode ?? "?"} ${result.stderr.trim().slice(0, 200)}`,
+          },
+        ]
+      : [];
+  return { findings, degraded };
 }
 
 interface EslintMessage {

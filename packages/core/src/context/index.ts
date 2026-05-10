@@ -1,5 +1,8 @@
 import type { ChangedFile } from "../diff/index.js";
 import type { EcosystemContext } from "../ecosystem/index.js";
+import type { DegradedEntry } from "../schema.js";
+
+export type { DegradedEntry } from "../schema.js";
 
 /**
  * Public surface of the M5 cheap-signals + M6 semantic context selector
@@ -11,9 +14,9 @@ import type { EcosystemContext } from "../ecosystem/index.js";
 export type Evidence = { startLine: number; endLine: number };
 
 export type Reason =
-  /** This candidate is imported by `from` (the changed file). Evidence: where the consumed exports live in the candidate. */
+  /** Upstream / contract: changed file `from` depends on this candidate. Evidence: where the consumed exports live in the candidate. */
   | { kind: "imported-by"; from: string; evidence?: Evidence[] }
-  /** This candidate imports `target` (the changed file). Evidence: import-statement line(s) + usage call sites in the candidate. */
+  /** Downstream / blast radius: this candidate depends on changed file `target`. Evidence: import-statement line(s) + usage call sites in the candidate. */
   | { kind: "imports"; target: string; evidence?: Evidence[] }
   /** Path-only awareness signal — folders are noisy, content is not surfaced. */
   | { kind: "same-folder"; sibling: string }
@@ -36,8 +39,8 @@ export type ContextCandidate = {
 
 export type SelectorOutput = {
   candidates: ContextCandidate[];
-  /** Surfaced via `metadata.degradedWorkers` per ADR-0018. */
-  degraded: string[];
+  /** Surfaced via `metadata.degradedWorkers` per ADR-0018 (now discriminated per ADR-0021 #7). */
+  degraded: DegradedEntry[];
 };
 
 export interface ContextSelector {
@@ -76,6 +79,10 @@ export {
  * binary; `semantic` is intensity-scaled by the chunk's max cosine
  * similarity. `MAX_REASON_WEIGHT_SUM = 3.6` is the sum of all weights —
  * normalizing by it keeps `score ∈ [0, 1]`.
+ *
+ * Direction note: `imported-by` is upstream (contracts the changed file
+ * depends on); `imports` is downstream (consumers / blast radius). The
+ * 1.0 / 0.8 split is a deferred tuning call (ADR-0018).
  */
 export const REASON_WEIGHTS = {
   "imported-by": 1.0,

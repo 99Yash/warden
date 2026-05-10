@@ -108,6 +108,9 @@ importers:
       '@warden/core':
         specifier: workspace:*
         version: link:../core
+      '@warden/db':
+        specifier: workspace:*
+        version: link:../db
       '@warden/env':
         specifier: workspace:*
         version: link:../env

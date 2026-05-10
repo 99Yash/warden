@@ -7,6 +7,7 @@ import { and, db, eq, fileState, importGraph } from "@warden/db";
 import type { ChangedFile } from "../diff/index.js";
 import type { EcosystemContext } from "../ecosystem/index.js";
 import type { ChunkStore, EmbeddingStore } from "../indexing/index.js";
+import type { DegradedEntry } from "../schema.js";
 import {
   MAX_CONTENT_BEARING,
   MAX_REASON_WEIGHT_SUM,
@@ -82,7 +83,7 @@ export class CheapSignalsSelector implements ContextSelector {
     diff?: string;
   }): Promise<SelectorOutput> {
     const { repoRoot, changed, ecosystem } = input;
-    const degraded: string[] = [];
+    const degraded: DegradedEntry[] = [];
 
     const parser =
       this.opts.parser ??
@@ -110,7 +111,11 @@ export class CheapSignalsSelector implements ContextSelector {
       ]);
     } catch {
       dirtyFiles = allFilesRel;
-      degraded.push("context: git ls-files --modified failed; falling back to full hash");
+      degraded.push({
+        kind: "info",
+        topic: "context",
+        message: "context: git ls-files --modified failed; falling back to full hash",
+      });
     }
 
     const dirtyFilesFiltered = dirtyFiles.filter((f) => SOURCE_EXT_RE.test(f));
@@ -139,9 +144,11 @@ export class CheapSignalsSelector implements ContextSelector {
     }
     // First-run case: no file_state rows yet, none dirty (clean tree).
     if (needsHashing.length > 0) {
-      degraded.push(
-        `context: cold import-graph build (hashing ${needsHashing.length} files)`,
-      );
+      degraded.push({
+        kind: "info",
+        topic: "context",
+        message: `context: cold import-graph build (hashing ${needsHashing.length} files)`,
+      });
       await runInBatches(needsHashing, PARSE_BATCH_SIZE, async (path) => {
         const abs = resolvePath(repoRoot, path);
         const sha = await safeSha256(abs);
@@ -183,12 +190,18 @@ export class CheapSignalsSelector implements ContextSelector {
     });
 
     if (cacheCounts.misses > 0 && cacheCounts.hits === 0) {
-      degraded.push(
-        `context: cold import-graph build (parsed ${coldParseCount} files in Ts)`,
-      );
+      degraded.push({
+        kind: "info",
+        topic: "context",
+        message: `context: cold import-graph build (parsed ${coldParseCount} files in Ts)`,
+      });
     }
     if (cacheCounts.parseErrors > 0) {
-      degraded.push(`context: ${cacheCounts.parseErrors} files failed to parse`);
+      degraded.push({
+        kind: "info",
+        topic: "context",
+        message: `context: ${cacheCounts.parseErrors} files failed to parse`,
+      });
     }
 
     // 4. Reverse import index.
@@ -216,7 +229,11 @@ export class CheapSignalsSelector implements ContextSelector {
       symbolRefHits = await collectSymbolRefHits(repoRoot, changedExportsByPath, changedRelSet);
     } catch {
       symbolRefHits = [];
-      degraded.push("context: git grep failed; symbol-ref signal disabled");
+      degraded.push({
+        kind: "warning",
+        topic: "context",
+        message: "context: git grep failed; symbol-ref signal disabled",
+      });
     }
 
     // 6. Aggregate per-candidate reasons (keyed on absolute path during graph
@@ -326,9 +343,11 @@ export class CheapSignalsSelector implements ContextSelector {
     }
 
     if (changedRel.length > 0 && contentBearing.length === 0 && sameFolderOnly.length === 0) {
-      degraded.push(
-        "context: zero adjacent files found — falling back to diff-only LLM pass",
-      );
+      degraded.push({
+        kind: "info",
+        topic: "context",
+        message: "context: zero adjacent files found — falling back to diff-only LLM pass",
+      });
     }
 
     return {

@@ -1,5 +1,6 @@
 import type { EmbeddingProvider } from "@warden/ai";
 import type { ChunkStore, EmbeddingStore } from "../../indexing/index.js";
+import type { DegradedEntry } from "../../schema.js";
 import type { Evidence } from "../index.js";
 
 /**
@@ -41,7 +42,7 @@ export interface SemanticSignalInput {
 export interface SemanticSignalOutput {
   /** filePath → max-aggregated hit info. */
   hitsByFile: Map<string, SemanticHit>;
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 export async function semanticSignal(input: SemanticSignalInput): Promise<SemanticSignalOutput> {
@@ -59,7 +60,14 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
     if (!v) {
       return {
         hitsByFile: new Map(),
-        degraded: ["context: voyage query embed returned no vector — semantic signal disabled"],
+        degraded: [
+          {
+            kind: "warning",
+            topic: "context",
+            message:
+              "context: voyage query embed returned no vector — semantic signal disabled",
+          },
+        ],
       };
     }
     queryVector = v;
@@ -67,7 +75,13 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
     const msg = err instanceof Error ? err.message : String(err);
     return {
       hitsByFile: new Map(),
-      degraded: [`context: voyage query embed failed (${msg.slice(0, 120)}) — semantic signal disabled`],
+      degraded: [
+        {
+          kind: "warning",
+          topic: "context",
+          message: `context: voyage query embed failed (${msg.slice(0, 120)}) — semantic signal disabled`,
+        },
+      ],
     };
   }
 
@@ -79,7 +93,13 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
   if (corpusCount === 0) {
     return {
       hitsByFile: new Map(),
-      degraded: ["context: no embeddings yet — run `warden init`"],
+      degraded: [
+        {
+          kind: "actionable",
+          topic: "embeddings",
+          message: "context: no embeddings yet — run `warden init`",
+        },
+      ],
     };
   }
 

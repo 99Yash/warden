@@ -75,10 +75,31 @@ export const CommentSchema = z.object({
 });
 export type Comment = z.infer<typeof CommentSchema>;
 
+/**
+ * Discriminated `degradedWorkers` entry (ADR-0021 #7). Replaces the M4/M5
+ * flat-string shape so the banner renderer reads `kind` instead of substring-
+ * matching prefixes. Topic is an open string with conventional values
+ * (`context`, `osv`, `gitignore`, `committability`, `scalability`,
+ * `consistency`, `deadcode`, `embeddings`, `schema`, `llm`, `vuln`, `tsc`,
+ * `eslint`, `jscpd`, `audit`, `banner`, `ecosystem`) so new workers add
+ * their own without churn.
+ *
+ *  - `actionable`: user can fix this; surfaces in default mode + the banner.
+ *  - `warning`: a worker partially failed but the review is still useful;
+ *    verbose-only by default.
+ *  - `info`: forensic / informational; never blocks; verbose-only.
+ */
+export const DegradedEntrySchema = z.object({
+  kind: z.enum(["actionable", "warning", "info"]),
+  topic: z.string(),
+  message: z.string(),
+});
+export type DegradedEntry = z.infer<typeof DegradedEntrySchema>;
+
 export const CommentSetMetadataSchema = z.object({
   durationMs: z.number().nonnegative(),
   /** Workers that timed out or otherwise failed; surfaced per `vision.md` §11. */
-  degradedWorkers: z.array(z.string()).default([]),
+  degradedWorkers: z.array(DegradedEntrySchema).default([]),
 });
 export type CommentSetMetadata = z.infer<typeof CommentSetMetadataSchema>;
 

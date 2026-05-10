@@ -5,6 +5,7 @@ import {
   streamText,
   type LanguageModel,
 } from "@warden/ai";
+import type { DegradedEntry } from "../schema.js";
 import type { FormatterListener } from "./events.js";
 import { LlmOutputSchema, type LlmOutput } from "./schema.js";
 
@@ -33,11 +34,11 @@ export interface CascadeResult {
   modelId: string;
   durationMs: number;
   /** degradedWorkers entries to surface — empty when primary succeeded on first try. */
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResult> {
-  const degraded: string[] = [];
+  const degraded: DegradedEntry[] = [];
 
   // Attempt 1: Anthropic primary.
   const primary = getBossModel();
@@ -57,7 +58,11 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
     await sleep(RETRY_BACKOFF_MS);
     const retry = await tryProvider({ model: primary, provider: "anthropic", opts });
     if (retry.ok) {
-      degraded.push(`llm: anthropic ${first.error.summary}, retried successfully`);
+      degraded.push({
+        kind: "warning",
+        topic: "llm",
+        message: `llm: anthropic ${first.error.summary}, retried successfully`,
+      });
       return { ...retry.value, degraded };
     }
     first.error = retry.error;
@@ -80,7 +85,11 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
   opts.emit?.({ type: "phase-start", phase: "llm", provider: "google", modelId: fallbackId });
   const fb = await tryProvider({ model: fallback, provider: "google", opts });
   if (fb.ok) {
-    degraded.push(`llm: anthropic ${first.error.summary}, served from google`);
+    degraded.push({
+      kind: "warning",
+      topic: "llm",
+      message: `llm: anthropic ${first.error.summary}, served from google`,
+    });
     return { ...fb.value, degraded };
   }
 

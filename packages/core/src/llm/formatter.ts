@@ -1,5 +1,5 @@
 import { stableCommentId } from "../comment-id.js";
-import type { Comment, RetrievedContext } from "../schema.js";
+import type { Comment, DegradedEntry, RetrievedContext } from "../schema.js";
 import { callWithCascade } from "./cascade.js";
 import { computeCacheKey, getLlmCached, hashString, putLlmCached } from "./cache.js";
 import type { FormatterListener } from "./events.js";
@@ -40,7 +40,7 @@ export interface FormatResult {
   /** Comments to render — assertions (revised tool findings) + questions. */
   comments: Comment[];
   /** degradedWorkers entries from the cascade. */
-  degraded: string[];
+  degraded: DegradedEntry[];
   /** Whether the result came from cache. */
   cacheHit: boolean;
 }
@@ -71,7 +71,13 @@ export async function formatReview(input: FormatInput): Promise<FormatResult> {
   if (cached) {
     return {
       comments: applyLlmOutput(allInputComments, cached.payload),
-      degraded: [`llm: cache hit (${cached.provider}/${cached.modelId})`],
+      degraded: [
+        {
+          kind: "info",
+          topic: "llm",
+          message: `llm: cache hit (${cached.provider}/${cached.modelId})`,
+        },
+      ],
       cacheHit: true,
     };
   }

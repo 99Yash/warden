@@ -1,4 +1,4 @@
-import type { Category, CommentSet, ReviewInput, Tier } from "@warden/core";
+import type { Category, CommentSet, DegradedEntry, ReviewInput, Tier } from "@warden/core";
 import pc from "picocolors";
 
 const PRIORITY_ORDER: Category[] = [
@@ -19,6 +19,7 @@ const PRIORITY_ORDER: Category[] = [
 export function formatCommentSet(
   result: CommentSet,
   mode: ReviewInput["config"]["mode"],
+  verbose = false,
 ): string {
   const lines: string[] = [];
 
@@ -45,8 +46,15 @@ export function formatCommentSet(
   }
 
   lines.push(pc.dim(`  duration: ${result.metadata.durationMs}ms`));
-  if (result.metadata.degradedWorkers.length > 0) {
-    lines.push(pc.yellow(`  degraded: ${result.metadata.degradedWorkers.join(", ")}`));
+  // ADR-0021 #7: default mode shows only `actionable`-kind entries (the user
+  // can fix these); `--verbose` surfaces warning + info as well. Filtering
+  // happens here, not at the core boundary, so JSON consumers always see the
+  // unfiltered metadata.
+  const visible = verbose
+    ? result.metadata.degradedWorkers
+    : result.metadata.degradedWorkers.filter((e: DegradedEntry) => e.kind === "actionable");
+  if (visible.length > 0) {
+    lines.push(pc.yellow(`  degraded: ${visible.map((e) => e.message).join(", ")}`));
   }
 
   return lines.join("\n");

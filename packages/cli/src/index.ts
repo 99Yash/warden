@@ -120,7 +120,7 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     }
   }
 
-  process.stdout.write("\n" + formatCommentSet(result, mode) + "\n");
+  process.stdout.write("\n" + formatCommentSet(result, mode, opts.verbose === true) + "\n");
 }
 
 async function acquireDiff(

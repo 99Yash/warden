@@ -1,10 +1,11 @@
-import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
+import type { DegradedEntry } from "../schema.js";
+import { spawnCapture } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
 
 export interface TscRunResult {
   findings: ToolFinding[];
-  degraded: string[];
+  degraded: DegradedEntry[];
 }
 
 export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise<TscRunResult> {
@@ -18,7 +19,7 @@ export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise
 
   const seen = new Set<string>();
   const findings: ToolFinding[] = [];
-  const degraded: string[] = [];
+  const degraded: DegradedEntry[] = [];
 
   for (const r of results) {
     if (r.degraded) degraded.push(r.degraded);
@@ -35,38 +36,27 @@ export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise
 
 interface OneResult {
   findings: ToolFinding[];
-  degraded?: string;
+  degraded?: DegradedEntry;
 }
 
-function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
-  return new Promise((resolveP) => {
-    const child = spawn(
-      "npx",
-      ["--no-install", "tsc", "-b", "--pretty", "false", "--force", tsconfig],
-      { cwd: repoRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
-    );
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString();
-    });
-
-    child.on("error", () => {
-      resolveP({
-        findings: [],
-        degraded: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
-      });
-    });
-
-    child.on("close", () => {
-      const findings = parseTscOutput(stdout + "\n" + stderr, repoRoot);
-      resolveP({ findings });
-    });
-  });
+async function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
+  const result = await spawnCapture(
+    "npx",
+    ["--no-install", "tsc", "-b", "--pretty", "false", "--force", tsconfig],
+    { cwd: repoRoot },
+  );
+  if (!result.ok) {
+    return {
+      findings: [],
+      degraded: {
+        kind: "warning",
+        topic: "tsc",
+        message: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
+      },
+    };
+  }
+  const findings = parseTscOutput(result.stdout + "\n" + result.stderr, repoRoot);
+  return { findings };
 }
 
 const DIAG_RE =

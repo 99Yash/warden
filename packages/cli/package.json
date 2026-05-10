@@ -11,10 +11,13 @@
   "scripts": {
     "build": "tsdown",
     "check-types": "tsc -b",
-    "warden": "node --import tsx/esm src/index.ts"
+    "warden": "node --import tsx/esm src/index.ts",
+    "smoke:m7": "node --import tsx/esm scripts/smoke-m7-init.mts",
+    "smoke:m7-detectors": "node --import tsx/esm scripts/smoke-m7-detectors.mts"
   },
   "dependencies": {
     "@warden/core": "workspace:*",
+    "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
     "commander": "catalog:",
     "log-update": "catalog:",

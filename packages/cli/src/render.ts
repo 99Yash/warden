@@ -1,4 +1,4 @@
-import type { InitEvent } from "@warden/core";
+import type { DegradedEntry, InitEvent } from "@warden/core";
 import logUpdate from "log-update";
 import pc from "picocolors";
 
@@ -97,21 +97,20 @@ function truncate(s: string, max: number): string {
 
 /**
  * Renders the limitation banner above the phase log for `warden review`
- * (ADR-0019 #7). One dim yellow line; auto-disappears on `no-banner`. Not
+ * (ADR-0019 #7, refined per ADR-0021 #5/#7). One dim yellow line; auto-
+ * disappears when no `actionable`-kind entry mentions the index. Not
  * suppressible — banner reflects the state of the index, fixing it means
  * fixing the cause (`warden init` / `warden init --rebuild`).
+ *
+ * Reads the discriminated `kind` field instead of substring-matching on
+ * message prefixes. The first matching entry wins (banner is single-line).
  */
-const BANNER_PREFIXES = [
-  "context: no index",
-  "context: index stale",
-  "context: locked model",
-  "context: no embeddings yet",
-];
+const BANNER_TOPICS: ReadonlySet<string> = new Set(["context", "embeddings"]);
 
-export function renderBannerLine(degraded: string[]): string | null {
+export function renderBannerLine(degraded: DegradedEntry[]): string | null {
   for (const entry of degraded) {
-    if (BANNER_PREFIXES.some((p) => entry.startsWith(p))) {
-      return pc.yellow(`! ${entry.replace(/^context:\s*/, "")}`);
+    if (entry.kind === "actionable" && BANNER_TOPICS.has(entry.topic)) {
+      return pc.yellow(`! ${entry.message.replace(/^context:\s*/, "")}`);
     }
   }
   return null;
