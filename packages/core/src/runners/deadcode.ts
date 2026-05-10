@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { db, importGraph } from "@warden/db";
 import type { ChangedFile } from "../diff/index.js";
 import type { DegradedEntry } from "../schema.js";
+import { anyAddedInRange, formatErr, parseChangedSourceFile } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
 
 /**
@@ -30,8 +31,6 @@ import type { ToolFinding } from "./types.js";
  * milestone (per ADR-0021 #11).
  */
 
-const SOURCE_EXT_RE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
-
 export interface DeadcodeRunnerInput {
   repoRoot: string;
   changed: ChangedFile[];
@@ -56,29 +55,13 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
   const degraded: DegradedEntry[] = [];
 
   for (const cf of input.changed) {
-    if (!SOURCE_EXT_RE.test(cf.path)) continue;
-
-    const abs = isAbsolute(cf.path) ? cf.path : resolvePath(input.repoRoot, cf.path);
-    let content: string;
-    try {
-      content = await readFile(abs, "utf8");
-    } catch {
+    const parseResult = await parseChangedSourceFile(input.repoRoot, cf, "deadcode");
+    if (parseResult.kind === "skip") continue;
+    if (parseResult.kind === "degraded") {
+      degraded.push(parseResult.entry);
       continue;
     }
-
-    let sf: ts.SourceFile;
-    try {
-      sf = ts.createSourceFile(abs, content, ts.ScriptTarget.Latest, true);
-    } catch (err) {
-      degraded.push({
-        kind: "warning",
-        topic: "deadcode",
-        message: `deadcode: failed to parse ${cf.path} (${formatErr(err)})`,
-      });
-      continue;
-    }
-
-    const addedLines = new Set(cf.addedLines);
+    const { abs, sf, addedLines } = parseResult.parsed;
     const candidates = collectOptionalParamCandidates(sf, addedLines);
     if (candidates.length === 0) continue;
 
@@ -339,15 +322,3 @@ function hasExportModifier(node: ts.Node): boolean {
   return mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
 
-function anyAddedInRange(start: number, end: number, addedLines: Set<number>): boolean {
-  if (addedLines.size === 0) return false;
-  for (let i = start; i <= end; i++) {
-    if (addedLines.has(i)) return true;
-  }
-  return false;
-}
-
-function formatErr(err: unknown): string {
-  if (err instanceof Error) return err.message.slice(0, 120);
-  return String(err).slice(0, 120);
-}

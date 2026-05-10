@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { DegradedEntry } from "../schema.js";
+import { spawnCapture } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
 
 export interface TscRunResult {
@@ -39,39 +39,24 @@ interface OneResult {
   degraded?: DegradedEntry;
 }
 
-function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
-  return new Promise((resolveP) => {
-    const child = spawn(
-      "npx",
-      ["--no-install", "tsc", "-b", "--pretty", "false", "--force", tsconfig],
-      { cwd: repoRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
-    );
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString();
-    });
-
-    child.on("error", () => {
-      resolveP({
-        findings: [],
-        degraded: {
-          kind: "warning",
-          topic: "tsc",
-          message: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
-        },
-      });
-    });
-
-    child.on("close", () => {
-      const findings = parseTscOutput(stdout + "\n" + stderr, repoRoot);
-      resolveP({ findings });
-    });
-  });
+async function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
+  const result = await spawnCapture(
+    "npx",
+    ["--no-install", "tsc", "-b", "--pretty", "false", "--force", tsconfig],
+    { cwd: repoRoot },
+  );
+  if (!result.ok) {
+    return {
+      findings: [],
+      degraded: {
+        kind: "warning",
+        topic: "tsc",
+        message: `tsc(${relative(repoRoot, tsconfig)}): spawn failed`,
+      },
+    };
+  }
+  const findings = parseTscOutput(result.stdout + "\n" + result.stderr, repoRoot);
+  return { findings };
 }
 
 const DIAG_RE =

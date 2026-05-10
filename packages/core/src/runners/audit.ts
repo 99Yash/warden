@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import type { Lockfile } from "../ecosystem/index.js";
 import type { DegradedEntry } from "../schema.js";
+import { spawnCapture } from "./_shared.js";
 
 export type AuditSeverity = "info" | "low" | "moderate" | "high" | "critical";
 
@@ -41,52 +41,35 @@ export async function runAudit(repoRoot: string, lockfile: Lockfile): Promise<Au
     };
   }
 
-  return new Promise((resolveP) => {
-    const cmd = lockfile === "pnpm" ? "pnpm" : "npm";
-    const child = spawn(cmd, ["audit", "--json"], {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+  const cmd = lockfile === "pnpm" ? "pnpm" : "npm";
+  const result = await spawnCapture(cmd, ["audit", "--json"], { cwd: repoRoot });
 
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString();
-    });
+  if (!result.ok) {
+    return {
+      advisories: [],
+      degraded: [
+        { kind: "warning", topic: "audit", message: `audit(${cmd}): spawn failed` },
+      ],
+    };
+  }
 
-    child.on("error", () => {
-      resolveP({
-        advisories: [],
-        degraded: [
-          { kind: "warning", topic: "audit", message: `audit(${cmd}): spawn failed` },
-        ],
-      });
-    });
-
-    child.on("close", (code) => {
-      // npm/pnpm audit exits non-zero (1) when vulnerabilities are found — that
-      // is the success path. We only care about whether the JSON parsed.
-      const parsed = parseAuditOutput(stdout);
-      if (!parsed) {
-        const tail = stderr.trim().slice(-200);
-        return resolveP({
-          advisories: [],
-          degraded: [
-            {
-              kind: "warning",
-              topic: "audit",
-              message: `audit(${cmd}): exit ${code ?? "?"} — could not parse JSON${tail ? `: ${tail}` : ""}`,
-            },
-          ],
-        });
-      }
-      resolveP({ advisories: parsed, degraded: [] });
-    });
-  });
+  // npm/pnpm audit exits non-zero (1) when vulnerabilities are found — that
+  // is the success path. We only care about whether the JSON parsed.
+  const parsed = parseAuditOutput(result.stdout);
+  if (!parsed) {
+    const tail = result.stderr.trim().slice(-200);
+    return {
+      advisories: [],
+      degraded: [
+        {
+          kind: "warning",
+          topic: "audit",
+          message: `audit(${cmd}): exit ${result.exitCode ?? "?"} — could not parse JSON${tail ? `: ${tail}` : ""}`,
+        },
+      ],
+    };
+  }
+  return { advisories: parsed, degraded: [] };
 }
 
 /** Detects whether output is npm v2 (`vulnerabilities`) or pnpm v1 (`advisories`)

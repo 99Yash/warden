@@ -1,8 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
 import type { DegradedEntry } from "../schema.js";
+import { anyAddedInRange, parseChangedSourceFile } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
 
 /**
@@ -46,8 +45,6 @@ const BUILDER_HINT_NAMES: ReadonlySet<string> = new Set([
   "rightJoin",
 ]);
 
-const SOURCE_EXT_RE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
-
 export interface ScalabilityRunnerInput {
   repoRoot: string;
   changed: ChangedFile[];
@@ -65,29 +62,13 @@ export async function runScalability(
   const degraded: DegradedEntry[] = [];
 
   for (const cf of input.changed) {
-    if (!SOURCE_EXT_RE.test(cf.path)) continue;
-
-    const abs = isAbsolute(cf.path) ? cf.path : resolvePath(input.repoRoot, cf.path);
-    let content: string;
-    try {
-      content = await readFile(abs, "utf8");
-    } catch {
+    const result = await parseChangedSourceFile(input.repoRoot, cf, "scalability");
+    if (result.kind === "skip") continue;
+    if (result.kind === "degraded") {
+      degraded.push(result.entry);
       continue;
     }
-
-    let sf: ts.SourceFile;
-    try {
-      sf = ts.createSourceFile(abs, content, ts.ScriptTarget.Latest, true);
-    } catch (err) {
-      degraded.push({
-        kind: "warning",
-        topic: "scalability",
-        message: `scalability: failed to parse ${cf.path} (${formatErr(err)})`,
-      });
-      continue;
-    }
-
-    const addedLines = new Set(cf.addedLines);
+    const { sf, addedLines } = result.parsed;
     findLoadThenNarrow(sf, cf.path, addedLines, findings);
     findSequentialAwait(sf, cf.path, addedLines, findings);
   }
@@ -296,15 +277,3 @@ function touchesDiff(
   return anyAddedInRange(startLine, endLine, addedLines);
 }
 
-function anyAddedInRange(start: number, end: number, addedLines: Set<number>): boolean {
-  if (addedLines.size === 0) return false;
-  for (let i = start; i <= end; i++) {
-    if (addedLines.has(i)) return true;
-  }
-  return false;
-}
-
-function formatErr(err: unknown): string {
-  if (err instanceof Error) return err.message.slice(0, 120);
-  return String(err).slice(0, 120);
-}
