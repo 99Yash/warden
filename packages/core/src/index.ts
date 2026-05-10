@@ -196,8 +196,11 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   // catastrophic case (committed `node_modules/` etc.) for every runner
   // simultaneously, supersedes the M7 directory-concentration heuristic
   // formerly in committability.ts.
-  const rawChanged = input.diff ? parseUnifiedDiff(input.diff) : undefined;
-  const pruneResult = rawChanged ? pruneDiff(rawChanged) : undefined;
+  //
+  // Inlined so the parser's unpruned output is unreferenced after
+  // `pruneDiff()` returns — a 500K-file diff would otherwise pin the
+  // pre-prune array for the lifetime of `review()`.
+  const pruneResult = input.diff ? pruneDiff(parseUnifiedDiff(input.diff)) : undefined;
   const changed = pruneResult?.pruned;
   const noiseFilterDegraded: DegradedEntry[] = pruneResult?.degraded ?? [];
   const changedPaths = changed?.map((c) => c.path);

@@ -1,9 +1,12 @@
 import type { ChangedFile } from "./index.js";
 
 /**
- * Depth-limited diff tree (ADR-0025 / m9-plan §3). The prune stage walks
- * directories rather than per-file lists so a 500K-file `node_modules/`
- * dump produces a tree whose node count is O(directories), not O(files).
+ * Depth-limited diff tree (ADR-0025 / m9-plan §3). Node count is bounded
+ * by directory shape, not file count — a 500K-file `node_modules/` dump
+ * produces O(directories) interior nodes, with the leaves aggregated into
+ * the depth-limit node's `files[]`. Total memory is still O(files) (the
+ * survivors land in the pruned output), but interior-node walks during
+ * pruning don't degenerate.
  *
  * Beyond `MAX_DEPTH`, leaves aggregate into the depth-limit node — that
  * node's `fileCount` grows; its `files[]` carries every leaf below; no
@@ -48,9 +51,10 @@ export function buildDiffTree(
 }
 
 function insert(root: DiffTreeNode, file: ChangedFile, maxDepth: number): void {
-  // Normalize to POSIX for consistent splitting; the diff loader already
-  // emits POSIX paths but a defensive split avoids surprises if a future
-  // caller hands us Windows-style separators.
+  // Git diffs (and `parseUnifiedDiff()` downstream of them) always emit
+  // POSIX-style separators regardless of host OS, so a single `/` split
+  // is sufficient. The `.filter()` drops the empty leading segment that
+  // an absolute path would produce.
   const segments = file.path.split("/").filter((s) => s.length > 0);
   if (segments.length === 0) {
     // Pathological: empty path. Anchor at root and stop.
