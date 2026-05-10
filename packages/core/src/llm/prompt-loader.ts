@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const DIR = dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = resolve(DIR, "prompts");
 
-type PromptName = "system" | "user-template";
+type PromptName = "system" | "user-template" | "committability-system";
 
 const cache = new Map<PromptName, string>();
 
@@ -44,4 +44,8 @@ export function loadUserPrompt(vars: {
     .replaceAll("{{tool_findings}}", vars.toolFindings)
     .replaceAll("{{verified_advisories}}", vars.verifiedAdvisories)
     .replaceAll("{{retrieved_context}}", vars.retrievedContext);
+}
+
+export function loadCommittabilitySystemPrompt(): string {
+  return load("committability-system");
 }
