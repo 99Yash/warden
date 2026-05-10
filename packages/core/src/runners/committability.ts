@@ -26,27 +26,12 @@ import { formatErr } from "./_shared.js";
  * cause the question to be dropped silently (a forensic count surfaces in
  * `degraded` with topic `committability`, kind `info`).
  *
- * Pre-filter (Tier-1 hard-skip + ADR-0022 directory-concentration heuristic)
- * runs before any LLM call — catches the catastrophic node_modules-dump case
- * deterministically. The full M9 noise filter at the diff loader will
- * supersede this internal heuristic; until then, committability owns it.
+ * Noise pre-filter is gone from this runner as of M9 (ADR-0025): the
+ * baseline + JS-profile prune at the diff loader (`diff/prune.ts`) is
+ * universal and runs before any runner sees the diff. Committability
+ * receives an already-pruned `ChangedFile[]` and only owns the
+ * sub-agent + citation-verification surface.
  */
-
-// Tier-1 hard-skip: never-intentional-commit patterns. Applied to every
-// changed file before the concentration heuristic runs.
-const TIER1_HARD_SKIP_PATTERNS: ReadonlyArray<RegExp> = [
-  /(^|\/)\.git\//,
-  /(^|\/)\.DS_Store$/,
-  /(^|\/)Thumbs\.db$/,
-  /\.pyc$/,
-  /\.swp$/,
-  /(^|\/)\.vscode\/\.history\//,
-];
-
-// Concentration heuristic constants per ADR-0022.
-const CONCENTRATION_TOP_SHARE = 0.8;
-const CONCENTRATION_TOP_FLOOR = 50;
-const CONCENTRATION_NO_DOMINATOR_LIMIT = 200;
 
 // Sub-agent input: bound the snippet at SNIPPET_LINE_CAP lines built from
 // the diff-touched ranges (with ±CONTEXT_LINES surrounding each added line).
@@ -107,40 +92,10 @@ export async function runCommittability(
 ): Promise<CommittabilityRunnerOutput> {
   const degraded: DegradedEntry[] = [];
 
-  // Tier-1 hard-skip: drop never-intentional-commit paths.
-  const candidates: ChangedFile[] = [];
-  let tier1Skipped = 0;
-  for (const cf of input.changed) {
-    if (TIER1_HARD_SKIP_PATTERNS.some((re) => re.test(cf.path))) {
-      tier1Skipped++;
-      continue;
-    }
-    candidates.push(cf);
-  }
-  if (tier1Skipped > 0) {
-    degraded.push({
-      kind: "info",
-      topic: "committability",
-      message: `committability: tier-1 hard-skip filtered ${tier1Skipped} path${tier1Skipped === 1 ? "" : "s"}`,
-    });
-  }
-
+  // The diff-level noise filter (M9 / ADR-0025) has already removed
+  // baseline + JS-profile noise before this runner sees the input.
+  const candidates = input.changed;
   if (candidates.length === 0) {
-    return { questions: [], degraded };
-  }
-
-  // ADR-0022 directory-concentration heuristic. v0 uses `candidates.length`
-  // as the proxy for `addedCount` — the parser doesn't surface added-vs-modified
-  // status, and the catastrophic case (vendored bulk-add) is overwhelmingly
-  // newly-added files anyway. M9's noise filter at the diff loader will plug
-  // status-aware counting in when it lands.
-  const concentration = analyseConcentration(candidates);
-  if (concentration.skip) {
-    degraded.push({
-      kind: "actionable",
-      topic: "committability",
-      message: concentration.message,
-    });
     return { questions: [], degraded };
   }
 
@@ -232,52 +187,6 @@ export async function runCommittability(
   }
 
   return { questions: verified, degraded };
-}
-
-interface ConcentrationSkip {
-  skip: true;
-  message: string;
-}
-
-interface ConcentrationKeep {
-  skip: false;
-}
-
-function analyseConcentration(
-  candidates: ChangedFile[],
-): ConcentrationSkip | ConcentrationKeep {
-  const total = candidates.length;
-  const byTopDir = new Map<string, number>();
-  for (const cf of candidates) {
-    const top = topLevelDir(cf.path);
-    byTopDir.set(top, (byTopDir.get(top) ?? 0) + 1);
-  }
-  let dominator: { name: string; count: number } | undefined;
-  for (const [name, count] of byTopDir) {
-    if (!dominator || count > dominator.count) dominator = { name, count };
-  }
-  if (
-    dominator &&
-    dominator.count > CONCENTRATION_TOP_FLOOR &&
-    dominator.count / total > CONCENTRATION_TOP_SHARE
-  ) {
-    return {
-      skip: true,
-      message: `committability: skipped sub-agent — ${dominator.count}/${total} changed files concentrated in ${dominator.name}/ (likely vendored bulk-add — consider checking .gitignore for ${dominator.name}/)`,
-    };
-  }
-  if (total > CONCENTRATION_NO_DOMINATOR_LIMIT) {
-    return {
-      skip: true,
-      message: `committability: skipped sub-agent — ${total} changed files post-tier-1 (above ${CONCENTRATION_NO_DOMINATOR_LIMIT} with no dominant directory; consider triaging the diff or filtering by path)`,
-    };
-  }
-  return { skip: false };
-}
-
-function topLevelDir(path: string): string {
-  const idx = path.indexOf("/");
-  return idx === -1 ? "." : path.slice(0, idx);
 }
 
 interface SubAgentFileInput {
@@ -583,11 +492,11 @@ function normalizeWhitespace(s: string): string {
 }
 
 /**
- * `Runner`-contract wrapper (ADR-0023 #3). Internal Tier-1 hard-skip +
- * directory-concentration heuristic + cheap-tier sub-agent logic is
- * unchanged — the wrapper just adapts I/O shapes. `RunnerOutput.questions`
- * is populated; `findings` is empty (committability is a sub-agent, not a
- * deterministic detector).
+ * `Runner`-contract wrapper (ADR-0023 #3). The diff-level noise filter
+ * (M9 / ADR-0025) handles baseline + ecosystem-profile pruning before
+ * this runner is invoked, so the wrapper just adapts I/O shapes.
+ * `RunnerOutput.questions` is populated; `findings` is empty
+ * (committability is a sub-agent, not a deterministic detector).
  */
 export const committabilityRunner: Runner = {
   name: "committability",

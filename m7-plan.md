@@ -337,10 +337,14 @@ export async function runCommittability(
 
 Pre-filter (Tier 1 hard-skip):
 
+> **Obsolete in M9 per ADR-0025.** The Tier-1 hard-skip list graduated to a language-agnostic `BASELINE_NOISE` constant in `packages/core/src/diff/prune.ts` (M9). Committability no longer maintains its own copy — it consumes the already-pruned `ChangedFile[]` from the diff-level noise filter.
+
 - Glob exclusions: `.git/**`, `**/*.pyc`, `**/*.swp`, `.DS_Store`, `Thumbs.db`, `.vscode/.history/**`. These are never intentional commits.
 - Apply to the `changed` set; record `tier1Skipped: number` for the `degraded` log if non-zero.
 
 Threshold (M7 placeholder per ADR-0022; full diff-level noise filter ships in M9):
+
+> **Removed in M9 per ADR-0025.** ADR-0025 §4 dropped the directory-concentration heuristic in favor of profile-only noise filtering at the diff loader. The heuristic produced false positives on legitimate large refactors (the 1K-file rename inside `packages/api/` case) without a remediation surface. M10's overlay closes the project-specific-noise gap properly. The text below is preserved as historical context for the M7 → M9 transition.
 
 The placeholder catches the "node_modules dump" signature (and other catastrophic concentration cases) via a single directory-concentration heuristic, without needing the ecosystem profiles + diff-tree representation that M9 will add. Supersedes ADR-0021 #2's original "above 500 files post-Tier-1, skip" gate; the Tier-1 hard-skip list above is unchanged.
 

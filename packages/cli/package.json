@@ -14,7 +14,9 @@
     "warden": "node --import tsx/esm src/index.ts",
     "smoke:m7": "node --import tsx/esm scripts/smoke-m7-init.mts",
     "smoke:m7-detectors": "node --import tsx/esm scripts/smoke-m7-detectors.mts",
-    "smoke:m8-spine": "node --import tsx/esm scripts/smoke-m8-spine.mts"
+    "smoke:m8-spine": "node --import tsx/esm scripts/smoke-m8-spine.mts",
+    "smoke:m9-catastrophic": "node --import tsx/esm scripts/smoke-m9-catastrophic.mts",
+    "smoke:m9-large-refactor": "node --import tsx/esm scripts/smoke-m9-large-refactor.mts"
   },
   "dependencies": {
     "@warden/core": "workspace:*",
