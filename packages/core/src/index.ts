@@ -282,6 +282,33 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   // cleanly; M9+ may revisit when the noise filter touches that surface.
   const scratchpad = new Scratchpad();
 
+  // Decide orchestration runners up-front so dispatch() can run *concurrently*
+  // with the inline Promise.all instead of serializing after it. Pre-M8
+  // scalability ran in parallel with TSC/ESLint/vuln/deadcode; routing it
+  // through the contract must preserve that parallelism (caught by Copilot
+  // review on PR #5).
+  const orchestrationRunners: Runner[] = [];
+  if (changed && changed.length > 0) {
+    orchestrationRunners.push(scalabilityRunner);
+    // Committability fires only in `review` mode. `check` is deterministic-only
+    // per ADR-0011 — no LLM calls — and the sub-agent is a cheap-tier LLM.
+    if (input.config.mode === "review") {
+      orchestrationRunners.push(committabilityRunner);
+    }
+  }
+  const dispatchPromise: Promise<void> =
+    orchestrationRunners.length > 0
+      ? dispatch(
+          orchestrationRunners,
+          {
+            repoRoot: input.repoRoot,
+            changed: changed ?? [],
+            changedPaths: changedPaths ?? [],
+          } satisfies RunnerInput,
+          scratchpad,
+        )
+      : Promise.resolve();
+
   const [
     tscResult,
     eslintResult,
@@ -355,6 +382,11 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         )
       : { findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] };
 
+  // Wait for the orchestration-tier runners before reading the scratchpad.
+  // dispatch() has been running in parallel with everything above; this
+  // join only blocks if its longest runner outlasted jscpd.
+  await dispatchPromise;
+
   // Record inline-runner outputs into the scratchpad. Findings stay raw here;
   // synthesis applies `scopeToDiff` uniformly across the whole scratchpad,
   // which is a no-op on detectors that already filter against `addedLines`.
@@ -382,27 +414,6 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     degraded: deadcodeResult.degraded,
     durationMs: 0,
   });
-
-  // Orchestration-tier runners through dispatch(). Skipped when there's no
-  // diff to inspect — the contract still requires non-empty input semantics
-  // for the migrated runners (both consume `changed` directly).
-  const orchestrationRunners: Runner[] = [];
-  if (changed && changed.length > 0) {
-    orchestrationRunners.push(scalabilityRunner);
-    // Committability fires only in `review` mode. `check` is deterministic-only
-    // per ADR-0011 — no LLM calls — and the sub-agent is a cheap-tier LLM.
-    if (input.config.mode === "review") {
-      orchestrationRunners.push(committabilityRunner);
-    }
-  }
-  if (orchestrationRunners.length > 0) {
-    const runnerInput: RunnerInput = {
-      repoRoot: input.repoRoot,
-      changed: changed ?? [],
-      changedPaths: changedPaths ?? [],
-    };
-    await dispatch(orchestrationRunners, runnerInput, scratchpad);
-  }
 
   // ADR-0021 #8: when the diff doesn't touch a manifest / lockfile, collapse
   // npm-audit findings into a single summary comment. The full per-advisory

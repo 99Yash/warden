@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { resolve as resolvePath } from "node:path";
+import { open } from "node:fs/promises";
+import { resolve as resolvePath, sep as pathSep } from "node:path";
 import {
   Output,
   getWorkerCheapFallbackModel,
@@ -48,11 +48,31 @@ const CONCENTRATION_TOP_SHARE = 0.8;
 const CONCENTRATION_TOP_FLOOR = 50;
 const CONCENTRATION_NO_DOMINATOR_LIMIT = 200;
 
-// Sub-agent input: bound the snippet at the first 20 lines OR 4KB to keep
-// per-file cost predictable. Binary files surface as `[binary; size=<N>B]`.
+// Sub-agent input: bound the snippet at SNIPPET_LINE_CAP lines built from
+// the diff-touched ranges (with ±CONTEXT_LINES surrounding each added line).
+// MAX_READ_BYTES caps the file head we read — large files past this offset
+// surface their later changed lines as `[truncated; file > N bytes]`.
+// Binary files surface as `[binary; size=<N>B]`.
 const SNIPPET_LINE_CAP = 20;
-const SNIPPET_BYTE_CAP = 4096;
+const CONTEXT_LINES = 2;
+const MAX_READ_BYTES = 16_384;
 const BINARY_SNIFF_BYTES = 2048;
+
+// Files whose content is itself sensitive — even an excerpt risks leaking
+// secrets to the LLM provider. The path itself is still useful committability
+// signal (`.env.local` in source IS the smell), so we transmit path-only.
+const SENSITIVE_PATH_PATTERNS: ReadonlyArray<RegExp> = [
+  /(^|\/)\.env(\..+)?$/,
+  /\.pem$/i,
+  /\.key$/i,
+  /\.p12$/i,
+  /\.pfx$/i,
+  /\.crt$/i,
+  /(^|\/)id_(rsa|ed25519|dsa|ecdsa)(\.pub)?$/,
+  /(^|\/)\.aws\/credentials$/,
+  /(^|\/)\.npmrc$/,
+  /(^|\/)\.netrc$/,
+];
 
 const DEFAULT_TIMEOUT_MS = 45_000;
 
@@ -124,11 +144,23 @@ export async function runCommittability(
     return { questions: [], degraded };
   }
 
-  // Build the per-file sub-agent input.
+  // Build the per-file sub-agent input. `buildFileInput` returns `null` when
+  // the path escapes `repoRoot` (path-traversal guard); other I/O errors
+  // surface as `info` degraded entries and the file is dropped from the
+  // sub-agent input but not from the diff (other runners still see it).
   const fileInputs: SubAgentFileInput[] = [];
   for (const cf of candidates) {
     try {
-      fileInputs.push(await buildFileInput(input.repoRoot, cf));
+      const fileInput = await buildFileInput(input.repoRoot, cf);
+      if (fileInput === null) {
+        degraded.push({
+          kind: "warning",
+          topic: "committability",
+          message: `committability: dropped ${cf.path} — path escapes repoRoot`,
+        });
+        continue;
+      }
+      fileInputs.push(fileInput);
     } catch (err) {
       degraded.push({
         kind: "info",
@@ -255,46 +287,154 @@ interface SubAgentFileInput {
   binary: boolean;
 }
 
+/**
+ * Lexical containment check — given a (possibly absolute / `..`-bearing)
+ * path from the diff, return its absolute resolution iff the result stays
+ * inside `repoRoot`. Returns `null` on escape so callers degrade rather
+ * than reading files the diff shouldn't be naming.
+ *
+ * Defensive against a malicious or malformed diff containing
+ * `--- /etc/passwd` or `--- ../../etc/shadow`. Symlinks inside the repo
+ * are not realpath-resolved here — that's a separate (M9+) hardening
+ * pass tied to the noise filter's path discipline.
+ */
+function resolveWithinRoot(repoRoot: string, relativePath: string): string | null {
+  if (relativePath.length === 0) return null;
+  const rootAbs = resolvePath(repoRoot);
+  const candidate = resolvePath(rootAbs, relativePath);
+  if (candidate === rootAbs) return candidate;
+  if (candidate.startsWith(rootAbs + pathSep)) return candidate;
+  return null;
+}
+
+function isSensitivePath(p: string): boolean {
+  return SENSITIVE_PATH_PATTERNS.some((re) => re.test(p));
+}
+
 async function buildFileInput(
   repoRoot: string,
   cf: ChangedFile,
-): Promise<SubAgentFileInput> {
-  const abs = resolvePath(repoRoot, cf.path);
-  const buf = await readFile(abs);
-  const sizeBytes = buf.byteLength;
-  const sniffWindow = buf.subarray(0, Math.min(BINARY_SNIFF_BYTES, sizeBytes));
-  const binary = sniffWindow.includes(0);
-  if (binary) {
+): Promise<SubAgentFileInput | null> {
+  const abs = resolveWithinRoot(repoRoot, cf.path);
+  if (abs === null) return null;
+
+  // Sensitive paths: path-only signal, no file content transmitted to the
+  // LLM provider. The filename itself is still useful committability
+  // evidence (`.env.local` in source IS the smell).
+  if (isSensitivePath(cf.path)) {
+    return {
+      path: cf.path,
+      sizeBytes: -1,
+      snippet: "[sensitive path — content withheld; review the path itself]",
+      binary: false,
+    };
+  }
+
+  // Read only what's needed. `readFile()` would slurp the whole file just to
+  // slice the first 16KB; `open()` + bounded `read()` keeps memory + time
+  // proportional to the snippet, not the file.
+  const handle = await open(abs, "r");
+  try {
+    const stats = await handle.stat();
+    const sizeBytes = stats.size;
+    const readBytes = Math.min(MAX_READ_BYTES, sizeBytes);
+    const buf = Buffer.alloc(readBytes);
+    if (readBytes > 0) {
+      await handle.read(buf, 0, readBytes, 0);
+    }
+    const sniffWindow = buf.subarray(0, Math.min(BINARY_SNIFF_BYTES, readBytes));
+    if (sniffWindow.includes(0)) {
+      return {
+        path: cf.path,
+        sizeBytes,
+        snippet: `[binary; size=${sizeBytes}B]`,
+        binary: true,
+      };
+    }
+    const text = buf.toString("utf8");
+    const truncated = readBytes < sizeBytes;
+    const snippet = buildDiffScopedSnippet(text, cf.addedLines, truncated, sizeBytes);
     return {
       path: cf.path,
       sizeBytes,
-      snippet: `[binary; size=${sizeBytes}B]`,
-      binary: true,
+      snippet,
+      binary: false,
     };
+  } finally {
+    await handle.close();
   }
-  const truncated = buf.subarray(0, Math.min(SNIPPET_BYTE_CAP, sizeBytes)).toString("utf8");
-  const lines = truncated.split("\n").slice(0, SNIPPET_LINE_CAP);
-  return {
-    path: cf.path,
-    sizeBytes,
-    snippet: lines.join("\n"),
-    binary: false,
-  };
+}
+
+/**
+ * Build a snippet from the diff-touched line ranges (each added line plus
+ * `±CONTEXT_LINES` of surrounding context, with adjacent windows merged).
+ * Capped at `SNIPPET_LINE_CAP` lines total.
+ *
+ * For added (whole-file) diffs this naturally degenerates to "the whole
+ * file up to the cap" because `addedLines` covers every line. For modified
+ * files this surfaces only the lines being changed, so unrelated header
+ * content (potentially including secrets) doesn't leak to the LLM.
+ */
+function buildDiffScopedSnippet(
+  fullText: string,
+  addedLines: number[],
+  truncated: boolean,
+  fileSize: number,
+): string {
+  if (addedLines.length === 0) {
+    return "[deletion-only diff — no added lines to inspect]";
+  }
+  const allLines = fullText.split("\n");
+  const sorted = [...addedLines].sort((a, b) => a - b);
+  const windows: Array<{ start: number; end: number }> = [];
+  for (const ln of sorted) {
+    const start = Math.max(1, ln - CONTEXT_LINES);
+    const end = ln + CONTEXT_LINES;
+    const last = windows[windows.length - 1];
+    if (last && start <= last.end + 1) {
+      last.end = Math.max(last.end, end);
+    } else {
+      windows.push({ start, end });
+    }
+  }
+  const out: string[] = [];
+  let lineCount = 0;
+  let reachedTruncationBoundary = false;
+  for (const w of windows) {
+    if (lineCount >= SNIPPET_LINE_CAP) break;
+    if (out.length > 0) out.push("...");
+    for (let i = w.start; i <= w.end && lineCount < SNIPPET_LINE_CAP; i++) {
+      const line = allLines[i - 1];
+      if (line === undefined) {
+        if (truncated) reachedTruncationBoundary = true;
+        break;
+      }
+      out.push(`${i}: ${line}`);
+      lineCount++;
+    }
+  }
+  if (reachedTruncationBoundary) {
+    out.push(`... [truncated; file > ${MAX_READ_BYTES}B (size=${fileSize}B)]`);
+  }
+  return out.join("\n");
 }
 
 function renderUserPrompt(files: SubAgentFileInput[]): string {
   const blocks = files.map((f) => {
-    const header = `### ${f.path} (${f.sizeBytes}B${f.binary ? ", binary" : ""})`;
+    const sizeLabel = f.sizeBytes < 0 ? "" : ` (${f.sizeBytes}B${f.binary ? ", binary" : ""})`;
+    const header = `### ${f.path}${sizeLabel}`;
     return `${header}\n\`\`\`\n${f.snippet}\n\`\`\``;
   });
   return [
     `# Files in this diff`,
     "",
-    `Review the following ${files.length} file${files.length === 1 ? "" : "s"} for committability concerns. Each block shows the path and the first ~20 lines of content.`,
+    `Review the following ${files.length} file${files.length === 1 ? "" : "s"} for committability concerns.`,
+    `Each block shows the file path and the diff-touched line ranges. Lines are prefixed with their line number followed by a colon (\`47: ...\`).`,
+    `When citing a snippet for a content-based finding, quote ONLY the file content — do not include the \`<n>: \` line-number prefix in your snippet field. The line number goes in the \`line\` field.`,
     "",
     blocks.join("\n\n"),
     "",
-    `Emit findings only for files where you're reasonably confident there's a smell. Cite line + verbatim snippet for content-based findings. Empty findings is the right answer when nothing fires.`,
+    `Emit findings only for files where you're reasonably confident there's a smell. Empty findings is the right answer when nothing fires.`,
   ].join("\n");
 }
 
@@ -393,10 +533,37 @@ async function verifyCitation(
 ): Promise<boolean> {
   const trimmed = snippet.trim();
   if (trimmed.length === 0) return false;
-  const norm = normalizeWhitespace(trimmed);
+  // Defense in depth: even though `path` here is membership-checked against
+  // candidatePaths upstream, those originated from the diff and could
+  // contain `..` segments or absolute paths in a malicious / malformed
+  // input. The same containment check that gates `buildFileInput` runs
+  // here.
+  const abs = resolveWithinRoot(repoRoot, path);
+  if (abs === null) return false;
+  // Bounded read: only fetch the relevant line range. Citation snippets
+  // are line-anchored — slurping the whole file just to look at line N±5
+  // is the same shape Copilot flagged on `buildFileInput`.
+  // Strip a stray `<n>: ` line-number prefix in case the sub-agent
+  // accidentally echoed it from the prompt back into its `snippet` field.
+  // The prompt explicitly tells the LLM not to include the prefix; this is
+  // defense-in-depth so a slip doesn't fail an otherwise-valid citation.
+  const stripped = trimmed.replace(/^\d+:\s*/, "");
+  const norm = normalizeWhitespace(stripped);
+  if (norm.length === 0) return false;
   let content: string;
   try {
-    content = await readFile(resolvePath(repoRoot, path), "utf8");
+    const handle = await open(abs, "r");
+    try {
+      const stats = await handle.stat();
+      const readBytes = Math.min(MAX_READ_BYTES, stats.size);
+      const buf = Buffer.alloc(readBytes);
+      if (readBytes > 0) {
+        await handle.read(buf, 0, readBytes, 0);
+      }
+      content = buf.toString("utf8");
+    } finally {
+      await handle.close();
+    }
   } catch {
     return false;
   }

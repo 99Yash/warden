@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { Runner, RunnerInput, RunnerOutput } from "./runner.js";
 import type { Scratchpad } from "./scratchpad.js";
 
