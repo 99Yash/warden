@@ -12,6 +12,7 @@ import {
   type SelectorOutput,
 } from "./context/index.js";
 import { parseUnifiedDiff } from "./diff/index.js";
+import { pruneDiff } from "./diff/prune.js";
 import { detectEcosystem, type Lockfile } from "./ecosystem/index.js";
 import { ensureGitignore } from "./init/ensure-gitignore.js";
 import { walkRepo } from "./init/walk.js";
@@ -48,6 +49,8 @@ import { runVulnerabilityCheck } from "./vuln/index.js";
 export * from "./schema.js";
 export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosystem/index.js";
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
+export { pruneDiff, type PruneResult } from "./diff/prune.js";
+export { buildDiffTree, MAX_DEPTH as DIFF_TREE_MAX_DEPTH, type DiffTreeNode } from "./diff/tree.js";
 export { resolveDiff, type DiffMode, type ResolveDiffOptions, type ResolvedDiff } from "./diff/source.js";
 export type { FormatterEvent, FormatterListener } from "./llm/index.js";
 export type { ToolFinding } from "./runners/types.js";
@@ -186,7 +189,17 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     });
   }
 
-  const changed = input.diff ? parseUnifiedDiff(input.diff) : undefined;
+  // M9 (ADR-0025): diff-level noise filter. Pre-runner stage between
+  // `parseUnifiedDiff()` and runner dispatch — every downstream runner
+  // (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency,
+  // committability) consumes the *pruned* `ChangedFile[]`. Defends the
+  // catastrophic case (committed `node_modules/` etc.) for every runner
+  // simultaneously, supersedes the M7 directory-concentration heuristic
+  // formerly in committability.ts.
+  const rawChanged = input.diff ? parseUnifiedDiff(input.diff) : undefined;
+  const pruneResult = rawChanged ? pruneDiff(rawChanged) : undefined;
+  const changed = pruneResult?.pruned;
+  const noiseFilterDegraded: DegradedEntry[] = pruneResult?.degraded ?? [];
   const changedPaths = changed?.map((c) => c.path);
 
   // M6 (ADR-0019 #7): banner state is computed *before* the selector runs,
@@ -432,6 +445,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   // through `scratchpad.flattenDegraded()`.
   const environmentalDegraded: DegradedEntry[] = [
     ...gitignoreDegraded,
+    ...noiseFilterDegraded,
     ...bannerStateToDegraded(bannerState),
     ...vulnResult.degraded,
     ...selectorResult.degraded,

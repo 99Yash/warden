@@ -1,221 +1,204 @@
-# Warden — M9 Plan (diff-level noise filter)
+# Warden — M9 Plan (diff-level noise filter, v0 scope)
 
-This is the milestone brief for the agent (or future-me) implementing M9. Self-contained: read this plus `decisions.md` ADR-0022 (the M9 direction) and you have everything.
+This is the milestone brief for the agent (or future-me) implementing M9. Self-contained: read this plus `decisions.md` ADR-0022 (direction) + ADR-0025 (v0 scope) and you have everything.
 
-**Status: stub.** The design direction is locked by ADR-0022; the implementation specifics below are first-draft and several call-outs are deliberately marked **TBD per M9 grilling**. Run the grilling pass before writing code — the M7 plan went through ~17 questions before it stabilised, and M9 has at least four open design seams (per-subtree ecosystem detection, profile schema, runner-interface migration, override surface).
+**Status: locked.** ADR-0025 closes M9's grilling pass. The seven open design questions in the prior version of this plan are all answered (see ADR-0025 caveat "m9-plan.md's open design questions"); start coding when ready.
 
 ## Read first (in this order)
 
-1. **`./decisions.md`** — focus on **ADR-0022 (this milestone's direction)** plus ADR-0008 (zero-config posture; existing `.reviewbot/overlay.yaml` is the override surface), ADR-0013 (I/O-pure core; the diff loader change is internal to `@warden/core`), ADR-0019 (M6 — content-addressed storage discipline applies to profile loading), ADR-0021 #2 (the M7 placeholder this milestone replaces).
-2. **`./CONTEXT.md`** — `diff-level noise filter`, `noise profile`, and `diff tree` are defined there. Reach for those terms before inventing new ones.
-3. **`./m7-plan.md`** — the committability sub-agent's directory-concentration heuristic (the M7 placeholder) is the current state of the world. M9 generalises it: the heuristic stops being committability-specific and moves to the diff loader.
-4. **`./packages/core/src/ecosystem/`** — the M2 ecosystem detector. M9 extends it to emit a list of detected ecosystems (currently it returns the active one).
-5. **`./packages/core/src/diff/`** — the diff loader. M9's seam lives here.
-6. **`./packages/core/src/runners/`** — TSC, ESLint, jscpd, vuln, and the M7 detectors. Each consumes the diff today; each will consume the *pruned* diff after M9.
-7. **`./packages/core/src/index.ts`** — `review()`'s pipeline order. M9 inserts the filter between diff loading and runner dispatch.
+1. **`./decisions.md`** — focus on **ADR-0025 (M9 v0 scope)** and **ADR-0022 (architectural direction)** in that order. ADR-0025 is authoritative on what M9 ships; ADR-0022 is the long-term shape M10+ realizes. Also relevant: ADR-0008 (zero-config posture), ADR-0013 (I/O-pure core; no `git diff --raw` from inside core), ADR-0021 #2 + ADR-0022 (the M7 directory-concentration placeholder this milestone removes), ADR-0023 §5 (β interface — runners stay on `path[]`).
+2. **`./CONTEXT.md`** — `diff-level noise filter`, `noise profile`, `BASELINE_NOISE`, `diff tree` are defined there. Reach for those terms; do not invent new ones.
+3. **`./packages/core/src/diff/index.ts`** — the existing `parseUnifiedDiff()` returning `ChangedFile[]`. M9's tree builder consumes its output.
+4. **`./packages/core/src/ecosystem/index.ts`** — the existing JS-shaped detector. **Read but do not modify.** Multi-ecosystem detection is M11+ work; M9 assumes JS.
+5. **`./packages/core/src/runners/committability.ts`** — carries the M7 directory-concentration heuristic + Tier-1 hard-skip list that M9 removes (heuristic gone) and migrates (Tier-1 list → `BASELINE_NOISE` in `diff/prune.ts`).
+6. **`./packages/core/src/runners/`** — every runner (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consumes the diff. After M9, each consumes the *pruned* `ChangedFile[]`. The β interface (ADR-0023 §5) means runners' contracts don't change shape — `path[]` stays — only the contents narrow.
+7. **`./packages/core/src/index.ts`** — `review()`'s pipeline order. M9 inserts the prune step between diff parsing and runner dispatch.
 
 ## Goal of this milestone
 
-Implement **M9: diff-level noise filter — ecosystem-detection-driven, profile-loaded, depth-limited tree pruning, applied at the diff loader, every runner benefits.** By the end:
+Implement **M9 v0: diff-level noise filter — JS profile + universal Tier-1 baseline + tree pruning at the diff loader.** By the end:
 
-- A repo with `node_modules/` accidentally committed (gitignore broken, 500K+ files in `node_modules/`) runs `warden review` cleanly: TSC / ESLint / jscpd / vuln / scalability / deadcode / consistency / committability all see the *pruned* diff (changed source files only). One degraded entry per pruned subtree explains what got skipped and why.
-- The M7 directory-concentration heuristic in `committability.ts` is removed (the diff loader handles it generically now). The Tier-1 hard-skip list (`.git/`, `*.pyc`, etc.) stays — it's per-file noise that profiles also catch but a pre-runner glob is fine for files no profile would dispute.
-- `packages/core/src/ecosystem/profiles/` ships with one JSON profile per language Warden currently supports (start: `javascript`, `python`; **TBD per M9 grilling: which others — `rust`, `go`, `java`, `csharp`, `ruby`?**).
-- The diff is represented internally as a depth-limited tree (≤3 levels) with `(addedCount, modifiedCount, deletedCount)` per node. Pruning operates on subtrees; the catastrophic case never materialises as a flat path list anywhere.
-- The existing `.reviewbot/overlay.yaml` schema extends to `noise.always` / `noise.never` (additive; existing overlays continue to work).
-- Per-runner integration: each runner's input shape changes from `path[]` to `{ tree, paths }` (or equivalent — **TBD per M9 grilling**). Backward-compat shim through M9 if needed; removed in M10.
-- Smoke harness covers the catastrophic case (synthetic 500K-file `node_modules/` diff), the legitimate-large-refactor case (1K-file rename inside `packages/api/` that the M7 placeholder false-positives on but M9 should pass cleanly), and the multi-ecosystem case (JS + Python repo with `node_modules/` and `__pycache__/` both in the diff).
-- Dogfood validation: rerun `warden review` against warden's own M6 / M7 PRs; confirm no regressions vs. the M7-placeholder behaviour, and confirm the catastrophic-case smoke fixture's pruned diff matches the expected subset.
+- A repo with `node_modules/` accidentally committed (gitignore broken, 500K+ files in `node_modules/`) runs `warden review` cleanly: TSC / ESLint / jscpd / vuln / scalability / deadcode / consistency / committability all see the *pruned* `ChangedFile[]` (real source files only). One degraded entry of `topic: "noise-filter"`, `kind: "actionable"` names what got skipped and why.
+- The M7 directory-concentration heuristic in `committability.ts` is removed entirely (no fallback layer in M9 v0; M10's overlay closes the project-specific-noise gap properly).
+- The Tier-1 hard-skip list (`.git/`, `*.pyc`, `*.swp`, `.DS_Store`, `Thumbs.db`, `.vscode/.history/`) graduates from `committability.ts` to a language-agnostic `BASELINE_NOISE` constant in `diff/prune.ts`. Applied universally before any profile; every runner benefits, not just committability.
+- `packages/core/src/ecosystem/profiles/javascript.json` ships with `alwaysNoise.{directories, extensions}`. No `contextDependent`, no `files`, no schema versioning. Lockfiles deliberately *not* pruned (vuln runs against `repoRoot`; lockfile presence in the diff is signal, not noise).
+- The diff tree is depth-limited (≤3 levels) with `fileCount` per node. Built from `parseUnifiedDiff()` output. Bounded in memory by directory structure, not file count.
+- Smoke harness covers the catastrophic JS case (synthetic 500K-file `node_modules/` diff) and the legitimate-large-refactor case (1K-file refactor inside a real source directory; assert no false-positive prune).
+- Dogfood validation: rerun `warden review` against warden's own M6 / M7 / M8 PRs; confirm no regressions on non-catastrophic inputs.
 - `pnpm check-types` + `pnpm lint` pass.
-- All M4–M7 behaviour preserved on non-catastrophic inputs.
+- All M4–M8 behaviour preserved on non-catastrophic inputs.
 
-**Stop at "diff-level filter ships, all runners consume pruned diffs, smoke harness passes." Do NOT start implementing per-symbol noise filtering, free-form prose claim extraction (M10 candidate), BYOEmbedder, cross-repo retrieval, custom-code SAST worker, full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key handling, or retrieval refinements.** Those are M10+.
+**Stop at "diff-level filter ships, JS profile + baseline land, smoke harness passes." Do NOT start implementing the overlay loader, multi-ecosystem detector rewrite, additional ecosystem profiles, structural-heuristic fallback, per-symbol noise filtering, prose-claim extraction, BYOEmbedder, cross-repo retrieval, custom-code SAST worker, async/daemon `JobRunner`, or anything else.** Those are M10+. ADR-0025 is explicit about each deferred piece's milestone slot.
 
 ## Repo additions
 
 ```
 packages/core/src/ecosystem/
-├── detect.ts                  # MODIFIED — emit list of detected ecosystems (was single).
-└── profiles/                  # NEW directory.
-    ├── javascript.json        # NEW — node_modules/, dist/, .next/, build/, .min.js, lockfiles.
-    ├── python.json            # NEW — __pycache__/, .venv/, *.egg-info/, .pyc, etc.
-    └── ...                    # NEW — TBD per M9 grilling: which other ecosystems ship in v0.
+└── profiles/                    # NEW directory.
+    └── javascript.json          # NEW — see §2 for schema and contents.
 
 packages/core/src/diff/
-├── tree.ts                    # NEW — build depth-limited diff tree from `git diff --raw`.
-├── prune.ts                   # NEW — apply noise profiles to the diff tree; emit degraded entries.
-└── index.ts                   # MODIFIED — diff loader composes tree + prune; returns pruned shape.
+├── tree.ts                      # NEW — build depth-limited tree from ChangedFile[].
+├── prune.ts                     # NEW — BASELINE_NOISE + profile loader + prune logic.
+└── index.ts                     # MODIFIED — `parseUnifiedDiff()` is unchanged; the prune
+                                 # entry point becomes a sibling export consumed by review().
 
 packages/core/src/runners/
-├── *.ts                       # MODIFIED — each runner adapts to the pruned-diff input shape.
-└── committability.ts          # MODIFIED — drop the M7 directory-concentration heuristic
-                               # (diff loader does it generically now); keep Tier-1 hard-skip.
+└── committability.ts            # MODIFIED — drop directory-concentration heuristic;
+                                 # drop the duplicated Tier-1 hard-skip list (now in BASELINE_NOISE).
 
-packages/core/src/overlay/
-└── index.ts                   # MODIFIED — extend overlay schema with `noise.always` / `noise.never`.
+packages/core/src/index.ts       # MODIFIED — pipeline inserts prune between
+                                 # parseUnifiedDiff() and runner dispatch.
 
 packages/cli/scripts/
-├── smoke-m8-catastrophic.mts  # NEW — synthetic 500K-file `node_modules/` diff fixture.
-├── smoke-m8-large-refactor.mts # NEW — 1K-file legitimate refactor; assert no false-positive prune.
-└── smoke-m8-multi-ecosystem.mts # NEW — JS + Python diff; assert both profiles apply.
+├── smoke-m9-catastrophic.mts    # NEW — synthetic 500K-file `node_modules/` diff fixture.
+└── smoke-m9-large-refactor.mts  # NEW — 1K-file legitimate refactor; assert no false-positive prune.
 ```
 
-No new workspace package. No new CLI verb. No new env var.
+No new workspace package. No new CLI verb. No new env var. No new dep (no yaml parser, no `@vercel/style` ecosystem registry — all profile data ships as static JSON inside `@warden/core`).
 
 ## Package boundaries to honor
 
-- All M9 code lives in `@warden/core`. The diff loader is internal; runners are internal; profiles ship inside the package.
-- `@warden/core` stays I/O-pure per ADR-0013. The diff loader reads `git diff --raw` (it has to — it's the diff loader), but no runner gains new I/O capabilities. Output flows through the existing `Comment[]` + `degradedWorkers[]` return surface.
-- No `@warden/ai` changes. The noise filter is deterministic; no LLM call.
-- No `@warden/db` changes (tentative — **TBD per M9 grilling: should pruned-diff state be cached for incremental re-runs?**).
+- All M9 code lives in `@warden/core`. The diff loader stays internal; runners stay internal; profiles ship inside the package.
+- `@warden/core` stays I/O-pure per ADR-0013. The diff loader does not invoke `git`; profiles load via `import` (or `readFileSync` of bundled JSON, depending on build setup — check what `code-chunk-shim.d.ts` did and mirror).
+- No `@warden/ai` changes. Noise filter is deterministic; no LLM call.
+- No `@warden/db` changes. ADR-0025 explicitly rejects caching pruned-diff state.
 
-## What to build (first-draft sketch — confirm during M9 grilling)
+## What to build
 
-### 1. Ecosystem detector extension
+### 1. JavaScript noise profile
 
-`packages/core/src/ecosystem/detect.ts`:
-
-- Today: returns the active ecosystem (single).
-- After M9: returns `{ ecosystems: EcosystemId[], rootMarkers: Record<EcosystemId, string> }` — list of detected ecosystems plus the root marker that triggered each detection.
-- Detection driven by root marker files: `package.json` / `pnpm-lock.yaml` → `javascript`; `pyproject.toml` / `requirements.txt` → `python`; `go.mod` → `go`; `Cargo.toml` → `rust`; etc. (Full list **TBD per M9 grilling**.)
-- Per-subtree detection: **TBD per M9 grilling.** Whether `frontend/=JS, backend/=Python` monorepos get top-level-directory marker scanning in v0, or whether they're a known limitation that M10 closes.
-
-### 2. Noise profiles
-
-`packages/core/src/ecosystem/profiles/{ecosystem}.json`:
-
-- Schema (first draft; **TBD per M9 grilling**):
+`packages/core/src/ecosystem/profiles/javascript.json`:
 
 ```json
 {
   "ecosystem": "javascript",
   "alwaysNoise": {
-    "directories": ["node_modules", ".next", "build", "out"],
-    "extensions": [".min.js", ".min.css", ".d.ts.map", ".js.map"],
-    "files": ["yarn.lock", "package-lock.json", "pnpm-lock.yaml"]
-  },
-  "contextDependent": {
-    "directories": ["dist", "vendor"]
-  },
-  "version": 1
+    "directories": ["node_modules", ".next", "build", "out", ".turbo", "coverage"],
+    "extensions": [".min.js", ".min.css", ".d.ts.map", ".js.map", ".css.map"]
+  }
 }
 ```
 
-- Profiles ship as static JSON; no codegen.
-- Multi-ecosystem repos union the rules: `alwaysNoise.directories` from JS (`node_modules`) + `alwaysNoise.directories` from Python (`__pycache__`) → both pruned.
-- `contextDependent` directories require additional checks (gitignore membership, file-extension homogeneity) before pruning.
+Notes:
+- **Lockfiles are deliberately absent.** `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` belong in the diff — vuln runs against `repoRoot` independently of diff content; ESLint and TSC filter by extension; the synthesizer prompt benefits from "this is a dep-bump PR" context.
+- `.turbo` and `coverage` echo the existing `SKIP_DIRS` set in `ecosystem/index.ts` (line 15) to keep the two lists conceptually aligned. The profile is the source of truth for the noise filter; `SKIP_DIRS` continues to scope tsconfig discovery only.
+- `dist/` is **not** in `alwaysNoise.directories`. It's a context-dependent directory (some monorepos commit `dist/` intentionally). Without an overlay escape hatch, false-positive risk is too high. M10's overlay re-opens the question.
+
+### 2. `BASELINE_NOISE` constant in `diff/prune.ts`
+
+```ts
+// Language-agnostic noise floor; applied unconditionally before any profile.
+// OS / editor junk that's noise regardless of ecosystem.
+const BASELINE_NOISE = {
+  directories: [".git", ".vscode/.history"],
+  fileNames: [".DS_Store", "Thumbs.db"],
+  extensions: [".pyc", ".swp"],
+} as const;
+```
+
+Notes:
+- Migrated from `committability.ts`'s Tier-1 hard-skip list. Original location drops it once `BASELINE_NOISE` is wired in.
+- Distinct from the JS profile by being language-agnostic. Future profiles add to the picture without redeclaring this floor.
 
 ### 3. Diff tree builder
 
 `packages/core/src/diff/tree.ts`:
 
-- Input: raw output of `git diff --raw` (or equivalent diff source).
-- Output: a tree of `DiffTreeNode` rooted at the repo root, with `(name, addedCount, modifiedCount, deletedCount, totalSize, gitignored, children)` per node.
-- Depth limit: 3 levels by default. Beyond depth 3, leaves aggregate (so `src/foo/bar/baz/quux.ts` rolls up into `src/foo/bar` with just count metadata, not a path list).
-- Recursive expansion: if a leaf's count is small enough to justify it (**threshold TBD per M9 grilling**), expand one more level. Used by runners that need real paths for files that survived pruning.
-- Memory-bounded: the tree's node count is bounded by directory structure, not file count. A 500K-file diff fits in a few KB.
+- Input: `ChangedFile[]` from `parseUnifiedDiff()`.
+- Output: a `DiffTreeNode` rooted at `""` (repo-relative), each node carrying `{ name, fileCount, files: ChangedFile[], children: Map<string, DiffTreeNode> }`.
+- Depth limit: 3 levels by default. Beyond depth 3, files aggregate into the depth-3 node — its `fileCount` grows; its `files[]` carries the leaves; no further `children` materialise.
+- Bounded by directory structure, not file count. A 500K-file diff produces a tree whose node count is O(directories), not O(files).
+- The tree stays internal to `diff/`. Runners receive `ChangedFile[]` (β interface per ADR-0023 §5).
 
 ### 4. Prune logic
 
 `packages/core/src/diff/prune.ts`:
 
-- Input: the diff tree + the union of loaded noise profiles + the parsed overlay (`noise.always` / `noise.never`).
-- Output: a *pruned* diff tree + a list of `DegradedEntry` per pruned subtree.
-- Algorithm:
-  1. Apply `overlay.noise.never` first — these directories are explicitly user-protected; never prune them, even if a profile says always-noise.
-  2. Apply `overlay.noise.always` next — user-declared noise; prune unconditionally.
-  3. Apply `alwaysNoise.directories` from the profile union; prune matching subtrees.
-  4. Apply `alwaysNoise.extensions` to leaves; prune individual files matching the extension.
-  5. Apply `alwaysNoise.files` to leaves.
-  6. For `contextDependent.directories`: check gitignore membership and file-extension homogeneity. **TBD per M9 grilling: full decision rule.**
-  7. Apply structural fallback heuristics for cases the profiles miss (the M7 directory-concentration check, generalised). **TBD per M9 grilling: which structural heuristics survive into M9 vs. get dropped because profiles cover the case.**
-- Each pruned subtree emits one `DegradedEntry` with `topic: "noise-filter"`, `kind: "actionable"`, and a message naming the path + count + reason + ecosystem.
+- Input: the `DiffTreeNode` + the loaded JS noise profile (statically imported at module load) + the `BASELINE_NOISE` constant.
+- Output: the *pruned* `ChangedFile[]` + a `DegradedEntry[]` listing pruned subtrees.
+- Algorithm (apply in this order):
+  1. **Apply `BASELINE_NOISE`.** Walk the tree; drop nodes whose name matches `BASELINE_NOISE.directories`; drop files whose name matches `BASELINE_NOISE.fileNames` or whose extension matches `BASELINE_NOISE.extensions`. Each dropped subtree (not each file) emits one degraded entry.
+  2. **Apply the JS profile's `alwaysNoise.directories`.** Walk the tree; drop nodes whose name (at any depth) matches. One degraded entry per dropped subtree.
+  3. **Apply the JS profile's `alwaysNoise.extensions`.** Walk the leaves; drop files matching the extension. **No degraded entry per file** — the M9 v0 acceptance is "loud about subtrees, quiet about individual files." If many files of the same extension are dropped, that's already implied by the surrounding directory structure being unchanged.
 
-### 5. Runner-interface migration
+Each pruned subtree's degraded entry: `{ kind: "actionable", topic: "noise-filter", message: \`skipped \${count} files in \${path}/ (\${reason})\` }`. Reason text examples: `"node_modules — JS ecosystem profile"`, `".git directory — baseline noise"`, `".vscode/.history — baseline noise"`.
 
-Each existing runner consumes the diff today. After M9 each consumes the *pruned* diff. The interface change is **TBD per M9 grilling** — two candidate shapes:
+### 5. Pipeline integration
 
-- **(α)** Replace `path[]` with `{ tree: DiffTreeNode, paths: string[] }`; runners that need flat paths use `paths` (computed once from the tree); runners that want tree-aware logic (e.g., a future "directory-level deadcode") use `tree`.
-- **(β)** Keep `path[]` as the runner contract; the loader returns the flattened pruned paths. Runners stay shape-stable; the tree is internal to `diff/`. Loses tree-aware capabilities for downstream runners but matches the existing interface exactly.
+`packages/core/src/index.ts`:
 
-Recommendation TBD; the asymmetry is whether any runner benefits from the tree. M7's deadcode detector might.
+- Today: `review()` calls `parseUnifiedDiff(diff)` and threads `ChangedFile[]` into runner dispatch.
+- After M9: `review()` calls `parseUnifiedDiff(diff)`, then `pruneDiff(changedFiles)` (returns `{ pruned, degraded }`), then threads `pruned` into dispatch and `degraded` into the existing `degradedWorkers` accumulator. Same for `check()`.
 
-### 6. Overlay schema extension
+The β interface holds: runners still receive `ChangedFile[]`. Only the contents narrow.
 
-`packages/core/src/overlay/index.ts`:
+### 6. `committability.ts` cleanup
 
-- Extend the existing zod schema:
-
-```ts
-const OverlaySchema = z.object({
-  knownDebt: z.array(...).optional(),     // existing
-  noise: z.object({                        // NEW
-    always: z.array(z.string()).optional(),
-    never: z.array(z.string()).optional(),
-  }).optional(),
-});
-```
-
-- Path entries are repo-relative directory globs (e.g., `generated-api-client/`, `proto-out/**`).
-- Existing overlays without a `noise` block continue to validate (the field is optional).
+- Remove the directory-concentration heuristic entirely (the `>80% concentration *or* >200 files` block).
+- Remove the duplicated Tier-1 hard-skip list (the entries that moved to `BASELINE_NOISE`).
+- Keep the rest of the sub-agent's logic untouched (citation verification, prompt construction, model selection — all unchanged).
+- Verify the existing committability smoke fixture still passes after the heuristic + Tier-1 removal.
 
 ### 7. Smoke harness
 
-`packages/cli/scripts/smoke-m8-catastrophic.mts`:
+`packages/cli/scripts/smoke-m9-catastrophic.mts`:
 
-- Synthesises a fixture diff with 500K added files in `node_modules/` plus 12 added files in `src/`.
-- Asserts: pruned diff has 12 paths (only `src/`), one degraded entry with `topic: "noise-filter"` naming `node_modules/` and the JS ecosystem.
-- Wall-clock target: < 5 seconds for the full pipeline (the catastrophic case shouldn't be 50× slower than the normal case).
+- Synthesizes a fixture diff with 500K added files in `node_modules/` plus 12 added files in `src/`.
+- Asserts: pruned `ChangedFile[]` has 12 paths (only `src/`); one degraded entry of `topic: "noise-filter"` naming `node_modules/`.
+- Wall-clock target: < 5 seconds end-to-end (the catastrophic case shouldn't be 50× slower than a normal review).
 
-`packages/cli/scripts/smoke-m8-large-refactor.mts`:
+`packages/cli/scripts/smoke-m9-large-refactor.mts`:
 
-- Synthesises a fixture diff with 1K added files inside `packages/api/` (legitimate refactor).
-- Asserts: pruned diff has 1K paths (no false-positive prune), no `noise-filter` degraded entries.
-- Asserts the M7 directory-concentration placeholder *would* have skipped the committability sub-agent on this diff (validating that M9 strictly improves on the placeholder).
+- Synthesizes a fixture diff with 1K added files inside a legitimate source directory (e.g., `packages/api/src/`).
+- Asserts: pruned `ChangedFile[]` has 1K paths (no false-positive prune); zero `topic: "noise-filter"` degraded entries.
+- Documents that the M7 directory-concentration heuristic *would* have skipped committability on this diff — i.e., M9 strictly improves on the placeholder.
 
-`packages/cli/scripts/smoke-m8-multi-ecosystem.mts`:
-
-- Repo with both `package.json` and `pyproject.toml` at root.
-- Diff includes added files in `node_modules/`, `__pycache__/`, `src/`, and `app/` (Python source).
-- Asserts: pruned diff has only `src/` and `app/` paths; two degraded entries (one for each ecosystem); `frontend/=JS, backend/=Python`-style per-subtree detection is **NOT asserted** unless M9 grilling commits to shipping it.
-
-## Open design questions (for the M9 grilling)
-
-1. **Per-subtree ecosystem detection — ship or defer?** The simple case (root-marker detection + profile union) covers single-ecosystem repos and ecosystem-mixed monorepos with shared roots. The hard case (`frontend/=JS, backend/=Python` with directory-level boundaries) needs per-top-level-directory marker scanning. ADR-0022's "Caveat — per-subtree ecosystem detection is an M9 sub-decision" parks the choice; M9 grilling makes it.
-2. **Ecosystem coverage in v0.** Profiles for which languages? `javascript` + `python` are the floor; what's the ceiling — `rust`, `go`, `java`, `csharp`, `ruby`, `php`, `elixir`, `dart`? Trade-off is profile-authoring effort vs. catastrophic-case coverage; the "first user from a new ecosystem" experience is the ceiling lever.
-3. **Profile schema.** The first-draft schema in §2 is plausibly right but not grilled. Open seams: should `contextDependent` have its own decision rule per directory, or one global rule? Should profiles have versioning to support migration when Warden's profile-consumption logic evolves? Should profiles be loadable from `node_modules/@warden/profiles-*` for community-contributed profiles, or hardcoded in `@warden/core`?
-4. **Runner-interface migration shape (α vs. β).** Whether the tree leaks into runner contracts or stays internal to `diff/`. The asymmetry is whether any runner benefits from tree-aware input — and that depends on M9+ ambitions for cross-runner abstractions.
-5. **Structural heuristics — kept or dropped?** The M7 directory-concentration heuristic catches the catastrophic case without profiles. After profiles ship, it's redundant in the JS-`node_modules/` case but might still help in cases profiles don't cover (project-specific generated dirs the user hasn't added to the overlay). Do they live as a permanent fallback layer, or does the overlay carry that load?
-6. **Caching — pruned-diff state in `.warden/cache.sqlite`?** Pruning is fast on small diffs and bounded on large ones, so probably not worth caching. But if M10+ adds expensive per-subtree analysis (semantic chunking on the pruned tree), caching becomes worth it. Decide whether the storage interface accommodates it.
-7. **Degraded-entry verbosity.** One entry per pruned subtree at default verbosity might be noisy in multi-ecosystem repos (4–6 entries every run). Should default mode collapse them to "noise filter pruned N subtrees (run with --verbose for breakdown)"? **Or is per-subtree visibility a trust feature, never collapsed?**
+There is **no** multi-ecosystem smoke fixture in M9. That fixture is named in M11+ when the multi-ecosystem detector ships.
 
 ## What NOT to do in this milestone
 
+- **No overlay loader.** ADR-0025 §3 explicitly defers this to M10's own milestone. Do not introduce a yaml parser dep, do not create `packages/core/src/overlay/`, do not touch `.reviewbot/overlay.yaml`. If you find yourself wanting an escape hatch for a profile false positive, the answer is "M10 fixes it" — note the case in the milestone's lessons section and move on.
+- **No multi-ecosystem detector rewrite.** ADR-0025 §1 explicitly defers this to M11+. Do not modify `packages/core/src/ecosystem/index.ts`. The JS profile loads unconditionally — the assumption that the active project is JS is hardcoded for M9 v0.
+- **No additional ecosystem profiles.** No Python, no Rust, no Go. ADR-0025 §1 names the milestone slot.
+- **No structural-heuristic fallback.** ADR-0025 §4 dropped it. If the JS profile misses a project-specific noise dump, that's M10's overlay's job.
+- **No `contextDependent` schema bucket.** ADR-0025 §5 dropped it.
+- **No schema versioning.** ADR-0025 §5 dropped it.
+- **No `git diff --raw` invocation from core.** ADR-0025 §2: tree built from `parseUnifiedDiff()` output. Core stays I/O-pure.
+- **No new CLI verbs.** `warden show-skipped` was floated and rejected in ADR-0022; degraded entries are the explainability surface.
 - **No symbol-level filtering.** M9 prunes at the file/directory level. "Skip this function because it's auto-generated" is M10+ territory.
-- **No prose-claim extraction or LLM noise classification.** ADR-0022's "pure structural heuristics, no profiles" rejection cuts both ways: profiles are structured data; LLM classification was tried-and-rejected in the original chat thread for being expensive at scale. Don't reintroduce it.
-- **No new CLI verbs.** `warden show-skipped` was floated and rejected — degraded entries are the explainability surface. Adding a verb is M10+ scope, gated on dogfood evidence that degraded entries are insufficient.
-- **No mid-stream profile reloading.** Profiles are loaded once at the start of the review; reloading on profile-file changes mid-review is YAGNI.
-- **No community-profile contribution mechanism.** Question (3) in "Open design questions" raises this; v0 ships hardcoded profiles only. Community profiles are an M10+ feature gated on a real contributor case.
-- **No retroactive overlay migration.** Existing overlays (`.reviewbot/overlay.yaml`) without a `noise` block continue to work as-is. Don't auto-add empty `noise` blocks; don't write to user files.
+- **No tree on runner contracts.** ADR-0023 §5 + ADR-0025 keep β: runners receive `ChangedFile[]`. The tree stays internal to `diff/`.
+- **No caching of pruned-diff state.** ADR-0025 §"Why" rejects this for v0; pruning is fast and bounded.
 
 ## Acceptance criteria
 
-- [ ] Ecosystem detector emits a list of detected ecosystems (extension to the M2 detector) — verified by unit fixture.
-- [ ] Profiles for `javascript` and `python` ship in `packages/core/src/ecosystem/profiles/` (additional ecosystems per M9 grilling decision).
-- [ ] Diff tree builder produces a depth-limited tree from `git diff --raw` output — verified by unit fixture, including the 500K-file pathological case (memory bounded, fast build time).
-- [ ] Prune logic applies overlay → profile → structural-heuristic-fallback in order; pruned subtrees emit one degraded entry each.
-- [ ] All existing runners (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consume the pruned diff. No runner regressions on M4–M7 behaviour.
-- [ ] Committability runner's M7 directory-concentration heuristic removed; Tier-1 hard-skip preserved.
-- [ ] Overlay schema accepts `noise.always` / `noise.never`; existing overlays validate as before.
-- [ ] Smoke harness passes: `smoke-m8-catastrophic.mts`, `smoke-m8-large-refactor.mts`, `smoke-m8-multi-ecosystem.mts`.
-- [ ] Dogfood: rerun against warden's M6 + M7 PRs, no regressions vs. M7-placeholder behaviour on non-catastrophic inputs.
+- [ ] `packages/core/src/ecosystem/profiles/javascript.json` ships with the schema in §1; loads via `import` from `prune.ts`.
+- [ ] `BASELINE_NOISE` constant in `diff/prune.ts` covers `.git/`, `.DS_Store`, `*.pyc`, `*.swp`, `Thumbs.db`, `.vscode/.history/`.
+- [ ] Diff tree builder produces a depth-limited tree from `ChangedFile[]` — verified by unit fixture, including the 500K-file pathological case (memory bounded, fast build time).
+- [ ] Prune logic applies baseline → profile-directories → profile-extensions in order; pruned subtrees emit one degraded entry each with `topic: "noise-filter"`, `kind: "actionable"`.
+- [ ] All existing runners (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consume the *pruned* `ChangedFile[]`. No runner regressions on M4–M8 behaviour.
+- [ ] `committability.ts` no longer runs the directory-concentration heuristic; no longer maintains its own Tier-1 hard-skip list.
+- [ ] Smoke harness passes: `smoke-m9-catastrophic.mts` + `smoke-m9-large-refactor.mts`.
+- [ ] Dogfood: rerun against warden's M6 + M7 + M8 PRs, no regressions vs. M8 baseline behaviour on non-catastrophic inputs.
 - [ ] `pnpm check-types` + `pnpm lint` clean.
-- [ ] M7 placeholder text in `m7-plan.md` (§10 Threshold) marked obsolete with a pointer to "removed in M9."
+- [ ] M7 placeholder text in `m7-plan.md` (§10 Threshold or wherever the heuristic is described) marked obsolete with a pointer to "removed in M9 per ADR-0025."
 
-## Lessons from M7 → M9 transition
+## Dependencies on M10+
 
-(Filled in post-implementation, mirroring `scaffolding-plan.md`'s convention.)
+Naming the deferred work explicitly so the M10+ briefs can pick it up:
+
+- **M10 — overlay loader.** `.reviewbot/overlay.yaml` (or wherever the M10 grilling lands the file). Schema includes existing `knownDebt` (deferred from M3) plus `noise.always` + `noise.never`. Yaml parser dep, schema, location debate, integration with `prune.ts`. Closes the project-specific-noise gap M9 leaves open.
+- **M11+ — multi-ecosystem detector + Python/Rust/etc. profiles.** Detector rewrite to return `EcosystemId[]` + per-ecosystem profile authoring + profile-union semantics + per-subtree detection (the `frontend/=JS, backend/=Python` case from ADR-0022 §7).
+- **M11+ — structural fallback (only if dogfood demands it).** ADR-0025 §4 dropped the heuristic. If post-M10 dogfood shows project-specific noise dumps remain unaddressed even with overlays available, a structural fallback layer earns its own ADR + milestone slot.
+
+## Lessons from M8 → M9 transition
+
+1. **Profile-only coverage held up against the catastrophic-case fixture.** The 500K-file `node_modules/` synthetic ran in ~200ms — three orders of magnitude under the 5-second budget. The depth-3 tree's "aggregate at the limit" rule does its job: node count is bounded by directory shape (a few thousand for the synthetic), and the leaves sit in a few `files[]` arrays under depth-3 nodes. No GC pressure, no heap blow-up. The same pruning loop handles the 1K-file legitimate-refactor case in <10ms with zero `noise-filter` entries.
+2. **The "loud about subtrees, quiet about individual files" rule earns its keep.** Initial sketch emitted a degraded entry per dropped file name match. Re-reading m9-plan §4: `BASELINE_NOISE.fileNames` and `BASELINE_NOISE.extensions` drops are silent; only directory drops get a degraded line. Removing the per-file noise made the catastrophic-case smoke land exactly one `topic: "noise-filter"` entry — the cleanest possible UX signal. Per-file emissions would have buried the directory drop under noise.
+3. **Committability cleanup was small but load-bearing.** The runner shrank by ~50 lines (TIER1_HARD_SKIP_PATTERNS + analyseConcentration + topLevelDir + the constants). What was left is exactly the sub-agent surface (citation verification, prompt build, model fallback, sensitive-path policy). Single responsibility restored — committability now does committability, not noise filtering. Wireup change was one line in `runCommittability`: `const candidates = input.changed`.
+4. **JS profile feels sufficient for warden's own dogfood scope.** Walking the M5/M6/M7/M8 PRs in mind: no PR I can recall wanted a noise pattern that the JS profile + baseline doesn't already cover (`node_modules`, `.next`, `dist`, `coverage`, `.turbo`, plus baseline OS/editor junk). The case for M10's overlay is real but isn't urgent for warden's own development. Confidence the JS profile works for typical TS monorepos is high; the overlay's value will show up first on consumer projects with project-specific generated directories (`generated-api-client/`, `proto-out/`, `gql-types/`).
+5. **Asset loading mirrors prompt-loader's `readFileSync` shape.** Sticking with the existing pattern (no JSON `import` attribute, no `with { type: "json" }` ergonomics) avoided a `verbatimModuleSyntax`/Node-version question. The dist-time asset-copy story (prompts and now profiles both rely on adjacent files at runtime) is a known gap shared across both surfaces — when M10+ touches it for prompts, profiles get fixed simultaneously.
 
 ## When you're done
 
-Hand back: a list of any deviations from this plan (with reasons), confirmation all acceptance criteria pass, and one short note on which of the seven "open design questions" the M9 grilling resolved (so the next milestone's brief can reference them).
+Hand back: a list of any deviations from this plan (with reasons), confirmation all acceptance criteria pass, and one short note on whether the JS profile's `alwaysNoise.directories` set (`node_modules`, `.next`, `build`, `out`, `.turbo`, `coverage`) caught all the noise patterns warden's own dogfood produced — i.e., did profile-only coverage feel sufficient mid-flight, or did you find yourself wanting overlay support before M10 ships? That signal directly informs M10's priority.
