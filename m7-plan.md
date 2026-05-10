@@ -4,7 +4,9 @@ This is the milestone brief for the agent (or future-me) implementing M7. Self-c
 
 ## Read first (in this order)
 
-1. **`./decisions.md`** — focus on **ADR-0021 (this milestone's direction)** plus ADR-0008 (citation thesis — extends to questions in M7), ADR-0012 (review priority order — its successor ADR-0020 lists the four new category slots), ADR-0013 (I/O-pure core), ADR-0017 (LLM provider fallback — applies to the sub-agent), ADR-0019 (M6 — punch-list items 1–14 originate here), ADR-0020 (the four new category names + slot ordering — M7 implements its M7+ upgrade path).
+1. **`./decisions.md`** — focus on **ADR-0021 (this milestone's direction)** plus ADR-0008 (citation thesis — extends to questions in M7), ADR-0012 (review priority order — its successor ADR-0020 lists the four new category slots), ADR-0013 (I/O-pure core), ADR-0017 (LLM provider fallback — applies to the sub-agent), ADR-0019 (M6 — punch-list items 1–14 originate here), ADR-0020 (the four new category names + slot ordering — M7 implements its M7+ upgrade path), **ADR-0022 (M7 placeholder for diff-level noise filter; supersedes ADR-0021 #2's Tier-2 file-count gate).**
+
+   Also worth a skim: **`./CONTEXT.md`** — the noun glossary for Warden. The runner / detector / sub-agent vocabulary used throughout this plan is canonicalised there; reach for those terms before inventing new ones.
 2. **`./CLAUDE.md`** — package boundary table is load-bearing. M7 adds files in `@warden/core` only; no new workspace package; no new package boundary crossings.
 3. **`./packages/core/src/index.ts`** — current `review()` pipeline. M5 left `RetrievedContext` populated via `candidatesToRetrievedContext()`; M6 added the semantic signal + `runInit`. M7 adds three deterministic detector workers + one sub-agent worker + the question-citation verifier post-pass + the npm-audit collapse logic.
 4. **`./packages/core/src/schema.ts`** — `CategoryEnum` already contains `scalability`, `consistency`, `deadcode`, `committability` (added by ADR-0020). `KindEnum` already discriminates `assertion | question`. No schema changes in M7 beyond the `degradedWorkers` discriminated shape.
@@ -29,18 +31,18 @@ Implement **M7: detector-driven promotion of three categories from `questions[]`
 - Polish: init summary line splits chunks-cache from embeddings-cache wording; banner placement moves to pre-phase per ADR-0019 #7's intent; ensureGitignore moves after schema bootstrap (atomicity); Voyage echo verified against requested model. (Items 5, 6, 12, 14 crossed.)
 - `pnpm check-types` + `pnpm lint` pass.
 - All M4 / M5 / M6 behavior preserved (no regression in TSC / ESLint / vuln / jscpd / cheap-signals / semantic / `init` / banner flow).
-- **Dogfood validation gate**: rerun `warden review` against warden's own M6 PR (`#3`); confirm at least 4 of the 6 Copilot findings warden missed at M6 now surface as findings (not just questions). The 2 that overlap with warden's prior coverage stay covered. Anything still missed gets a written explanation in the close-out report — either documented as known limitation or as M8 punch-list candidate.
+- **Dogfood validation gate**: rerun `warden review` against warden's own M6 PR (`#3`); confirm at least 4 of the 6 Copilot findings warden missed at M6 now surface as findings (not just questions). The 2 that overlap with warden's prior coverage stay covered. Anything still missed gets a written explanation in the close-out report — either documented as known limitation or as a later-milestone punch-list candidate.
 
-**Stop at "blockers crossed + three deterministic detectors + sub-agent + question-citation verifier + npm-audit collapse + cheap polish + smoke harness work end-to-end on a fresh repo and on warden's own M6 PR." Do NOT start implementing multi-language detector support, free-form prose claim extraction in consistency, repo-wide deadcode scan, language-aware review guidance, BYOEmbedder, cross-repo retrieval, custom-code SAST worker, full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key handling, or retrieval refinements.** Those are M8+.
+**Stop at "blockers crossed + three deterministic detectors + sub-agent + question-citation verifier + npm-audit collapse + cheap polish + smoke harness work end-to-end on a fresh repo and on warden's own M6 PR." Do NOT start implementing multi-language detector support, free-form prose claim extraction in consistency, repo-wide deadcode scan, language-aware review guidance, BYOEmbedder, cross-repo retrieval, custom-code SAST worker, full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key handling, or retrieval refinements.** Those are later milestones.
 
 ## Repo additions
 
 ```
 packages/core/src/runners/
-├── scalability.ts            # NEW — Scalability detector (Type 1, AST). Direct-finding worker.
-├── deadcode.ts               # NEW — Deadcode detector (Type 1, AST + reverse import-graph).
-├── consistency.ts            # NEW — Consistency detector (Type 2, structured-verifier).
-└── committability.ts         # NEW — Committability sub-agent worker (Type 3, LLM cheap-tier).
+├── scalability.ts            # NEW — Scalability detector (AST). Direct-finding runner.
+├── deadcode.ts               # NEW — Deadcode detector (AST + reverse import-graph).
+├── consistency.ts            # NEW — Consistency detector (structured-verifier).
+└── committability.ts         # NEW — Committability sub-agent (cheap-tier LLM).
 
 packages/core/src/llm/
 ├── verify-citations.ts       # NEW — substring-verifier post-pass; reads cited line ranges,
@@ -84,7 +86,7 @@ packages/cli/scripts/
 └── smoke-m7-subagent.mts     # NEW — sub-agent against committability-shaped fixtures.
 ```
 
-No new workspace package. Whether `@warden/context` or `@warden/index` ever exists is M8+'s call when split-justification triggers fire (per ADR-0019 #11).
+No new workspace package. Whether `@warden/context` or `@warden/index` ever exists is a later-milestone call when split-justification triggers fire (per ADR-0019 #11).
 
 ## Package boundaries to honor
 
@@ -278,7 +280,7 @@ Doc set:
 - `AGENTS.md` (repo root)
 - `docs/**/*.md` (recursive glob)
 
-Out of scope: `node_modules/**/*.md`, `.github/**/*.md`, sub-package READMEs (M8+ — per-package doc-to-package mapping needs a story M7 doesn't have).
+Out of scope: `node_modules/**/*.md`, `.github/**/*.md`, sub-package READMEs (deferred to a later milestone — per-package doc-to-package mapping needs a story M7 doesn't have).
 
 Three structured claim types in v0:
 
@@ -307,7 +309,7 @@ Maps to `{ tier: 2, category: "consistency", kind: "assertion" }`.
 
 Triggers: the worker fires whenever any of the canonical docs OR the diff is non-empty. Per-claim verification only runs for claims that overlap with the diff (claim mentions a symbol / file / env var the diff also touches). Doc parsing is cheap; verification per claim is bounded by `O(claims × diff-size)`.
 
-Free-form prose claim extraction is M8+. Open-slot LLM questions can still surface prose mismatches the LLM happens to spot — they slot under `consistency` via category tagging in the questions lane.
+Free-form prose claim extraction is deferred to a later milestone. Open-slot LLM questions can still surface prose mismatches the LLM happens to spot — they slot under `consistency` via category tagging in the questions lane.
 
 ### 10. Committability sub-agent (`packages/core/src/runners/committability.ts`)
 
@@ -338,9 +340,14 @@ Pre-filter (Tier 1 hard-skip):
 - Glob exclusions: `.git/**`, `**/*.pyc`, `**/*.swp`, `.DS_Store`, `Thumbs.db`, `.vscode/.history/**`. These are never intentional commits.
 - Apply to the `changed` set; record `tier1Skipped: number` for the `degraded` log if non-zero.
 
-Threshold:
+Threshold (M7 placeholder per ADR-0022; full diff-level noise filter ships in M9):
 
-- Post-Tier-1 file count > 500 → skip the sub-agent entirely. Emit `degraded: [{ kind: "actionable", topic: "committability", message: \`skipped sub-agent: \${n} files post-filter (above 500; likely a sweep refactor or formatter run; consider .gitignore review)\` }]`.
+The placeholder catches the "node_modules dump" signature (and other catastrophic concentration cases) via a single directory-concentration heuristic, without needing the ecosystem profiles + diff-tree representation that M9 will add. Supersedes ADR-0021 #2's original "above 500 files post-Tier-1, skip" gate; the Tier-1 hard-skip list above is unchanged.
+
+- Compute concentration: for each top-level directory in the post-Tier-1 added set, count files. Let `topDir` = the directory with the largest count; `topShare` = `topDir.count / addedCount`.
+- **Skip sub-agent if `topShare > 0.80` and `addedCount > 50`.** Emit `degraded: [{ kind: "actionable", topic: "committability", message: \`skipped sub-agent: \${topDir.count}/\${addedCount} added files concentrated in \${topDir.name}/ (likely vendored bulk-add — consider checking .gitignore for \${topDir.name}/)\` }]`. The 50-file floor prevents the heuristic from firing on small diffs where one directory naturally dominates.
+- **Otherwise skip if `addedCount > 200`.** Emit `degraded: [{ kind: "actionable", topic: "committability", message: \`skipped sub-agent: \${addedCount} added files post-Tier-1 (above 200 with no dominant directory; consider triaging the diff or filtering by path before re-running)\` }]`.
+- Below both thresholds: sub-agent runs normally on the post-Tier-1 set.
 
 Sub-agent input shape (per file):
 
@@ -526,10 +533,10 @@ Banner placement (item 6): move the banner-render call from post-comments to pre
 - **Detectors emit findings with `kind: "assertion"`; sub-agent emits questions with `kind: "question"`.** No detector emits questions; no sub-agent emits assertions. The lane discipline is load-bearing.
 - **Every citation across both lanes goes through the substring-verifier.** No detector or sub-agent emission bypasses the verifier. The verifier is a post-pass, not a per-detector concern.
 - **`degradedWorkers` discriminated shape from day one.** Don't add a new detector emitting strings and migrate later. New code writes `{ kind, topic, message }` directly; the migration of existing call sites happens in Slice 1 before any detector lands.
-- **Detectors are TS-only via `SourceParser` DI.** No detector imports `typescript` directly — only `parser.ts` does. This preserves M5's tree-sitter swap-in path for M8+ multi-language.
+- **Detectors are TS-only via `SourceParser` DI.** No detector imports `typescript` directly — only `parser.ts` does. This preserves M5's tree-sitter swap-in path for later-milestone multi-language work.
 - **Sub-agent uses `getWorkerCheapModel()`, not `getBossModel()`.** The committability sub-agent is a worker, not the boss. The boss continues to be the M4 formatter.
 - **Substring-verifier uses pattern-match only, not AST-aware verification.** AST-aware would require structurally-valid LLM snippets (LLMs don't produce them reliably). Substring-match catches 95% of hallucinations and is robust to LLM whitespace mangling, line-ending differences, indent drift.
-- **No mid-stream re-tuning of detector thresholds.** v0 detector parameters (the trigger names, the threshold counts, the 500-file sub-agent skip) are constants in their respective files. Configurability is M8+ work tied to whatever per-repo config story Warden eventually grows.
+- **No mid-stream re-tuning of detector thresholds.** v0 detector parameters (the trigger names, the threshold counts, the directory-concentration sub-agent skip per ADR-0022) are constants in their respective files. Configurability is later-milestone work tied to whatever per-repo config story Warden eventually grows.
 - **No repo-wide deadcode scan.** The detector's reverse-import-graph queries are bounded by diff-touched + 1-hop. Repo-wide scanning is a separate audit verb (M8+).
 
 ## Slice ordering
@@ -546,7 +553,7 @@ Each slice is a coherent unit that should land + smoke before the next begins. T
 | **5** | Consistency detector (`runners/consistency.ts`). Smoke covers it. | Run on warden's M6 PR diff. Confirm README's `VOYAGE_API_KEY` claim fires. |
 | **6** | Committability sub-agent (`runners/committability.ts`) + substring-verifier (`llm/verify-citations.ts`) + sub-agent dispatcher (`@warden/ai`). `smoke-m7-subagent.mts` covers it. | Run on synthesized fixture (added file matching `scripts-bootstrap-*.mts` shape with `/Users/...` content). Confirm filename-based + content-based questions fire. Confirm verifier drops a deliberately-malformed citation. |
 | **7** | Polish: items 5 (init summary wording), 6 (banner placement), 12 (ensureGitignore atomicity), 14 (Voyage echo verify). | Final dogfood pass on warden's own M6 PR; on `blair`; on a third fresh repo. Validate at least 4 of the 6 Copilot-caught findings now surface. |
-| **8** | Close-out: dogfood report, M8 punch-list addendum (items 3, 4, 9, 13 from M7 plus the language-aware review guidance from Q17). ADR-0021 + this plan committed. | M7 ships. |
+| **8** | Close-out: dogfood report, follow-up punch-list addendum (items 3, 4, 9, 13 from M7 plus the language-aware review guidance from Q17). ADR-0021 + this plan committed. | M7 ships. |
 
 ## Acceptance criteria for M7
 
@@ -563,22 +570,22 @@ When all of these pass, M7 is done:
 9. Committability sub-agent emits a question on a fixture's `scripts-bootstrap-blair.mts`-shaped filename + a question on a `/Users/yash/...` content match. Both citations pass substring-verification.
 10. Substring-verifier drops at least one deliberately-malformed citation (test fixture in `smoke-m7-subagent.mts`); emits the corresponding `degraded: { kind: "info", topic: "llm", message: "dropped 1 citation..." }` entry.
 11. Init summary line reads as `\`319 chunks (319 cached) · 0/319 embeddings · 3 failed\`` (or analogous three-number form). Banner prints pre-phase. ensureGitignore runs after `readLockedModel`. Voyage echo verification fires on a model-mismatch test (manually flip `_modelId` after a successful API call to simulate). (Items 5, 6, 12, 14 crossed.)
-12. **Dogfood validation gate**: rerun `warden review` against warden's own M6 PR (`#3`); confirm at least 4 of the 6 Copilot findings warden missed at M6 now surface as findings (the three scalability cases + the deadcode case at minimum). The 2 still-missed findings (if any) are documented in the close-out report — either as known limitations (with rationale) or as M8 punch-list candidates.
+12. **Dogfood validation gate**: rerun `warden review` against warden's own M6 PR (`#3`); confirm at least 4 of the 6 Copilot findings warden missed at M6 now surface as findings (the three scalability cases + the deadcode case at minimum). The 2 still-missed findings (if any) are documented in the close-out report — either as known limitations (with rationale) or as later-milestone punch-list candidates.
 13. ADR-0021 + `m7-plan.md` committed. ADR-0020 namechecked as predecessor.
 
 ## What NOT to do in this milestone
 
-- **Do not implement multi-language detector support.** All three deterministic detectors are TS-only via `TsCompilerParser`. Tree-sitter swap-in for Python / Rust / Go / Java is M8+.
-- **Do not implement free-form prose claim extraction in consistency.** Structured-only (env vars + CLI commands + file paths). Free-form needs LLM extraction + LLM verification — entirely new worker shape; M8+.
+- **Do not implement multi-language detector support.** All three deterministic detectors are TS-only via `TsCompilerParser`. Tree-sitter swap-in for Python / Rust / Go / Java is a later milestone.
+- **Do not implement free-form prose claim extraction in consistency.** Structured-only (env vars + CLI commands + file paths). Free-form needs LLM extraction + LLM verification — entirely new worker shape; deferred.
 - **Do not implement repo-wide deadcode scanning.** Diff-touched functions + one hop downstream via `import_graph`. Pre-existing dead branches in untouched code are out of scope.
-- **Do not refactor `BannerState` to a discriminated-by-topic shape.** Add the `no-embeddings` peer state and align with the new `degradedWorkers` `kind` field. Broader refactor is M8+.
+- **Do not refactor `BannerState` to a discriminated-by-topic shape.** Add the `no-embeddings` peer state and align with the new `degradedWorkers` `kind` field. Broader refactor is deferred.
 - **Do not implement an LLM-driven detector for scalability or deadcode.** Direct findings from deterministic AST detection only. The LLM triage layer downgrades; it doesn't author.
-- **Do not ship punch-list items 3, 4, 9, 13.** Voyage retry classifier body-peek; embed-phase featureless spinner; pre-flight estimate refresh; `--simulate-fail-embed` test seam. All M8 polish.
-- **Do not implement language-aware review guidance.** Total-TS-style code-quality opinions (SSOT, type reuse, `as const` / `satisfies`, avoid `any`) defer to M8 with their own grilling.
-- **Do not implement BYOEmbedder, cross-repo retrieval, custom-code SAST worker, full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key handling, or retrieval refinements.** All M8+ per ADR-0019.
+- **Do not ship punch-list items 3, 4, 9, 13.** Voyage retry classifier body-peek; embed-phase featureless spinner; pre-flight estimate refresh; `--simulate-fail-embed` test seam. All deferred polish.
+- **Do not implement language-aware review guidance.** Total-TS-style code-quality opinions (SSOT, type reuse, `as const` / `satisfies`, avoid `any`) defer to a later milestone with their own grilling.
+- **Do not implement BYOEmbedder, cross-repo retrieval, custom-code SAST worker, full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key handling, or retrieval refinements.** All later milestones per ADR-0019.
 - **Do not write tests** (per memory `user_no_tests_personal.md`: no test culture on personal repos). The smoke scripts are the validation surface.
 - **Do not modify `CategoryEnum` or `KindEnum`.** Both are already correct (ADR-0020 added the four new categories; M4 added the `assertion | question` discriminator). M7 doesn't touch the schema beyond `degradedWorkers`.
-- **Do not introduce a new workspace package.** All M7 code lives in `@warden/core`, `@warden/db`, `@warden/ai`, `@warden/cli`. Whether `@warden/context` or `@warden/index` ever exists is M8+'s call when split-justification triggers fire (ADR-0019 #11).
+- **Do not introduce a new workspace package.** All M7 code lives in `@warden/core`, `@warden/db`, `@warden/ai`, `@warden/cli`. Whether `@warden/context` or `@warden/index` ever exists is a later-milestone call when split-justification triggers fire (ADR-0019 #11).
 
 If you reach for any of the above, stop and re-read ADR-0021 — the deferral is intentional.
 
@@ -586,11 +593,11 @@ If you reach for any of the above, stop and re-read ADR-0021 — the deferral is
 
 These are the non-obvious insights from the design discussion. Worth preserving here because they're the kind of thing you only see by working through the design tree carefully — not the kind that appear in the final ADR text. Pull them into a blog post about category-extension under a citation-discipline thesis.
 
-1. **The category list is *iterative*, not closed.** ADR-0020 added four; M7 promotes three of them to detector-asserted. M8+ may add more (security-pattern, leverage, api-claim) and may upgrade existing categories. The architectural through-line is the *upgrade path* (categories ship as questions; promote to findings/sub-agent-citations as deterministic producers earn rent), not the specific list. Open-slot LLM questions remain a fallback for cases the detectors don't catch — and they're the *evidence corpus* for which category to add next. Every time another reviewer catches something warden missed, ask "what category did I miss?", not "what bug did I miss?" — the category answer informs future runs; the bug answer is just this PR's diff.
+1. **The category list is *iterative*, not closed.** ADR-0020 added four; M7 promotes three of them to detector-asserted. Later milestones may add more (security-pattern, leverage, api-claim) and may upgrade existing categories. The architectural through-line is the *upgrade path* (categories ship as questions; promote to findings/sub-agent-citations as deterministic producers earn rent), not the specific list. Open-slot LLM questions remain a fallback for cases the detectors don't catch — and they're the *evidence corpus* for which category to add next. Every time another reviewer catches something warden missed, ask "what category did I miss?", not "what bug did I miss?" — the category answer informs future runs; the bug answer is just this PR's diff.
 
 2. **Citation discipline generalizes from assertions to questions.** ADR-0008 said "assertions need verifiable sources." ADR-0021 strengthens to "any citation, regardless of lane, needs a verifiable source." Questions without citations stay frictionless (the common case from the main review LLM). Questions with citations (the new sub-agent shape) get the same mechanical verification assertions get. The discipline becomes uniform across lanes; only the *lane semantics* differ (questions ask, assertions claim — but both, when grounded, must echo the source). Substring-match is the cheapest possible verification; second-LLM verification reintroduces the LLM-checks-LLM trust loop.
 
-3. **Sub-agent committability is the third detector type.** Type 1 (deterministic AST: scalability, deadcode), Type 2 (structured-verifier: consistency), Type 3 (LLM sub-agent with cite-and-verify: committability). Each fits a different point on the deterministic ↔ LLM spectrum, picked according to the natural shape of the category. Treating all four uniformly (all detectors *or* all prompts) gets one of them wrong; treating each according to its natural shape is what preserves ADR-0008 where deterministic detection is possible and acknowledges where LLM judgment is the right tool. The sub-agent path is also where M8+ extensions of committability go (mid-file URLs, accidentally-committed `.env.local`, etc.) — regex sets saturate fast; sub-agents grow with the LLM.
+3. **Detectors vs. sub-agents fit different points on the deterministic ↔ LLM spectrum.** The rule (canonicalised in `CONTEXT.md`): bounded *and* reliably structural across ecosystems → detector; open-ended *or* nominally bounded but context-dependent → sub-agent. Three categories satisfy the first clause (scalability via AST pattern-match, deadcode via AST + reverse import-graph, consistency via structured-verifier on env-var / CLI / file-path claims). Committability satisfies the second — supposedly-bounded subsets (dirname conventions, dev-script naming) are unreliable across ecosystems and call-sites, so an LLM sub-agent earns its keep. Treating all four uniformly (all detectors *or* all prompts) gets one of them wrong; treating each per its natural shape preserves ADR-0008 where deterministic detection is possible and acknowledges where LLM judgment is the right tool. The sub-agent path is also where later-milestone extensions of committability go (mid-file URLs, accidentally-committed `.env.local`, etc.) — regex sets saturate fast; sub-agents grow with the LLM. (Earlier drafts used a "Type 1 / Type 2 / Type 3" labelling; that taxonomy was dropped during the M7 follow-up grilling — the runner / detector / sub-agent cut in `CONTEXT.md` is the canonical vocabulary.)
 
 4. **The committability "regex pre-filter" was almost a trap.** Initial sketch: hard-exclude `node_modules/`, `dist/`, `build/`, etc. via regex before the sub-agent sees them. User pushback: those directories *might* be intentional commits (published artifact, workaround for broken dependency). Refining to a Tier-1 hard-skip (only patterns that are *never* intentional: `.git/`, `*.pyc`, `*.swp`, OS temp files) plus letting the sub-agent decide for ambiguous cases is the principled answer. The general lesson: hard exclusions are a form of pre-judging that conflicts with "let the LLM use its judgment." Use exclusions only for *truly* universal noise; trust the sub-agent for the rest.
 
@@ -604,20 +611,20 @@ These are the non-obvious insights from the design discussion. Worth preserving 
 
 9. **Sequencing detectors in increasing-novelty order is risk management.** Scalability is the simplest (single-file AST query). Deadcode adds reverse import-graph traversal. Consistency adds doc parsing + zod schema introspection. Committability adds the sub-agent — a new pipeline shape (LLM call as a worker). Landing them in this order means each new piece sits on top of a stable foundation; the most novel piece (sub-agent) lands last when the worker pipeline is well-exercised. The opposite ordering (sub-agent first) is faster to validate the new shape but compounds integration risk.
 
-10. **Language-aware review guidance is a *separate* milestone, not M7 polish.** TS-quality opinions (Total-TS patterns, SSOT, type reuse) feel like they could ride along in M7's prompt update. Resisting that urge: the language-guidance design space (static prompt section vs. retrieval-augmented vs. hybrid; per-language scoping; corpus curation; how it interacts with M6's chunk store) is its own grilling. Folding a half-formed version into M7 either ships a saturating baseline that inhibits later redesign (the prompt-section trap) or balloons scope (retrieval-augmented at this stage). Defer to M8 keeps the choice coherent. The general lesson: when a question deserves its own grilling, *don't sneak its half-answer into the current grilling's plan*.
+10. **Language-aware review guidance is a *separate* milestone, not M7 polish.** TS-quality opinions (Total-TS patterns, SSOT, type reuse) feel like they could ride along in M7's prompt update. Resisting that urge: the language-guidance design space (static prompt section vs. retrieval-augmented vs. hybrid; per-language scoping; corpus curation; how it interacts with M6's chunk store) is its own grilling. Folding a half-formed version into M7 either ships a saturating baseline that inhibits later redesign (the prompt-section trap) or balloons scope (retrieval-augmented at this stage). Deferring to a later milestone keeps the choice coherent. The general lesson: when a question deserves its own grilling, *don't sneak its half-answer into the current grilling's plan*.
 
 11. **The M5 selector weight terminology trap.** Q3 of the M7 grilling proposed "flipping" the cheap-signals weights so blast-radius (`imported-by`) wins over contracts (`imports`). The proposal was sound; the labels in the proposal were inverted from the labels in the code. Reading the actual constants showed the desired state was already shipped. The trap: when the *direction* of an asymmetry is hidden behind English labels ("things that depend on" vs. "things depended on by"), it's easy to argue past oneself about which side has the higher weight. The fix: always check the code's actual constants before ratifying a weight change. Generalized: when proposing a numeric tuning, *quote the existing constants* in the proposal.
 
 12. **ADR-0021 amends ADR-0008 by extending citation discipline to questions.** Until now, questions were citation-free by design (asking is not claiming). The committability sub-agent emits citations alongside its questions; ADR-0021 extends the discipline to those citations. The original ADR-0008 invariant ("the LLM cannot author findings without a tool source") is preserved — the sub-agent isn't asserting findings, it's asking grounded questions whose grounding is mechanically checkable. The general principle: when a new emission shape lands (sub-agent questions with citations), the relevant invariant either bends to accommodate it or stays invariant by extending uniformly to the new shape. Uniform extension is almost always the better choice.
 
-13. **The "build the seam, don't fill it" temptation is sometimes just dead architecture.** The M7 grilling's first sketch had a doc-claim-extractor + verifier-phase architecture for consistency. Refining v0 to deterministic-only (env vars / CLI / file paths) collapsed to a single worker — the verifier phase had nothing to do. "Reserve the architectural slot for M8+ free-form prose" sounds prudent; in practice, empty seams accumulate when there's no consumer testing them. The principle: build seams when you have a concrete consumer about to materialize, not when there's a hypothetical M8+ use case. M8 can add the seam itself when free-form prose claims earn rent.
+13. **The "build the seam, don't fill it" temptation is sometimes just dead architecture.** The M7 grilling's first sketch had a doc-claim-extractor + verifier-phase architecture for consistency. Refining v0 to deterministic-only (env vars / CLI / file paths) collapsed to a single worker — the verifier phase had nothing to do. "Reserve the architectural slot for later-milestone free-form prose" sounds prudent; in practice, empty seams accumulate when there's no consumer testing them. The principle: build seams when you have a concrete consumer about to materialize, not when there's a hypothetical future use case. The relevant later milestone can add the seam itself when free-form prose claims earn rent.
 
 Each of these came out of walking the M7 design tree question-by-question instead of writing the plan top-down. The point of grilling is that the eventual plan is the *survivor* of decisions, not the *first draft* of them.
 
 ## When you're done
 
 - Hand back: a list of any deviations from this plan (with reasons) and confirmation all acceptance criteria pass.
-- The next session picks up at M8+ — likely some combination of: punch-list items 3/4/9/13 (polish carryover), language-aware review guidance (deferred from M7 Q17 with its own grilling), tree-sitter / multi-language detector support, free-form prose claim extraction in consistency, repo-wide deadcode scan as an audit verb, BYOEmbedder, cross-repo retrieval + leverage category, custom-code SAST worker (DeepSec-shaped per ADR-0015), full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key-change handling, retrieval refinements. M8+'s first decision is which slice to take next; that's the next grilling's job.
+- The next sessions are M8 (boss/worker orchestration) and M9 (diff-level noise filter per ADR-0022). Beyond those, residual deferred work includes: punch-list items 3/4/9/13 (polish carryover), language-aware review guidance (deferred from M7 Q17 with its own grilling), tree-sitter / multi-language detector support, free-form prose claim extraction in consistency, repo-wide deadcode scan as an audit verb, BYOEmbedder, cross-repo retrieval + leverage category, custom-code SAST worker (DeepSec-shaped per ADR-0015), full `warden index export/import` CLI verbs, async/daemon `JobRunner`, cloud-hosted index, mid-stream key-change handling, retrieval refinements. Each later milestone picks its slice via its own grilling.
 
 ---
 

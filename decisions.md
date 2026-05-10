@@ -35,6 +35,42 @@ Companion doc: `vision.md` (the long-form thinking framework, preserved from the
 | LLM provider posture | Anthropic primary; one-retry on transient; Google Gemini fallback (gemini-2.5-pro/flash matched to sonnet/haiku tiers); hard fail if both fail (ADR-0017)        |
 | Context selection (M5) | Cheap-signals selector + jscpd dedup runner; embeddings/Merkle/`warden init`/banner deferred to M6 (ADR-0018) |
 | Indexing layer (M6)    | Voyage `voyage-code-3` hosted embeddings + `code-chunk` chunker + locked-model index + selector v2 semantic reason; export/import CLI deferred (ADR-0019) |
+| Diff-level noise filter (M9) | Diff-loader pre-runner stage prunes via ecosystem detection + per-ecosystem noise profiles (in-package JSON) + depth-limited tree; M7 ships directory-concentration placeholder (ADR-0022) |
+| Orchestration spine (M8) | `Runner` contract + in-memory `Scratchpad` + parallel `dispatch()` + `synthesizer` (replaces M4 formatter); committability + scalability migrated; remaining 6 detectors inline until M9; dynamic dispatch + new LLM-shaped sub-agents + specialist *worker* tier deferred (ADR-0023) |
+
+---
+
+## Status snapshot (as of 2026-05-10)
+
+Tracks whether each ADR's decisions are reflected in the shipped code, not whether the ADR has been "approved." `Done` = code matches the decision; `Partial` = some sub-points landed, others still open; `Direction` = forward-looking, near-term constraints met but full surface awaits a future milestone; deferred items inside an ADR are listed under that ADR.
+
+| ADR | Status | Note |
+|-----|--------|------|
+| 0001 | Done | Single-user / OSS-quality posture upheld; no multi-tenant scaffolding. |
+| 0002 | Done | CLI shipped; bot/IDE wrappers explicitly deferred per ADR-0013. |
+| 0003 | Done | Node + pnpm + Turborepo as scaffolded. |
+| 0004 | Done | `packages/{cli,core,ai,db,env,config}` live; `apps/` empty by design. |
+| 0005 | Done | All LLM calls flow through Vercel AI SDK in `@warden/ai`. |
+| 0006 | Done | Sonnet/Haiku tiered, Anthropic primary. Multi-provider fallback amended by ADR-0017; BYOLLM still deferred. |
+| 0007 | Done | Drizzle on better-sqlite3 at `.warden/cache.sqlite`; sync layer YAGNI as stated. |
+| 0008 | Done | All four phases (ecosystem detect → TSC/ESLint → npm-audit/OSV → single-LLM formatter) shipped via M1–M4. M2+ deferred list intact. |
+| 0009 | Done | ESLint runner shipped; Semgrep deferred. |
+| 0010 | Done | Pretty CLI default + `--json`; PR-comment / SARIF deferred. |
+| 0011 | Done | `warden check` + `warden review` shipped; `patrol` reserved. |
+| 0012 | Done | Priority order encoded in `PRIORITY_ORDER` (extended by ADR-0020); test-culture detection in place. |
+| 0013 | Done (architectural constraint) | `@warden/core` is I/O-pure; bot deployments themselves remain explicit M2+ work. |
+| 0014 | Done | One-shot non-interactive CLI; no TUI. |
+| 0015 | Direction | M4 prompts-as-files constraint shipped (`packages/core/src/llm/prompts/{system,user-template}.md`). Custom-code SAST worker still deferred. |
+| 0016 | Done | Storage interfaces (`ChunkStore` / `EmbeddingStore` / `MerkleStore` / `JobRunner` / `IndexExporter` / `IndexImporter`), content-addressing, model-versioning all live. CLI export/import verbs amended to interface-only by ADR-0019 #8. |
+| 0017 | Done | `@warden/core/src/llm/cascade.ts` shipped; Anthropic→retry→Google fallback wired with `degradedWorkers` notice. |
+| 0018 | Done | M5 cheap-signals selector + jscpd dedup runner shipped; `import_graph` + `file_state` tables in place. |
+| 0019 | Done | Voyage `voyage-code-3` + `code-chunk` + locked-model + banner gradient + Phase 1–3 `warden init` shipped. M7+ deferrals listed in CLAUDE.md still pending. |
+| 0020 | Done | Four new categories (`scalability`, `consistency`, `deadcode`, `committability`) added to `CategoryEnum` and `PRIORITY_ORDER`; system prompt slot for question lane in place. |
+| 0021 | Partial | See per-point breakdown at the end of the ADR. Engine blockers + most polish landed; committability sub-agent + consistency detector + question-citation verifier still open. ADR-0021 #2's Tier-2 file-count gate is superseded by ADR-0022's directory-concentration heuristic. |
+| 0022 | Direction | M7 directory-concentration placeholder ships in the committability slice; full diff-level noise filter scheduled for M9 per `m9-plan.md`. |
+| 0023 | Direction | M8 grilling complete (Q1 → Q8); orchestration spine (dispatch + scratchpad + synthesizer + `Runner` contract) scheduled for M8 per `m8-plan.md`. Migration scope: committability + scalability through the contract; remaining 6 detectors stay inline until M9. |
+
+Deferred items called out within ADRs (not yet scheduled): ADR-0008 backlog (sibling-repo scanning, multi-ecosystem, persistent feedback loop, license scanning, IDE/Action wrappers); ADR-0019 M10+ list (BYOEmbedder, cross-repo / `node_modules` / `.d.ts` retrieval, custom-code SAST worker, `warden index export/import` CLI verbs, real async/daemon `JobRunner`, cloud-hosted index, mid-stream key-change handling, retrieval refinements); ADR-0023 deferrals (dynamic dispatch, three execution modes, new LLM-shaped sub-agents — adversarial critic / self-aware checker / free-form prose consistency, tool-call seams, SQLite-backed scratchpad, vision-tier specialist Sonnet workers, re-platforming of the remaining 6 detectors through the contract).
 
 ---
 
@@ -711,5 +747,182 @@ The headline tension in M7 is that ADR-0020 deliberately routed all four new cat
 **Caveat — this ADR codifies an upgrade pattern future ADRs will reuse.** ADR-0020 introduced "LLM asks via questions[] today; deterministic detector asserts via findings[] later." ADR-0021 implements that for three categories and adds a third lane (sub-agent emits citations into questions[]). The pattern — *categories shipped as questions; promoted to findings/sub-agent-citations as deterministic producers earn rent* — applies to any future category extension. M8+ may add `security-pattern` (custom-code SAST), `leverage` (cross-repo), `api-claim` (third-party API-shape verification), each starting as a question-lane category and graduating per its own ADR. The lane discipline (LLM never asserts, sub-agents emit grounded questions, deterministic detectors emit grounded assertions) is the architectural through-line.
 
 **Caveat — this is a *direction*, not a milestone schedule.** M7 is the next milestone, but its acceptance bar is "blockers crossed + four category upgrades land + dogfood validation against M6 PR #3 catches at-least the 4-of-9 Copilot findings that motivated ADR-0020," not a calendar. Per ADR-0001's single-user-built-right posture, dogfooding pacing dominates artificial deadlines.
+
+**Status (per numbered point in the Decision section).**
+
+| # | Sub-point | Status |
+|---|-----------|--------|
+| 1 | Three deterministic detector workers | Partial — `scalability-detector` (`packages/core/src/runners/scalability.ts`) and `deadcode-detector` (`runners/deadcode.ts`) shipped; `consistency-detector` runner not yet present (category is wired in `mapSeverity` and `runners/types.ts`, and the LLM question-lane covers the gap for now). |
+| 2 | `committability-subagent` worker | Open — category appears in `CategoryEnum` and `system.md`, but no sub-agent worker file exists in `packages/core/src/llm/`. |
+| 3 | Substring-verification of question citations | Open — gated on #2; no verifier post-pass shipped. |
+| 4 | Runtime schema migration | Done — `db()` in `packages/db/src/index.ts` calls `migrate()` with bundled `dist/migrations/`. |
+| 5 | `BannerState` `no-embeddings` peer | Done — `packages/core/src/banner/index.ts` emits `{ kind: "no-embeddings" }`. |
+| 6 | Repo-root precedence (`pnpm-workspace.yaml` → `.git` → `package.json`) | Done — `packages/db/src/path.ts:findRepoRoot()`. |
+| 7 | Discriminated `degradedWorkers` shape | Done — `{ kind, topic, message }` flowing across all push sites. |
+| 8 | npm-audit collapse-unless-manifest-touched | Done — `collapseVulnComments()` + `manifestTouched` gating in `packages/core/src/index.ts`. |
+| 9 | Cheap polish (#5 / #6 / #12 / #14) | Partial — verify per-item before claiming closed; banner placement and runtime-migration ordering both in line with intent. |
+| 10 | Sub-agent as third LLM call shape | Open — gated on #2. |
+| 11 | TS-only horizon | Done — all detectors built on `TsCompilerParser`. |
+| 12 | Smoke harness | Partial — `smoke-m7-init.mts` and `smoke-m7-detectors.mts` shipped; `smoke-m7-subagent.mts` not present (gated on #2). |
+
+---
+
+## ADR-0022 — M9: diff-level noise filter; M7 placeholder via directory-concentration heuristic
+
+**Decision.** A pre-runner stage that prunes the diff before any runner consumes it ships in M9 as the right architectural answer to the catastrophic-input problem (committed `node_modules/` or its ecosystem equivalent). The full design — ecosystem-detection-driven, profile-loaded, depth-limited tree pruning, with bounded memory regardless of input size — is described below and milestone-planned in `m9-plan.md`. M7 ships only a single-heuristic placeholder, scoped to the committability sub-agent: skip if any one top-level directory contributes >80% of added files (the "node_modules dump" signature) *or* if added files exceed 200 with no dominator. The degraded entry is `actionable` and names the suspect directory by name so the user can fix `.gitignore` directly. This supersedes ADR-0021 #2's Tier-2 raw 500-file threshold; the Tier-1 hard-skip list (`.git/`, `*.pyc`, `*.swp`, `.DS_Store`, `Thumbs.db`, `.vscode/.history/`) is unchanged.
+
+The full M9 design:
+
+1. **Single seam at the diff loader.** The noise filter is a property of the diff input, not of any one runner. When the loader returns a diff, it returns a *pruned* diff — every downstream runner (TSC, ESLint, jscpd, vuln, the M7 deterministic detectors, the committability sub-agent) sees the same filtered input. No per-runner threading; no per-runner re-litigation of the noise policy.
+
+2. **Ecosystem detection drives the filter.** M2's ecosystem detection (`packages/core/src/ecosystem/`) already classifies the repo by marker files (`package.json` → JS/TS, `pyproject.toml` → Python, `go.mod` → Go, etc.). The detector is extended to emit a list of detected ecosystems; the filter loads the corresponding **noise profiles** and unions them. Multi-ecosystem repos (JS + Python; JS + Rust) get the union of both profiles' rules.
+
+3. **Noise profiles ship inside `@warden/core`.** Per-ecosystem JSON documents at `packages/core/src/ecosystem/profiles/{javascript,python,rust,go,java,csharp,ruby}.json` listing always-noise directories (`node_modules/`, `__pycache__/`, `target/`, `bin/`, `obj/`, etc.), context-dependent directories (`dist/`, `vendor/`, `build/`), generated extensions (`.pyc`, `.min.js`, `.d.ts.map`), and lock files. Profiles are *Warden's* knowledge, not the user's burden — no new config file (`.warden/ecosystems.toml` was rejected; ADR-0008's zero-config posture holds). User override flows through the existing `.reviewbot/overlay.yaml`.
+
+4. **Diff tree representation, not flat list.** The filter aggregates `git diff --raw` into a depth-limited tree (≤3 levels) of `(path, addedCount, modifiedCount, deletedCount)` nodes. Memory is bounded by directory structure, not file count — a 500K-file diff still fits in a few KB. Pruning happens against subtrees: when a profile says `node_modules/` is always-noise and the tree shows `node_modules/ [+498,000 files]`, the entire subtree is dropped in one pass without enumerating the leaves.
+
+5. **`.gitignore` is the user's per-repo declaration; profiles are belt-and-suspenders.** The catastrophic case is "someone removed `node_modules/` from `.gitignore`." When that happens, gitignore alone fails. Profiles defend: regardless of gitignore, JS-detected repos skip `node_modules/`. In the normal case, gitignore already prunes most of what profiles would catch; the filter is silently redundant — exactly as belt-and-suspenders should be.
+
+6. **One degraded-entry per pruned subtree.** Each pruned subtree emits a `{ kind: "actionable", topic: "noise-filter", message: \`skipped \${count} files in \${path}/ (\${reason}, \${ecosystem} ecosystem)\` }`. The user sees what got pruned, why, and can act on it (fix `.gitignore`, override via `.reviewbot/overlay.yaml`). No new `warden show-skipped` verb — the degraded entries themselves are the explainability surface.
+
+7. **Per-subtree ecosystem detection is M9's own sub-decision.** The clean case is single-ecosystem repos (JS-only, Python-only). The hard case is monorepos with directory-level ecosystem boundaries: `frontend/=JS, backend/=Python`. Ideally the filter detects ecosystems per top-level directory and applies profiles scoped to each subtree, so it doesn't accidentally skip `backend/vendor/` using the JS profile's rule about Go-specific `vendor/`. M9's own grilling decides whether per-subtree detection ships in the initial cut or as a follow-up.
+
+**Why.**
+
+- *Single seam vs. per-runner.* The catastrophic case wastes every runner. TSC tries to type-check 500K vendored files; ESLint lints them; jscpd dedup-scans them; vuln runs against the wrong manifests; the M7 detectors traverse vendored AST; the committability sub-agent costs the most when it does, but it's the loudest victim, not the only one. Filtering at the diff loader fixes all six in one place; the per-runner alternative re-litigates the noise policy six times and threads explainability through six emission paths.
+
+- *Profiles vs. structural-only heuristics.* Pure structural heuristics (>80% concentration, binary skip, gitignore alignment) are ecosystem-agnostic by design — no profile maintenance. The disadvantage: degraded messages can only say `"skipped: appears to be bulk-added junk"` without naming *what* the junk is. Profiles let the message say `"skipped 498,000 files in node_modules/ (vendored JS dependencies)"` — confidence vs. guess. Trust matters; profiles ship.
+
+- *Profiles inside Warden vs. user config.* `.warden/ecosystems.toml` was the alternative — a per-project config file the user maintains. Rejected because ADR-0008's zero-config posture is load-bearing for the OSS-quality bar (ADR-0001), and noise profiles are *Warden's* domain knowledge: every JS project has the same `node_modules/`, every Python project has the same `__pycache__/`. Nothing project-specific to configure unless the project has a non-standard generated directory — which is what `.reviewbot/overlay.yaml` is for.
+
+- *Tree representation vs. flat list.* The pathological case (500K files) can't be held as a flat list anywhere — neither in memory nor in an LLM prompt. The tree representation is the only design that bounds memory by structure rather than count. Without it, the filter falls over on the exact case it was built to defend.
+
+- *M7 placeholder vs. nothing.* The committability sub-agent is the loudest victim of unfiltered diffs (LLM cost scales linearly with files). Shipping M7 with no guard means the first user to commit `node_modules/` and run `warden review` gets a $5 sub-agent invocation. The directory-concentration heuristic catches that case for ~1 hour of code; deferring it would either delay M7 or accept the misfire. The placeholder is also a stub of M9's structural-heuristic layer — if it catches the cases that matter, M9 inherits real evidence about heuristic signal quality.
+
+- *Why M9 and not M7.* The full design is materially more work than the M7 placeholder: ecosystem-profile authoring (one per language), diff-tree builder + pruner, integration into all six existing runners (each one's interface adapts to "diff is now a pruned tree, not a path list"), per-subtree ecosystem decision, smoke harness on synthetic catastrophic-diff fixtures, and a dogfood pass on at least three distinct ecosystems. Cramming it into M7 either delays M7 or half-bakes the filter.
+
+**Alternatives considered and rejected.**
+
+- *Sub-agent-only file-volume guard.* Cheapest path; just put a hard threshold around committability and call it done. Rejected because the catastrophic case (committed `node_modules/`) wastes every runner, not just the sub-agent. Fixing only the loudest victim leaves TSC, ESLint, jscpd, vuln, and the M7 detectors silently churning through vendored input.
+
+- *Per-runner opt-in filter.* Each runner declares whether it wants the noise filter applied. Rejected because every new runner re-litigates the policy debate, the explainability surface splinters across emission paths, and there's no principled answer to "should TSC see vendored code?" — the answer is always no, and consolidating that in the loader is the single-truth design.
+
+- *New `.warden/ecosystems.toml` config file.* User-authored profile + ignore-list overrides. Rejected because it violates ADR-0008's zero-config posture; the project-specific override case is what `.reviewbot/overlay.yaml` already handles; per-ecosystem profile data is Warden's domain knowledge.
+
+- *Pure structural heuristics, no profiles.* Detect the catastrophic case via ecosystem-agnostic signals only. Rejected because trust matters: a degraded message that says `"appears to be vendored junk"` builds less confidence than one that says `"vendored JS dependencies (node_modules/)"`. Profiles are the cheap source of confidence; structural heuristics complement them but don't replace them.
+
+- *Ship the full M9 design in M7.* Rejected per "Why M9 and not M7" — would delay M7 or half-bake the filter; both worse than placeholder + clean M9.
+
+- *Defer everything (no M7 placeholder).* Ship M7 with raw 500-file threshold (ADR-0021's Tier-2 design). Rejected because the directory-concentration heuristic is a few-hours spike that catches the actual catastrophic case and pre-validates the structural-signal layer M9 will build on. Holding it for M9 buys nothing.
+
+**Caveat — supersedes ADR-0021 #2's Tier-2 file-count gate.** ADR-0021 specified "Above 500 files post-Tier-1, the sub-agent is skipped entirely." ADR-0022 replaces that with the directory-concentration heuristic: skip if >80% of added files share one top-level directory *or* if added files >200 with no dominator. The Tier-1 hard-skip list (`.git/`, `*.pyc`, `*.swp`, `.DS_Store`, `Thumbs.db`, `.vscode/.history/`) is unchanged. Other M7 sub-points of ADR-0021 are unaffected.
+
+**Caveat — per-subtree ecosystem detection is an M9 sub-decision, not a commitment.** The simple case (single-ecosystem repo; multi-ecosystem repo where ecosystems share root markers) is handled by root-level detection plus profile union. The hard case — monorepos with directory-level boundaries (`frontend/`=JS, `backend/`=Python) — needs per-top-level-directory marker detection. M9's grilling decides whether to ship per-subtree detection in the initial cut or as a follow-up; storage interfaces should accommodate it either way.
+
+**Caveat — the M7 placeholder will misfire on legitimate large refactors.** A 1,000-file rename inside `packages/api/` triggers the >80% concentration rule. The user lives with the misfire (re-run with `--force-committability` if such a flag exists, or accept the noise) until M9 ships the full filter, at which point ecosystem profiles + tree pruning eliminate the catastrophic case without false positives on legitimate concentration. Mid-flight, the placeholder is honest about being a stub.
+
+**Caveat — degraded `topic` namespace expands by one.** Topic `noise-filter` joins the conventional list (`context`, `osv`, `gitignore`, `committability`, `scalability`, `deadcode`, `consistency`, `embeddings`, `schema`, `llm`, `vuln`). Listed here so M9's emission sites don't reinvent the topic name.
+
+**Caveat — `.reviewbot/overlay.yaml` semantics extend slightly.** Today the overlay handles known-debt suppression. M9 extends it to also override the noise filter — `noise.always: ["generated-api-client/", "proto-out/"]` for project-specific generated dirs, `noise.never: ["vendor/internal/"]` for project-specific real dirs the profile would otherwise skip. Schema migration is additive; existing overlays keep working.
+
+**Status.** Direction. M7 placeholder ships per the directory-concentration heuristic above. Full M9 design tracked in `m9-plan.md`.
+
+---
+
+## ADR-0023 — M8: orchestration spine: dispatch + scratchpad + synthesizer
+
+**Decision.** M8 ships the *spine* of the boss/worker orchestration deferred by ADR-0008 — dispatch, scratchpad, synthesizer — without the worker tier itself. The deferred concept (CONTEXT.md §3) reserves *worker* for vision-tier specialist Sonnet LLMs in a multi-call pipeline; M8 dispatches the *existing* runners (detectors + sub-agents per CONTEXT.md §5) through new orchestration plumbing, validating the contract against committability + scalability without committing to specialist-LLM workers. The dogfood gap that motivated this scheduling — Copilot caught 6 legit findings warden review missed on PR #4, 5 of which the user fixed in commit `8944ac3` — does not close in M8 (closing it requires the LLM-shaped sub-agents M9+ adds *on top of* this spine). M8's value is *enabling*: every M9+ AI-heavy capability (adversarial critic, self-aware invariant checker, free-form prose consistency, DeepSec-shaped SAST) plugs into this spine rather than reinventing dispatch and synthesis.
+
+The full surface:
+
+1. **Single deferred item, no bundle.** ADR-0008's deferral list (boss/worker orchestration, two-LLM generator+grader) plus the `project_warden_self_aware_boss.md` direction plus ADR-0019's deferred DeepSec-shaped SAST collectively constitute the AI-heavy roadmap. M8 schedules exactly one of them — boss/worker orchestration's *spine* — to preserve the milestone-shape discipline established by ADR-0018 / ADR-0019 / ADR-0021. Bundling two AI-heavy directions into one milestone is exactly the failure mode ADR-0008 was written to avoid.
+
+2. **Spine, not full orchestration.** M8 does not ship dynamic dispatch (boss reasons about which runners to invoke per-diff); it does not ship the three execution modes from the inspiration blog (direct / parallel / explore-then-decide); it does not ship new LLM-shaped sub-agents (adversarial critic, self-aware checker). Dispatch is static — the same runners are invoked on every `warden review` and `warden check`, just routed through the new dispatch + scratchpad surface. Dynamic routing earns its own ADR when M9+ adds enough LLM-shaped workers to make routing decisions meaningful.
+
+3. **Migration scope: committability + scalability through the contract; remaining 6 detectors stay inline.** The `Runner` contract is exercised by exactly two existing runners — committability (LLM cheap-tier sub-agent) and scalability (deterministic AST detector) — so the contract is validated against both shapes. TSC, ESLint, jscpd, vuln, deadcode, and consistency continue to run inline from `runReview()` in M8; their migration to the contract is M9+ work (likely M9 since the noise filter touches the same runner-input surface). Half-migrated state is acknowledged technical debt with a documented unwind path.
+
+4. **In-memory `Scratchpad` class with structured per-runner output lifecycle.** `Scratchpad.outputs` is a `Map<runnerName, RunnerOutput>`; `RunnerOutput = { name, findings, questions?, degraded[], durationMs, error? }`. The Map is bounded by *runner count* (~8 today, ≤20 even in M11+), not diff size; pathological-diff memory pressure scales with findings volume identically in any storage shape and is solved upstream by M9's noise filter, not by the scratchpad. SQLite-backed scratchpad is rejected for M8 — `warden review` is short-lived (seconds), no crash-recovery consumer exists, and the class abstraction preserves the swap point for M11+ daemon scenarios where persistence would actually matter.
+
+5. **Runner contract input is `path[]` (β); diff tree stays internal to `diff/`.** No current runner benefits from tree-aware input — TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability all consume paths and produce findings file-locally. Threading the diff tree into runner contracts (α) without a concrete tree-aware consumer is the "build the seam, don't fill it" pattern ADR-0018 / ADR-0019 / ADR-0021 each rejected. Future tree-aware runners (M9+ "directory-level dedup," "subtree-scoped semantic chunking" if those ever materialise) ship α at that point; β doesn't burn the option.
+
+6. **Spine code lives in `packages/core/src/orchestration/`.** Dedicated directory: `orchestration/{scratchpad.ts, dispatch.ts, synthesizer.ts, runner.ts, index.ts}`. Mirrors M5's `context/` and M6's `indexing/` pattern — each new architectural concern earns its own directory. Pre-positions for a future `@warden/orchestration` workspace-package split if ADR-0019 #11's analogue triggers ever fire (e.g., DeepSec-shaped SAST worker dispatched alongside review runners; daemon mode with cross-process coordination). `packages/core/src/llm/` keeps the prompt loader, citation verifier, and the cascade (provider-fallback) — orchestration is *what we ask the LLM to do*, cascade is *how we reach it*.
+
+7. **Unified pipeline: both verbs go through dispatch + scratchpad.** `warden check` and `warden review` share the dispatch + scratchpad layer; only the *synthesis ending* differs. `check` runs the existing deterministic formatter on scratchpad outputs (no LLM call); `review` runs the LLM synthesizer. One code path, two endings — adding an M9+ runner threads through dispatch once, not through two divergent pipelines. `check` also validates the spine without LLM cost: smoke fixtures and dogfood loops can exercise dispatch + scratchpad through `check` (deterministic, fast, free) before any synthesizer call ever runs.
+
+8. **Synthesizer prompt: flat input.** The synthesizer flattens `Scratchpad → ToolFinding[]` before prompting; M4's existing system prompt + user template are unchanged. M4's prompt already labels findings by source (`tsc`, `eslint`, etc.); restructuring the prompt to organize findings by runner section is a *prompt redesign* with its own dogfood needs and shouldn't ride along with the spine refactor. M9+ may revisit when dynamic dispatch arrives and the prompt actually needs new structure.
+
+9. **Concurrency and error model preserved.** Runners continue to dispatch in parallel via `Promise.all` (same as today). Per-runner failures land in `RunnerOutput.error?`; the dispatcher records a `degradedWorkers` entry of appropriate kind (`actionable` / `warning` / `info` per ADR-0021 #7); the rest of the review is unaffected. Same posture as ADR-0017's multi-provider fallback for the synthesizer's LLM call (Anthropic → retry → Google) — orchestration is *what we ask the LLM to do*, the cascade applies inside the synthesizer call unchanged.
+
+10. **One smoke harness: `smoke-m8-spine.mts`.** Validates dispatch (per-runner outputs land in scratchpad with correct shape, durations recorded, errors captured), scratchpad (Map access, flatten helper, type safety), and dual-ending pipeline (`warden check` and `warden review` produce expected `CommentSet` from the same scratchpad on a fixture diff). Mirrors the M5/M7 pattern of "one smoke per architectural piece"; M8 spine is one piece.
+
+11. **Re-platform committability + scalability; preserve M7 directory-concentration placeholder.** The committability sub-agent's M7 internal Tier-1 hard-skip + directory-concentration heuristic stays inside `committability.ts` until M9 ships the noise filter at the diff loader (per ADR-0022's M9 retarget). Migrating committability through the spine's `Runner` contract doesn't change its internal logic — same input shape, same output shape, same heuristics. Scalability migrates similarly: AST traversal logic unchanged, only the dispatch wrapper differs.
+
+12. **ADR-0008 citation discipline: trivially preserved.** M8 ships zero new LLM-shaped sub-agents. Existing committability sub-agent already lives in `questions[]` per ADR-0021 #2 with substring-verification per ADR-0021 #3. The synthesizer's job is to triage and format scratchpad outputs — same posture as M4's formatter — never to author assertions. Citation invariant unchanged.
+
+13. **TS-only horizon for M8.** Every runner under the contract is TS (per ADR-0021 #11's TS-only horizon). The contract itself is language-agnostic; tree-sitter swap-ins for Python / Rust / Go / Java land alongside per-language detectors in the M8+ multi-language milestone (still deferred), threading through the same spine.
+
+**Why.**
+
+- *The single-deferred-item discipline.* ADR-0018 / ADR-0019 / ADR-0021 each shipped exactly one architectural direction — context selector, indexing layer, detector promotion. M8 picking exactly one of the four AI-heavy deferrals (boss/worker orchestration spine) preserves the pattern. Bundling two (e.g., spine + adversarial critic worker) conflates "the spine works" with "the worker works" in dogfood evaluation; if dogfood reveals a quality regression, you can't tell which piece is responsible. One milestone = one architectural commit.
+
+- *Spine before workers.* The four AI-heavy deferrals (boss/worker orchestration, two-LLM generator+grader, self-aware boss, DeepSec-shaped SAST) reframed under the orchestration model are *spine + roles* rather than *alternatives*. The spine is foundational; the others are workers/properties that plug into it. Shipping any of the others without the spine produces mid-tier work — exactly the framing the user rejected during the M8 grilling. Spine first; specific workers earn their own ADRs when scheduled.
+
+- *Static dispatch in M8, dynamic dispatch in M9+.* The blog's reasoning-based routing is meaningful when the boss has *multiple* LLM-shaped workers to choose between. M8 has exactly one (committability) — a thin demonstration of dynamic routing that doesn't justify its own complexity. Static dispatch in M8 ships the spine; M9+ earns dynamic routing when 2+ LLM workers exist and the routing decision actually matters.
+
+- *Q4-Mid migration scope (committability + scalability).* Half-migrated state is debt, but full migration of all 8 runners through the spine is a milestone-and-a-half of work — error channels, fixtures, smoke harnesses, runner registration. Q4-Min (committability only) under-validates the contract against deterministic shapes. Q4-Mid validates against both LLM-shaped (committability) and deterministic-AST (scalability) at minimum cost; the remaining 6 detectors migrate in M9 (likely) when the noise filter touches their input surface anyway.
+
+- *β interface (`path[]`).* No current runner consumes tree-aware input. Threading the diff tree (α) through every runner contract without a consumer is dead seam. β preserves the option (M9+ tree-aware runners ship α at that point) without paying for it preemptively.
+
+- *In-memory `Scratchpad` class.* The pathological case (500K-file diff) is solved at the diff loader by M9's noise filter, not at the scratchpad. The scratchpad's pressure is bounded by findings volume, which scales identically across storage shapes — SQLite doesn't reduce it. Crash recovery is not a real consumer for short-lived `warden review`. The class abstraction preserves the SQLite swap point for M11+ daemon scenarios; in-memory is the smallest credible cut today.
+
+- *Q6-a dedicated `orchestration/` directory.* Spine concepts (scratchpad, dispatch, synthesizer) are tightly coupled and named; scattering them across `runners/` and `llm/` muddles the architectural concern. Pre-positions the workspace-package split point named in ADR-0019 #11's analogue triggers.
+
+- *Q7-a unified pipeline.* `check` validates the spine without LLM cost; `review` adds the synthesizer call on the same scratchpad. One code path, two endings, one runner-addition surface. Splitting into two pipelines doubles the maintenance cost for every M9+ runner.
+
+- *Q8 flat synthesizer prompt.* Restructuring the prompt to leverage Scratchpad's per-runner shape is a prompt redesign with its own dogfood evaluation; bundling it into M8 conflates spine validation with prompt validation. M4's existing prompt already labels by source; flattening preserves that. Prompt evolution becomes its own work when dynamic dispatch in M9+ actually demands new structure.
+
+- *Naming: "orchestration spine" not "boss/worker spine."* CONTEXT.md §3 reserves *worker* for vision-tier specialist Sonnet LLMs in a multi-call pipeline. M8 ships dispatch + scratchpad + synthesizer with *no* workers — only existing runners (detectors + sub-agents per CONTEXT.md §5). Calling M8 "boss/worker spine" pre-claims the reserved term before workers actually exist. *Orchestration spine* is descriptive and honest; the ADR body still references "boss/worker orchestration" as the deferred long-term direction the spine pre-positions for.
+
+**Alternatives considered and rejected.**
+
+- *Bundle spine + first LLM-shaped worker (e.g., adversarial critic).* Closes some dogfood misses immediately and demonstrates orchestration is real. Rejected because it conflates "the spine works" with "a specific worker design works" — if dogfood reveals quality issues, attribution is muddled. Single-direction milestones is the established pattern (ADR-0018 / 0019 / 0021).
+
+- *Spine-alone with no migrated runners (Q4-Min).* Smallest credible cut. Rejected because the contract validated against zero or one runner is likely wrong-shaped for the runners M9 has to migrate; M9 would discover the misshape and redesign, making M8 a partial throwaway. Q4-Mid validates against both shapes at minimum cost.
+
+- *Q4-Full: migrate all 8 runners in M8.* Maximum validation. Rejected because it's a milestone-and-a-half of work — the user's ADR-0019 / ADR-0021 pattern is "smallest credible consumer" + iterate, not "migrate everything in one shot."
+
+- *α interface (tree-aware runner input).* Maximum flexibility for downstream. Rejected because no current runner benefits from tree-aware input; α is dead seam without a consumer.
+
+- *SQLite-backed scratchpad.* Crash-recoverable, inspectable post-hoc, queryable across runs. Rejected because `warden review` is short-lived; crash-recovery has no consumer; pathological-case memory pressure isn't reduced by storage choice. The class abstraction preserves the swap point for M11+ daemon scenarios.
+
+- *Structured synthesizer prompt with per-runner sections + per-runner durations + error states surfaced to the LLM.* More information for the synthesizer to reason about. Rejected because it's a prompt redesign needing its own dogfood pass; M8's job is the spine, not prompt evolution.
+
+- *Diverged pipelines: `check` keeps the inline path, `review` is the only spine consumer.* Less change to `check`. Rejected because two pipelines double the maintenance cost for every M9+ runner; unified pipeline + conditional ending is the architectural cleaner cut.
+
+- *Full boss/worker orchestration in M8 (planning + dispatch + workers + synthesis with reasoning-based routing).* Closes the dogfood gap most aggressively. Rejected as too much architecture in one milestone — same scope-creep failure mode ADR-0008 was written against. Static dispatch + spine in M8; dynamic routing + workers earn their own M9+ ADRs.
+
+- *Mid-tier "critic worker" ADR.* The first framing offered to the user during this grilling: ship a dedicated peer LLM that critiques the diff adversarially, separate from any orchestration spine. Rejected by the user because (a) it's an ad-hoc fix rather than a foundational architectural commitment, and (b) the same capability is naturally a worker dispatched by the spine in M9+, not a freestanding ADR. Memorialised so future grilling sessions can reference the rejected framing.
+
+- *Self-aware boss as M8.* Closes the most embarrassing dogfood miss (#2: `collapseVulnComments` violating ADR-0008's own citation discipline). Rejected because *self-aware boss* is a *property* of the boss, not an architecture — adding introspection to a boss that doesn't yet have a dispatch surface to introspect against is putting the cart before the horse. Self-aware boss earns its own ADR after the spine ships and there's actually a boss with introspectable behavior.
+
+- *Two-LLM generator+grader as M8.* Closest to ADR-0008's deferred phrasing. Rejected because generator+grader only catches misses *within the formatter's own scope*; it doesn't add adversarial coverage of code the formatter didn't comment on. The dogfood evidence (Copilot beats warden) suggests the missing capability is *adversarial reading of the diff*, which a grader of the formatter's output doesn't supply. Adversarial reading is a worker the spine dispatches in M9+; generator+grader is a different worker shape that may also earn its own ADR.
+
+**Caveats.**
+
+- *Caveat — does not close the M7 PR dogfood gap by itself.* M8's value is enabling, not closing. Six findings Copilot caught on PR #4 (scopeToDiff cross-function bug, citation discipline self-violation, doc-code drift in `formatCommentSet`, `import.meta.dirname` runtime brittleness, dead-branch `findings.length >= 0` term, hard-coded path in error message) remain uncaught by warden review until M9+ adds the LLM-shaped sub-agents (adversarial critic, free-form prose consistency, etc.) that the spine dispatches. Honest scheduling: spine first; capability second.
+
+- *Caveat — half-migrated runner state is acknowledged debt.* Six deterministic detectors (TSC, ESLint, jscpd, vuln, deadcode, consistency) stay inline in M8; only committability + scalability migrate through the contract. M9 likely closes this when the noise filter touches the same runner-input surface; if M9 ships before the migration is forced, the debt persists into M10. Documented unwind path: each remaining runner's wrapper is ~30 lines of adapter code matching the same `Runner` contract committability and scalability already exercise.
+
+- *Caveat — `worker` stays a reserved term.* CONTEXT.md §3's *worker* (vision-tier specialist Sonnet LLM in a multi-call pipeline) is *still deferred* after M8 ships. M8's spine is *boss + dispatch + scratchpad + synthesizer* routing existing runners; it earns the right to dispatch a worker if and when one ships, but no worker ships in M8. The ADR title and prose deliberately avoid "boss/worker spine" to honor the vocabulary discipline.
+
+- *Caveat — synthesizer is the same LLM call M4 ships, not a new one.* No additional cost or latency in M8. The synthesizer reads `Scratchpad → ToolFinding[]` (flatten helper) before prompting; the cascade (Anthropic → retry → Google per ADR-0017) and prompt template (ADR-0015's externalised `system.md` / `user-template.md`) are unchanged. Cost-neutral for the M4 → M8 transition.
+
+- *Caveat — committability's M7 directory-concentration placeholder stays inside `committability.ts` until M9.* Per ADR-0022's M9 retarget, the noise filter at the diff loader supersedes the placeholder. Migrating committability through the spine's `Runner` contract doesn't change this — same internal Tier-1 + concentration heuristic logic. M9's noise filter removes the placeholder when it ships.
+
+- *Caveat — orchestration directory is internal to `@warden/core` in M8.* No `@warden/orchestration` workspace package; ADR-0019 #11's analogue split-justification triggers (non-review consumer of orchestration emerges; daemon mode with cross-process coordination; external consumers want to register their own runners against the spine) don't fire. Documented for future revisit; the directory is the clean extraction point if any of those triggers materialise.
+
+- *Caveat — the inspiration source (`https://www.ronit.one/blog/agent-orch`) is acknowledged but warden's spine differs in shape.* The blog's three execution modes (direct / parallel / explore-then-decide) and reasoning-based routing are M9+ work, not M8. M8 is "shared scratchpad + parallel dispatch + boss synthesis" — the foundational subset. Sub-agents in the blog write to a Redis scratchpad; warden's in-memory `Scratchpad` is the equivalent for single-process use, with the SQLite swap point preserved for M11+ daemon scenarios where Redis-equivalent persistence would matter.
+
+**Status.** Direction. M8 grilling complete (Q1 → Q8); design locked. Implementation tracked in `m8-plan.md`.
 
 ---
