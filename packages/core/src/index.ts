@@ -22,6 +22,7 @@ import {
   readLockedModel,
 } from "./indexing/index.js";
 import type { FormatterListener } from "./llm/index.js";
+import { verifyCitations } from "./llm/verify-citations.js";
 import {
   Scratchpad,
   deterministicSynthesize,
@@ -31,6 +32,7 @@ import {
   type RunnerInput,
 } from "./orchestration/index.js";
 import { committabilityRunner } from "./runners/committability.js";
+import { runConsistency } from "./runners/consistency.js";
 import { runDeadcode } from "./runners/deadcode.js";
 import { runEslint } from "./runners/eslint.js";
 import { runJscpd } from "./runners/jscpd.js";
@@ -53,6 +55,11 @@ export { pruneDiff, type PruneResult } from "./diff/prune.js";
 export { buildDiffTree, MAX_DEPTH as DIFF_TREE_MAX_DEPTH, type DiffTreeNode } from "./diff/tree.js";
 export { resolveDiff, type DiffMode, type ResolveDiffOptions, type ResolvedDiff } from "./diff/source.js";
 export type { FormatterEvent, FormatterListener } from "./llm/index.js";
+export {
+  verifyCitations,
+  type VerifyCitationsInput,
+  type VerifyCitationsOutput,
+} from "./llm/verify-citations.js";
 export type { ToolFinding } from "./runners/types.js";
 export type { AuditAdvisory, AuditSeverity } from "./runners/audit.js";
 export { verifyOsv, type OsvRecord, type VerifiedAdvisory } from "./verify/osv.js";
@@ -331,6 +338,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     vulnResult,
     selectorResult,
     deadcodeResult,
+    consistencyResult,
   ] = await Promise.all([
       runTsc(input.repoRoot, ecosystem.tsconfigPaths),
       ecosystem.hasEslint && changedPaths && changedPaths.length > 0
@@ -383,6 +391,21 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
             ] as DegradedEntry[],
           }))
         : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
+      // M10 (ADR-0021 §1c): consistency detector — verifies doc claims about
+      // env-vars / CLI surface / `.warden/*` path constants against the
+      // current code. Stays inline like deadcode; not contract-migrated.
+      changed && changed.length > 0
+        ? runConsistency({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
+            findings: [] as ToolFinding[],
+            degraded: [
+              {
+                kind: "warning",
+                topic: "consistency",
+                message: `consistency: detector failed (${formatErr(err)})`,
+              },
+            ] as DegradedEntry[],
+          }))
+        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
     ]);
 
   // jscpd runs sequentially after the selector — it consumes the candidate
@@ -428,6 +451,12 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     name: "deadcode",
     findings: deadcodeResult.findings,
     degraded: deadcodeResult.degraded,
+    durationMs: 0,
+  });
+  scratchpad.record({
+    name: "consistency",
+    findings: consistencyResult.findings,
+    degraded: consistencyResult.degraded,
     durationMs: 0,
   });
 
@@ -494,10 +523,22 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     });
   }
 
+  // M10 (ADR-0021 §3): global substring-verifier post-pass. Runs over every
+  // Comment whose sources[] carries a `{path, line, snippet}` triple; drops
+  // sources whose snippet doesn't substring-match the cited file, and drops
+  // Comments left with zero verified snippet sources (if they had ≥1 to
+  // begin with). Catches both deterministic-runner snippet citations and
+  // LLM-authored ones in a single pass — placed before `applyHardRules()`
+  // so the priority-sort + tier-3 gate see the verified set.
+  const verified = await verifyCitations({
+    comments: synthOutput.comments,
+    repoRoot: input.repoRoot,
+  });
+
   // Hard rules in code per grilling Q11 (P3): final priority sort + tier-3
   // verbose-gate. Soft rules (judgment-driven suppression) live in the LLM
   // prompt and have already been applied above.
-  const finalComments = applyHardRules(synthOutput.comments, input.config);
+  const finalComments = applyHardRules(verified.comments, input.config);
 
   return {
     comments: finalComments,
@@ -507,6 +548,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         ...environmentalDegraded,
         ...scratchpad.flattenDegraded(),
         ...synthOutput.degraded,
+        ...verified.degraded,
       ],
     },
   };

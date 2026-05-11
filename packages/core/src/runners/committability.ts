@@ -21,16 +21,19 @@ import { formatErr } from "./_shared.js";
  * location, or content shape suggests they shouldn't have been committed.
  *
  * Lane discipline (ADR-0021 #3): the sub-agent emits questions, never
- * assertions. Each emitted citation is substring-verified against the cited
- * file before the question lands in the output — unverifiable citations
- * cause the question to be dropped silently (a forensic count surfaces in
- * `degraded` with topic `committability`, kind `info`).
+ * assertions. Each finding's `{path, line, snippet}` triple flows through to
+ * `toQuestion()` and lands on the Comment's `sources[]`. Citation accuracy
+ * is enforced post-synthesis by the global verifier (`verify-citations.ts`,
+ * ADR-0021 §3) which substring-checks every triple against the cited file
+ * and emits its own forensic counts under `topic: "llm"`. This runner only
+ * keeps the lane-integrity guard (`droppedUnknownPath`) — citations into
+ * files outside the diff are dropped here with `topic: "committability"`.
  *
  * Noise pre-filter is gone from this runner as of M9 (ADR-0025): the
  * baseline + JS-profile prune at the diff loader (`diff/prune.ts`) is
  * universal and runs before any runner sees the diff. Committability
- * receives an already-pruned `ChangedFile[]` and only owns the
- * sub-agent + citation-verification surface.
+ * receives an already-pruned `ChangedFile[]` and only owns the sub-agent +
+ * lane-integrity surface.
  */
 
 // Sub-agent input: bound the snippet at SNIPPET_LINE_CAP lines built from
@@ -151,32 +154,23 @@ export async function runCommittability(
     });
   }
 
-  // Substring-verify every content-based citation; map verified findings to
-  // question-shaped Comments. Name-based findings (no `line`) skip verification.
+  // M10 (ADR-0021 §3): committability no longer runs its own internal
+  // substring verifier. Findings flow through to `toQuestion()`, which emits
+  // them with `{path, line, snippet}` on `sources[]`; the global verifier
+  // (`verify-citations.ts`) post-pass after synthesis drops citations whose
+  // triple doesn't substring-match the cited file content.
+  //
+  // The `droppedUnknownPath` guard stays — that's lane integrity (LLM cited
+  // a path the diff doesn't touch), not citation accuracy.
   const candidatePaths = new Set(candidates.map((c) => c.path));
   const verified: Comment[] = [];
-  let droppedUnverified = 0;
   let droppedUnknownPath = 0;
   for (const f of subAgent.findings) {
     if (!candidatePaths.has(f.path)) {
       droppedUnknownPath++;
       continue;
     }
-    if (f.line != null && f.line > 0) {
-      const ok = await verifyCitation(input.repoRoot, f.path, f.line, f.snippet);
-      if (!ok) {
-        droppedUnverified++;
-        continue;
-      }
-    }
     verified.push(toQuestion(f));
-  }
-  if (droppedUnverified > 0) {
-    degraded.push({
-      kind: "info",
-      topic: "committability",
-      message: `committability: dropped ${droppedUnverified} finding${droppedUnverified === 1 ? "" : "s"} with unverifiable snippet`,
-    });
   }
   if (droppedUnknownPath > 0) {
     degraded.push({
@@ -434,63 +428,6 @@ async function tryProvider(
   }
 }
 
-async function verifyCitation(
-  repoRoot: string,
-  path: string,
-  line: number,
-  snippet: string,
-): Promise<boolean> {
-  const trimmed = snippet.trim();
-  if (trimmed.length === 0) return false;
-  // Defense in depth: even though `path` here is membership-checked against
-  // candidatePaths upstream, those originated from the diff and could
-  // contain `..` segments or absolute paths in a malicious / malformed
-  // input. The same containment check that gates `buildFileInput` runs
-  // here.
-  const abs = resolveWithinRoot(repoRoot, path);
-  if (abs === null) return false;
-  // Bounded read: only fetch the relevant line range. Citation snippets
-  // are line-anchored — slurping the whole file just to look at line N±5
-  // is the same shape Copilot flagged on `buildFileInput`.
-  // Strip a stray `<n>: ` line-number prefix in case the sub-agent
-  // accidentally echoed it from the prompt back into its `snippet` field.
-  // The prompt explicitly tells the LLM not to include the prefix; this is
-  // defense-in-depth so a slip doesn't fail an otherwise-valid citation.
-  const stripped = trimmed.replace(/^\d+:\s*/, "");
-  const norm = normalizeWhitespace(stripped);
-  if (norm.length === 0) return false;
-  let content: string;
-  try {
-    const handle = await open(abs, "r");
-    try {
-      const stats = await handle.stat();
-      const readBytes = Math.min(MAX_READ_BYTES, stats.size);
-      const buf = Buffer.alloc(readBytes);
-      if (readBytes > 0) {
-        await handle.read(buf, 0, readBytes, 0);
-      }
-      content = buf.toString("utf8");
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return false;
-  }
-  const lines = content.split("\n");
-  // Allow ±5 line drift — LLMs are not always exact on line numbers.
-  const start = Math.max(1, line - 5);
-  const end = Math.min(lines.length, line + 5);
-  for (let i = start; i <= end; i++) {
-    const candidate = normalizeWhitespace(lines[i - 1] ?? "");
-    if (candidate.length > 0 && candidate.includes(norm)) return true;
-  }
-  return false;
-}
-
-function normalizeWhitespace(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
-}
-
 /**
  * `Runner`-contract wrapper (ADR-0023 #3). The diff-level noise filter
  * (M9 / ADR-0025) handles baseline + ecosystem-profile pruning before
@@ -517,6 +454,11 @@ export const committabilityRunner: Runner = {
 
 function toQuestion(f: SubAgentFinding): Comment {
   const line = f.line != null && f.line > 0 ? f.line : 1;
+  // M10 (ADR-0021 §3): grounded citation triple feeds the global verifier
+  // post-pass. Content-cited findings carry `{path, line, snippet}`;
+  // name-only findings (no `line`) leave the trio undefined so the verifier
+  // skips them (there's no snippet to substring-match against).
+  const hasContentCitation = f.line != null && f.line > 0 && f.snippet.trim().length > 0;
   return {
     id: stableCommentId(`committability:${f.path}:${line}:${f.reason}`),
     file: f.path,
@@ -533,6 +475,9 @@ function toQuestion(f: SubAgentFinding): Comment {
         id: "committability-subagent",
         title: f.path,
         retrievedAt: new Date().toISOString(),
+        ...(hasContentCitation
+          ? { path: f.path, line: f.line as number, snippet: f.snippet }
+          : {}),
       },
     ],
     confidence: f.severity === "warning" ? 0.7 : 0.5,
