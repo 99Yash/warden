@@ -59,6 +59,9 @@ const ENV_SOURCE_REL = "packages/env/src/index.ts";
 const CLI_INDEX_REL = "packages/cli/src/index.ts";
 const CLI_COMMANDS_DIR_REL = "packages/cli/src/commands";
 
+const DOC_PATH_RE = /^(?:README|CLAUDE|AGENTS)\.md$|^docs\/.+\.md$/i;
+const SRC_SURFACE_RE = /^packages\/[^/]+\/src\//;
+
 export async function runConsistency(
   input: ConsistencyRunnerInput,
 ): Promise<ConsistencyRunnerOutput> {
@@ -67,8 +70,17 @@ export async function runConsistency(
 
   const changedSet = new Set(input.changed.map((c) => c.path));
 
-  // Collect doc set. Trigger condition checks whether any doc was edited or
-  // any code-side surface relevant to a claim was touched.
+  // Trigger gate: skip the entire detector when the diff touches neither any
+  // tracked doc file nor any `packages/*/src/**` source file. The per-claim
+  // gating below would suppress all findings in that case anyway, so doing
+  // the doc walk + env/CLI parse + source-tree scan would be pure overhead.
+  const anyDocTouched = [...changedSet].some((p) => DOC_PATH_RE.test(p));
+  const srcSurfaceTouched = [...changedSet].some((p) => SRC_SURFACE_RE.test(p));
+  if (!anyDocTouched && !srcSurfaceTouched) {
+    return { findings, degraded };
+  }
+
+  // Collect doc set.
   const docs = await collectDocs(input.repoRoot, degraded);
   if (docs.length === 0) {
     return { findings, degraded };
@@ -115,8 +127,11 @@ export async function runConsistency(
 
     if (pathLiterals) {
       for (const claim of extractPathClaims(doc)) {
-        const pathTouched = changedSet.has(claim.literal);
-        if (!docTouched && !pathTouched) continue;
+        // Path-literal claims like `.warden/cache.sqlite` reference runtime
+        // paths that never appear in a diff. Gate on whether any source file
+        // under `packages/*/src/**` (where these literals are defined) was
+        // touched, not on the literal string itself.
+        if (!docTouched && !srcSurfaceTouched) continue;
         if (!pathLiterals.has(claim.literal)) {
           findings.push({
             source: "consistency",
@@ -432,7 +447,19 @@ function verifyEnvClaim(claim: EnvClaim, doc: DocFile, env: EnvFacts): ToolFindi
       message: `${doc.relPath} claims ${claim.envVar} is optional; ${ENV_SOURCE_REL} treats it as required`,
     };
   }
-  if (claim.predicate === "default" && fact.kind === "default") {
+  if (claim.predicate === "default") {
+    if (fact.kind !== "default") {
+      return {
+        source: "consistency",
+        file: doc.relPath,
+        line: claim.line,
+        column: 1,
+        endLine: claim.line,
+        severity: "warning",
+        ruleId: "env-default-mismatch",
+        message: `${doc.relPath} claims ${claim.envVar} defaults to \`${claim.defaultValue ?? "?"}\`; ${ENV_SOURCE_REL} treats it as ${fact.kind}`,
+      };
+    }
     if (fact.defaultLiteral !== undefined && claim.defaultValue !== fact.defaultLiteral) {
       return {
         source: "consistency",

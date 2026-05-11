@@ -21,16 +21,19 @@ import { formatErr } from "./_shared.js";
  * location, or content shape suggests they shouldn't have been committed.
  *
  * Lane discipline (ADR-0021 #3): the sub-agent emits questions, never
- * assertions. Each emitted citation is substring-verified against the cited
- * file before the question lands in the output — unverifiable citations
- * cause the question to be dropped silently (a forensic count surfaces in
- * `degraded` with topic `committability`, kind `info`).
+ * assertions. Each finding's `{path, line, snippet}` triple flows through to
+ * `toQuestion()` and lands on the Comment's `sources[]`. Citation accuracy
+ * is enforced post-synthesis by the global verifier (`verify-citations.ts`,
+ * ADR-0021 §3) which substring-checks every triple against the cited file
+ * and emits its own forensic counts under `topic: "llm"`. This runner only
+ * keeps the lane-integrity guard (`droppedUnknownPath`) — citations into
+ * files outside the diff are dropped here with `topic: "committability"`.
  *
  * Noise pre-filter is gone from this runner as of M9 (ADR-0025): the
  * baseline + JS-profile prune at the diff loader (`diff/prune.ts`) is
  * universal and runs before any runner sees the diff. Committability
- * receives an already-pruned `ChangedFile[]` and only owns the
- * sub-agent + citation-verification surface.
+ * receives an already-pruned `ChangedFile[]` and only owns the sub-agent +
+ * lane-integrity surface.
  */
 
 // Sub-agent input: bound the snippet at SNIPPET_LINE_CAP lines built from

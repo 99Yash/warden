@@ -64,9 +64,11 @@ export const SourceSchema = z
      * is the tool's exit code, not a snippet to substring-verify.
      *
      * Invariant: either all three of `{path, line, snippet}` are populated or
-     * all three are undefined. The global verifier (`verify-citations.ts`)
-     * skips any source where the trio is incomplete, so a partial population
-     * surfaces as a silently-skipped citation rather than a hard parse error.
+     * all three are undefined. The `.refine()` below enforces this at parse
+     * time — partial triples fail validation rather than being silently
+     * skipped downstream. The global verifier (`verify-citations.ts`) then
+     * substring-checks every fully-populated triple and drops sources whose
+     * snippet does not match the cited file at `line ± DRIFT`.
      */
     path: z.string().optional(),
     line: z.number().int().positive().optional(),
