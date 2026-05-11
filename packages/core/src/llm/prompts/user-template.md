@@ -1,32 +1,29 @@
-# Diff under review
-
-```diff
+<diff>
 {{diff}}
-```
+</diff>
 
-# Tool findings (deterministic, pre-verified)
-
-Each finding is identified by an `id`. To rewrite or drop one, reference it by id in `revisedComments`. Unmentioned ids are kept verbatim.
+<tool-findings>
+Each finding has an `id` attribute. To rewrite or drop one, reference it by id in `revisedComments`. Unmentioned ids are kept verbatim.
 
 {{tool_findings}}
+</tool-findings>
 
-# Verified vulnerability advisories
-
-These were produced by `npm audit` and verified against OSV.dev. Treat them as authoritative — same triage rules apply (rewrite for readability, drop only if clearly irrelevant).
+<verified-advisories>
+Produced by `npm audit` and verified against OSV.dev. Treat them as authoritative — same triage rules apply (rewrite for readability, drop only if clearly irrelevant).
 
 {{verified_advisories}}
+</verified-advisories>
 
-# Retrieved repository context
-
+<retrieved-context>
 Code adjacent to the diff that may help you judge intent. Two kinds of evidence:
 
-- **Adjacent files (with evidence)**: line ranges from files that import / are imported by / reference symbols in the diff. Cite by `path:line` when a claim leans on these.
-- **Same-folder neighbors (paths only)**: awareness signal for files living next to the diff. No content is shown — you do not know what's in them, so do not claim things about them.
+- `<adjacent-files>` — `<chunk>` entries with content from files that import / are imported by / reference symbols in the diff. Cite by `path:line` when a claim leans on these.
+- `<same-folder-neighbors>` — `<neighbor>` paths only. Awareness signal. No content is shown — you do not know what's in them, so do not claim things about them.
 
 {{retrieved_context}}
+</retrieved-context>
 
-# Your task
-
+<the-task>
 Apply the rules from your system prompt:
 
 - Decide which tool findings to rewrite, drop, or leave alone.
@@ -35,3 +32,4 @@ Apply the rules from your system prompt:
 - Output the JSON object per the schema in your system prompt.
 
 Default-keep on tool findings: when in doubt, leave it alone.
+</the-task>

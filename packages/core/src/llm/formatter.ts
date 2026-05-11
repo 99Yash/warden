@@ -172,42 +172,56 @@ function renderComments(comments: Comment[]): string {
   return comments
     .map((c) => {
       const range = c.lineStart === c.lineEnd ? `${c.lineStart}` : `${c.lineStart}-${c.lineEnd}`;
+      const sources = c.sources.map((s) => s.id ?? s.url ?? s.type).join(", ") || "(none)";
       return [
-        `- id: ${c.id}`,
-        `  file: ${c.file}:${range}`,
-        `  category: ${c.category} (tier ${c.tier})`,
-        `  claim: ${c.claim}`,
-        `  explanation: ${c.explanation}`,
-        `  sources: ${c.sources.map((s) => s.id ?? s.url ?? s.type).join(", ") || "(none)"}`,
+        `<finding id="${escapeAttr(c.id)}" file="${escapeAttr(c.file)}:${range}" category="${c.category}" tier="${c.tier}" confidence="${c.confidence}">`,
+        `  <claim>${escapeText(c.claim)}</claim>`,
+        `  <explanation>${escapeText(c.explanation)}</explanation>`,
+        `  <sources>${escapeText(sources)}</sources>`,
+        `</finding>`,
       ].join("\n");
     })
-    .join("\n\n");
+    .join("\n");
 }
 
 function renderRetrievedContext(ctx: RetrievedContext): string {
+  if (ctx.chunks.length === 0 && ctx.sameFolderPaths.length === 0) {
+    return "(empty — no adjacent context surfaced for this diff)";
+  }
+
   const sections: string[] = [];
 
   if (ctx.chunks.length > 0) {
-    sections.push("## Adjacent files (with evidence)");
-    sections.push(
-      ctx.chunks
-        .map(
-          (c) =>
-            `### ${c.path}:${c.lineStart}-${c.lineEnd}\nReason: ${c.reason}\n\`\`\`\n${c.snippet}\n\`\`\``,
-        )
-        .join("\n\n"),
-    );
+    const inner = ctx.chunks
+      .map((c) => {
+        return [
+          `  <chunk path="${escapeAttr(c.path)}" lines="${c.lineStart}-${c.lineEnd}" reason="${escapeAttr(c.reason)}">`,
+          `<![CDATA[`,
+          c.snippet,
+          `]]>`,
+          `  </chunk>`,
+        ].join("\n");
+      })
+      .join("\n");
+    sections.push(`<adjacent-files>\n${inner}\n</adjacent-files>`);
   }
 
   if (ctx.sameFolderPaths.length > 0) {
-    sections.push("## Same-folder neighbors (paths only — awareness signal, no content)");
-    sections.push(ctx.sameFolderPaths.map((p) => `- ${p}`).join("\n"));
+    const inner = ctx.sameFolderPaths
+      .map((p) => `  <neighbor path="${escapeAttr(p)}" />`)
+      .join("\n");
+    sections.push(`<same-folder-neighbors>\n${inner}\n</same-folder-neighbors>`);
   }
 
-  if (sections.length === 0) {
-    return "(empty — no adjacent context surfaced for this diff)";
-  }
   return sections.join("\n\n");
+}
+
+function escapeAttr(s: string): string {
+  return s.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function escapeText(s: string): string {
+  return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
 }
 
 function readThinkingBudgetFromEnv(): number | undefined {
