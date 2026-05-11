@@ -48,14 +48,39 @@ export type Tier = z.infer<typeof TierEnum>;
 export const KindEnum = z.enum(['assertion', 'question']);
 export type Kind = z.infer<typeof KindEnum>;
 
-export const SourceSchema = z.object({
-  type: SourceTypeEnum,
-  url: z.url().optional(),
-  id: z.string().optional(),
-  title: z.string().optional(),
-  /** ISO-8601 timestamp when the source was retrieved (citation freshness). */
-  retrievedAt: z.string(),
-});
+export const SourceSchema = z
+  .object({
+    type: SourceTypeEnum,
+    url: z.url().optional(),
+    id: z.string().optional(),
+    title: z.string().optional(),
+    /** ISO-8601 timestamp when the source was retrieved (citation freshness). */
+    retrievedAt: z.string(),
+    /**
+     * M10 (ADR-0021 §3): grounded citation triple. Producers that quote file
+     * content (committability sub-agent, future LLM workers, future
+     * snippet-citing detectors) populate all three. Tool-grounded sources
+     * (TSC / ESLint / npm-audit / OSV) leave them undefined — their grounding
+     * is the tool's exit code, not a snippet to substring-verify.
+     *
+     * Invariant: either all three of `{path, line, snippet}` are populated or
+     * all three are undefined. The global verifier (`verify-citations.ts`)
+     * skips any source where the trio is incomplete, so a partial population
+     * surfaces as a silently-skipped citation rather than a hard parse error.
+     */
+    path: z.string().optional(),
+    line: z.number().int().positive().optional(),
+    snippet: z.string().optional(),
+  })
+  .refine(
+    (s) =>
+      (s.path !== undefined && s.line !== undefined && s.snippet !== undefined) ||
+      (s.path === undefined && s.line === undefined && s.snippet === undefined),
+    {
+      message:
+        "Source citation triple must be all-or-nothing: populate {path, line, snippet} together or leave all three undefined",
+    },
+  );
 export type Source = z.infer<typeof SourceSchema>;
 
 export const CommentSchema = z.object({

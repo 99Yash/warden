@@ -758,9 +758,9 @@ The headline tension in M7 is that ADR-0020 deliberately routed all four new cat
 
 | # | Sub-point | Status |
 |---|-----------|--------|
-| 1 | Three deterministic detector workers | Partial — `scalability-detector` (`packages/core/src/runners/scalability.ts`) and `deadcode-detector` (`runners/deadcode.ts`) shipped; `consistency-detector` runner not yet present (category is wired in `mapSeverity` and `runners/types.ts`, and the LLM question-lane covers the gap for now). |
-| 2 | `committability-subagent` worker | Open — category appears in `CategoryEnum` and `system.md`, but no sub-agent worker file exists in `packages/core/src/llm/`. |
-| 3 | Substring-verification of question citations | Open — gated on #2; no verifier post-pass shipped. |
+| 1 | Three deterministic detector workers | Done — `scalability-detector` (`packages/core/src/runners/scalability.ts`), `deadcode-detector` (`runners/deadcode.ts`), and `consistency-detector` (`runners/consistency.ts`, M10) all shipped. |
+| 2 | `committability-subagent` worker | Done — `runners/committability.ts` ships the cheap-tier Haiku sub-agent; M10 migrated its emissions through `sources[]` with the new `{path, line, snippet}` triple. |
+| 3 | Substring-verification of question citations | Done — global verifier post-pass in `packages/core/src/llm/verify-citations.ts` runs after `synthesize()` / `deterministicSynthesize()` and before `applyHardRules()` (M10). |
 | 4 | Runtime schema migration | Done — `db()` in `packages/db/src/index.ts` calls `migrate()` with bundled `dist/migrations/`. |
 | 5 | `BannerState` `no-embeddings` peer | Done — `packages/core/src/banner/index.ts` emits `{ kind: "no-embeddings" }`. |
 | 6 | Repo-root precedence (`pnpm-workspace.yaml` → `.git` → `package.json`) | Done — `packages/db/src/path.ts:findRepoRoot()`. |
@@ -769,7 +769,7 @@ The headline tension in M7 is that ADR-0020 deliberately routed all four new cat
 | 9 | Cheap polish (#5 / #6 / #12 / #14) | Partial — verify per-item before claiming closed; banner placement and runtime-migration ordering both in line with intent. |
 | 10 | Sub-agent as third LLM call shape | Open — gated on #2. |
 | 11 | TS-only horizon | Done — all detectors built on `TsCompilerParser`. |
-| 12 | Smoke harness | Partial — `smoke-m7-init.mts` and `smoke-m7-detectors.mts` shipped; `smoke-m7-subagent.mts` not present (gated on #2). |
+| 12 | Smoke harness | Done — `smoke-m7-init.mts` + `smoke-m7-detectors.mts` (M7), `smoke-m8-spine.mts` (M8 contract), `smoke-m10-consistency.mts` + `smoke-m10-verifier.mts` (M10) shipped. |
 
 ---
 
