@@ -18,6 +18,9 @@ catalogs:
     ai:
       specifier: 6.0.77
       version: 6.0.77
+    ai-retry:
+      specifier: ^1.7.3
+      version: 1.7.3
     better-sqlite3:
       specifier: ^11.10.0
       version: 11.10.0
@@ -92,6 +95,9 @@ importers:
       ai:
         specifier: 'catalog:'
         version: 6.0.77(zod@4.3.6)
+      ai-retry:
+        specifier: 'catalog:'
+        version: 1.7.3(@ai-sdk/provider-utils@4.0.26(zod@4.3.6))(@ai-sdk/provider@3.0.10)(ai@6.0.77(zod@4.3.6))(zod@4.3.6)
     devDependencies:
       '@warden/config':
         specifier: workspace:*
@@ -969,6 +975,14 @@ packages:
     resolution: {integrity: sha512-nQyp0o1/mNdbTO1PO6kHkwSrmgZ0MT/jCCpNiwbUjGoRN4dlBhqJtoQuCnEOKzgTVwg0ZWiCoQy6SxMebQVh8A==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  ai-retry@1.7.3:
+    resolution: {integrity: sha512-j4ZL8WvIpONXd/vp6mpNW6ztO4yHEa8yQ92uWL7uY6f2+eg9Vzeg4i3n2Slw0eSBcAgIcJjE78KMSI/cTqkOzw==}
+    peerDependencies:
+      '@ai-sdk/provider': ^3.0.0
+      '@ai-sdk/provider-utils': ^4.0.0
+      ai: 6.x
+      zod: ^4.0.0
 
   ai@6.0.77:
     resolution: {integrity: sha512-tyyhrRpCRFVlivdNIFLK8cexSBB2jwTqO0z1qJQagk+UxZ+MW8h5V8xsvvb+xdKDY482Y8KAm0mr7TDnPKvvlw==}
@@ -2490,6 +2504,13 @@ snapshots:
   '@vercel/oidc@3.1.0': {}
 
   acorn@7.4.1: {}
+
+  ai-retry@1.7.3(@ai-sdk/provider-utils@4.0.26(zod@4.3.6))(@ai-sdk/provider@3.0.10)(ai@6.0.77(zod@4.3.6))(zod@4.3.6):
+    dependencies:
+      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider-utils': 4.0.26(zod@4.3.6)
+      ai: 6.0.77(zod@4.3.6)
+      zod: 4.3.6
 
   ai@6.0.77(zod@4.3.6):
     dependencies:

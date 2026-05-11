@@ -1,4 +1,10 @@
-import type { LanguageModel } from "ai";
+// We deliberately narrow from `ai`'s `LanguageModel` (which is
+// `LanguageModelV3 | GatewayLanguageModelId` to allow string gateway ids) to
+// ai-retry's `LanguageModel` alias (`LanguageModelV3`). The provider factory
+// always returns a model instance at runtime; the narrower type is what both
+// `streamText` (a supertype consumer) and `createRetryable` (which generics
+// strictly over `LanguageModelV3`) want.
+import type { LanguageModel } from "ai-retry";
 import { anthropicProvider, googleProvider } from "./provider.js";
 
 /**
