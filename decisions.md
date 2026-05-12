@@ -443,6 +443,26 @@ Google as the second provider:
 
 **Caveat — does not affect ADR-0008's citation thesis.** Citation discipline is about *what the LLM is asked to claim* (tool findings + verified CVEs only, no LLM-generated assertions per the M4 grilling Q1 → A+C decision). The provider behind the LLM doesn't change that. A Gemini fallback that triages tool findings + asks clarification questions honors the thesis identically to a Sonnet primary.
 
+**Amendment (2026-05-11) — implementation vehicle: `ai-retry`.** The cascade's *control flow* migrated from a hand-rolled three-attempt sequence in `cascade.ts` to a declarative `createRetryable({ model, retries: [...] })` from `ai-retry@^1` (re-exported through `@warden/ai`). The motivating "caller-side rather than AI SDK middleware" rationale (lines 426–429 above) is preserved by *contract*, not *implementation*:
+
+- The invariant ADR-0017 actually defends is **observability of cascade transitions** — `phase-start`, `fallback-engaged`, `reasoning-delta` events fire at the call site, and `degradedWorkers` entries (`retried successfully` / `served from google`) are produced naturally. That invariant is preserved by translating `ai-retry`'s `onRetry` / `onError` / `onSuccess` callbacks (which fire synchronously inside `cascade.ts`) into the same `FormatterEvent` shapes and `DegradedEntry` strings the hand-rolled cascade emitted.
+- Structurally `createRetryable` *is* middleware (it wraps a `LanguageModel`). The "no middleware" wording in the original rationale was load-bearing on *opacity*, not on *layer location*. `ai-retry`'s callback surface is the opposite of opaque — every transition fires a typed event with the `model`, `error`, and `attempts[]` history.
+- Hard-fail error message strings (`llm: anthropic failed (<reason>); google fallback also failed (<reason>)`) are reconstructed in the `catch` block so downstream formatters and any string-matching assertions don't need to learn `ai-retry`'s `RetryError` shape.
+
+**Why this swap was worth it (net):**
+- `error.isRetryable(true)` from the AI SDK is a strict superset of the hand-rolled `classifyTransient` — it catches Anthropic's `overloaded_error` (via the provider's `APICallError.isRetryable` override), 408, 409, and SDK-native network errors that the manual classifier missed.
+- `Retry-After` / `Retry-After-Ms` response headers are now honored (capped at 60 s). The hand-rolled cascade hard-coded `RETRY_BACKOFF_MS = 1000` and ignored the header.
+- Per-retry timeout via `Retry.timeout` on each entry replaces the manual `streamText({ timeout: { totalMs } })` plumbing. We deliberately do *not* pass an outer `abortSignal` on `streamText` — ai-retry composes any base signal with the per-retry fresh signal via `AbortSignal.any`, which would shorten the retry budget to `min(remaining-base, opts.timeoutMs)` on non-timeout transients (e.g. a fast 429). Trade-off: the very first attempt has no explicit per-call deadline and relies on the provider client's request timeout; ai-retry's `timeout` field then governs every retry attempt cleanly.
+- Per-retry `providerOptions: {}` strips `anthropic.thinking` on the Google fallback in one line instead of an inline ternary at the previous `cascade.ts:124`.
+
+**What this *does not* commit to:**
+- Adopting `schemaInvalid().switch(...)` for structured-output mismatches. Available; deferred until dogfood evidence shows we need it.
+- Adopting `ai-retry` for embedding calls (Voyage in M6). Same library works there; gated on a real reliability signal.
+- Changing the `getBossModel()` / `getBossFallbackModel()` factory shape — `@warden/ai`'s public API is unchanged.
+- ADR-0006's BYOLLM deferral. Multi-provider auto-detect via `WARDEN_API_KEY` and user-configurable model-per-role remain post-v0 work.
+
+**Reversal cost.** Low. Revert is one file (`packages/core/src/llm/cascade.ts`) plus removing the `ai-retry` re-export from `@warden/ai/src/index.ts` and the catalog entry. The hand-rolled cascade in `git log` is the rollback target if the library ever stops tracking AI SDK v6 closely.
+
 ---
 
 ## ADR-0018 — M5: cheap-signals context selector + jscpd dedup runner

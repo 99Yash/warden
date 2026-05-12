@@ -13,7 +13,8 @@
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@warden/env": "workspace:*",
-    "ai": "catalog:"
+    "ai": "catalog:",
+    "ai-retry": "catalog:"
   },
   "devDependencies": {
     "@warden/config": "workspace:*",

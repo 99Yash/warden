@@ -1,9 +1,16 @@
 import {
+  createRetryable,
+  error as anyError,
   getBossFallbackModel,
   getBossModel,
+  getModelKey,
   Output,
   streamText,
+  timeout as timeoutCondition,
   type LanguageModel,
+  type Retries,
+  type RetryContext,
+  type SuccessContext,
 } from "@warden/ai";
 import type { DegradedEntry } from "../schema.js";
 import type { FormatterListener } from "./events.js";
@@ -11,12 +18,15 @@ import { LlmOutputSchema, type LlmOutput } from "./schema.js";
 
 /**
  * The ADR-0017 cascade: try Anthropic → retry once on transient → fall back
- * to Google → hard fail. Caller-side rather than AI SDK middleware so the
- * failure mode is visible at this call site (degradedWorkers messages are
- * naturally produced; cascade transitions are observable).
+ * to Google → hard fail. Implemented on top of `ai-retry`, which expresses
+ * the same control flow declaratively while preserving ADR-0017's invariant
+ * that cascade transitions are observable at the call site — `onRetry` /
+ * `onError` / `onSuccess` callbacks translate into the same FormatterEvents
+ * and DegradedEntry messages the hand-rolled cascade produced.
  */
 
 const RETRY_BACKOFF_MS = 1000;
+const PRIMARY_RETRY_ATTEMPTS = 2; // 1 initial + 1 retry on transient
 
 export interface CascadeOptions {
   systemPrompt: string;
@@ -38,97 +48,110 @@ export interface CascadeResult {
 }
 
 export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResult> {
-  const degraded: DegradedEntry[] = [];
-
-  // Attempt 1: Anthropic primary.
-  const primary = getBossModel();
-  const primaryId = modelLabel(primary);
-  opts.emit?.({ type: "phase-start", phase: "llm", provider: "anthropic", modelId: primaryId });
-  const first = await tryProvider({
-    model: primary,
-    provider: "anthropic",
-    opts,
-  });
-  if (first.ok) {
-    return { ...first.value, degraded };
-  }
-
-  // Attempt 2: retry once on transient.
-  if (isTransient(first.error)) {
-    await sleep(RETRY_BACKOFF_MS);
-    const retry = await tryProvider({ model: primary, provider: "anthropic", opts });
-    if (retry.ok) {
-      degraded.push({
-        kind: "warning",
-        topic: "llm",
-        message: `llm: anthropic ${first.error.summary}, retried successfully`,
-      });
-      return { ...retry.value, degraded };
-    }
-    first.error = retry.error;
-  }
-
-  // Attempt 3: Google fallback if configured.
-  const fallback = getBossFallbackModel();
-  if (!fallback) {
-    throw new Error(
-      `llm: anthropic failed (${first.error.summary}); GOOGLE_GENERATIVE_AI_API_KEY not set, no fallback available`,
-    );
-  }
-  const fallbackId = modelLabel(fallback);
-  opts.emit?.({
-    type: "fallback-engaged",
-    from: `anthropic/${primaryId}`,
-    to: `google/${fallbackId}`,
-    reason: first.error.summary,
-  });
-  opts.emit?.({ type: "phase-start", phase: "llm", provider: "google", modelId: fallbackId });
-  const fb = await tryProvider({ model: fallback, provider: "google", opts });
-  if (fb.ok) {
-    degraded.push({
-      kind: "warning",
-      topic: "llm",
-      message: `llm: anthropic ${first.error.summary}, served from google`,
-    });
-    return { ...fb.value, degraded };
-  }
-
-  throw new Error(
-    `llm: anthropic failed (${first.error.summary}); google fallback also failed (${fb.error.summary})`,
-  );
-}
-
-interface AttemptOk {
-  ok: true;
-  value: Omit<CascadeResult, "degraded">;
-}
-
-interface AttemptErr {
-  ok: false;
-  error: { transient: boolean; summary: string; cause: unknown };
-}
-
-async function tryProvider(args: {
-  model: LanguageModel;
-  provider: "anthropic" | "google";
-  opts: CascadeOptions;
-}): Promise<AttemptOk | AttemptErr> {
   const startedAt = Date.now();
+
+  const primary = getBossModel();
+  const primaryKey = getModelKey(primary);
+  const primaryId = modelLabel(primary);
+  const fallback = getBossFallbackModel();
+  const fallbackKey = fallback ? getModelKey(fallback) : undefined;
+  const fallbackId = fallback ? modelLabel(fallback) : undefined;
+
+  // Observability state captured by the callbacks. The library decides retry
+  // control flow; we translate its callbacks into the FormatterEvent + degraded
+  // shapes ADR-0017 requires.
+  const errorSummaries: string[] = [];
+  // Tracked separately so degraded + hard-fail messages can quote the *latest*
+  // anthropic failure after a transient retry — matches the hand-rolled
+  // cascade's `first.error = retry.error` overwrite.
+  let lastPrimarySummary: string | undefined;
+  let servedBy: LanguageModel = primary;
+
+  opts.emit?.({ type: "phase-start", phase: "llm", provider: "anthropic", modelId: primaryId });
+
+  // Transient = anything the AI SDK's APICallError marks as retryable (408,
+  // 409, 429, 5xx, network errors, plus Anthropic's `overloaded_error` via the
+  // provider's `isRetryable` override) OR an AbortSignal.timeout() firing.
+  const transientCondition = anyError.isRetryable(true).or(timeoutCondition());
+
+  const retries: Retries<LanguageModel> = [
+    // 1) On transient against primary: retry the same model once with backoff
+    //    and a fresh per-attempt timeout.
+    transientCondition.retry({
+      delay: RETRY_BACKOFF_MS,
+      maxAttempts: PRIMARY_RETRY_ATTEMPTS,
+      timeout: opts.timeoutMs,
+    }),
+  ];
+
+  if (fallback) {
+    // 2) Static Google fallback for any remaining Anthropic failure. Strips
+    //    Anthropic-scoped `thinking` providerOptions (replacement semantics —
+    //    `options.providerOptions` overrides the call's, not merges with it).
+    retries.push({
+      model: fallback,
+      timeout: opts.timeoutMs,
+      options: { providerOptions: {} },
+    });
+  }
+
+  const retryable = createRetryable<LanguageModel>({
+    model: primary,
+    retries,
+    onError: (ctx: RetryContext<LanguageModel>) => {
+      if (ctx.current.type === "error") {
+        const summary = errorSummary(ctx.current.error);
+        errorSummaries.push(summary);
+        if (getModelKey(ctx.current.model) === primaryKey) {
+          lastPrimarySummary = summary;
+        }
+      }
+    },
+    onRetry: (ctx: RetryContext<LanguageModel>) => {
+      const nextKey = getModelKey(ctx.current.model);
+      // Cross-provider transition — emit the same fallback-engaged + phase-start
+      // pair the hand-rolled cascade used to.
+      if (fallbackKey && nextKey === fallbackKey) {
+        opts.emit?.({
+          type: "fallback-engaged",
+          from: `anthropic/${primaryId}`,
+          to: `google/${fallbackId ?? "unknown"}`,
+          reason: lastPrimarySummary ?? "unknown",
+        });
+        opts.emit?.({
+          type: "phase-start",
+          phase: "llm",
+          provider: "google",
+          modelId: fallbackId ?? "unknown",
+        });
+      }
+    },
+    onSuccess: (ctx: SuccessContext<LanguageModel>) => {
+      servedBy = ctx.current.model;
+    },
+  });
+
   try {
     const result = streamText({
-      model: args.model,
-      system: args.opts.systemPrompt,
-      prompt: args.opts.userPrompt,
+      model: retryable,
+      system: opts.systemPrompt,
+      prompt: opts.userPrompt,
       output: Output.object({ schema: LlmOutputSchema }),
-      timeout: { totalMs: args.opts.timeoutMs },
-      providerOptions:
-        args.provider === "anthropic"
-          ? {
-              anthropic: {
-                thinking: { type: "enabled", budgetTokens: args.opts.thinkingBudget },
-              },
-            }
-          : {},
+      // Per-attempt deadlines live on the retry entries above. We deliberately
+      // do NOT set an outer `abortSignal: AbortSignal.timeout(...)` here: it
+      // would flow through ai-retry's `resolveAbortSignal` and compose with
+      // each retry's fresh signal via `AbortSignal.any`, shortening the retry
+      // budget to `min(remaining-base, opts.timeoutMs)` on non-timeout
+      // transients. The initial attempt is bounded by the first retry entry's
+      // `timeout` (ai-retry applies the next-attempt timeout when issuing the
+      // call after a failure; the very first attempt relies on the provider
+      // client's own request deadline to surface an error that the retry
+      // policy can then react to).
+      providerOptions: {
+        anthropic: {
+          thinking: { type: "enabled", budgetTokens: opts.thinkingBudget },
+        },
+      },
     });
 
     // Forward reasoning tokens to the UI in real time. Text-deltas (the JSON
@@ -138,7 +161,7 @@ async function tryProvider(args: {
       try {
         for await (const part of result.fullStream) {
           if (part.type === "reasoning-delta") {
-            args.opts.emit?.({ type: "reasoning-delta", text: part.text });
+            opts.emit?.({ type: "reasoning-delta", text: part.text });
           }
         }
       } catch {
@@ -147,40 +170,72 @@ async function tryProvider(args: {
     })();
 
     const output = await result.output;
+
+    // Project the served model down to ADR-0017's two-value provider
+    // discriminator. Anything not the primary key is the Google fallback —
+    // it's the only other entry in `retries`.
+    const servedKey = getModelKey(servedBy);
+    const provider: "anthropic" | "google" = servedKey === primaryKey ? "anthropic" : "google";
+    const modelId = modelLabel(servedBy);
+
+    const degraded: DegradedEntry[] = [];
+    if (provider === "anthropic" && errorSummaries.length > 0) {
+      // Retried-successfully path: only one primary failure was observed
+      // (transient → retry succeeded), so first == last; keep `errorSummaries[0]`
+      // to match the hand-rolled cascade's `first.error.summary` here.
+      degraded.push({
+        kind: "warning",
+        topic: "llm",
+        message: `llm: anthropic ${errorSummaries[0]}, retried successfully`,
+      });
+    } else if (provider === "google") {
+      // Served-from-google path: the hand-rolled cascade overwrote `first.error`
+      // with the retry-failure summary before engaging fallback, so the
+      // degraded message reflected the *last* primary failure.
+      degraded.push({
+        kind: "warning",
+        topic: "llm",
+        message: `llm: anthropic ${lastPrimarySummary ?? "failed"}, served from google`,
+      });
+    }
+
     return {
-      ok: true,
-      value: {
-        output,
-        provider: args.provider,
-        modelId: modelLabel(args.model),
-        durationMs: Date.now() - startedAt,
-      },
+      output,
+      provider,
+      modelId,
+      durationMs: Date.now() - startedAt,
+      degraded,
     };
   } catch (err) {
-    return {
-      ok: false,
-      error: {
-        transient: classifyTransient(err),
-        summary: errorSummary(err),
-        cause: err,
-      },
-    };
+    // ai-retry throws `RetryError` (from `ai`) with `.errors[]` when every
+    // attempt fails; we re-shape to ADR-0017's expected message so downstream
+    // formatting + degradedWorkers tests don't have to learn a new shape.
+    // `lastPrimarySummary` matches the hand-rolled cascade's `first.error`
+    // semantic (overwritten by the retry failure when the transient retry
+    // ran), so the message quotes the latest primary failure rather than the
+    // initial one.
+    const primarySummary = lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
+    if (!fallback) {
+      throw new Error(
+        `llm: anthropic failed (${primarySummary}); GOOGLE_GENERATIVE_AI_API_KEY not set, no fallback available`,
+      );
+    }
+    const fallbackSummary = errorSummaries.at(-1) ?? errorSummary(err);
+    throw new Error(
+      `llm: anthropic failed (${primarySummary}); google fallback also failed (${fallbackSummary})`,
+    );
   }
 }
 
-function isTransient(err: { transient: boolean }): boolean {
-  return err.transient;
-}
-
-function classifyTransient(err: unknown): boolean {
-  const code = errorCode(err);
-  if (code === "ETIMEDOUT" || code === "ECONNRESET" || code === "ECONNREFUSED") return true;
+function errorSummary(err: unknown): string {
   const status = httpStatus(err);
-  if (status === 429) return true;
-  if (status !== undefined && status >= 500 && status < 600) return true;
-  // AI SDK timeouts surface as AbortError-shaped exceptions.
-  if (err instanceof Error && /timeout|aborted/i.test(err.message)) return true;
-  return false;
+  if (status !== undefined) return `HTTP ${status}`;
+  const code = errorCode(err);
+  if (code) return code;
+  if (err instanceof Error) {
+    return err.message.length > 80 ? `${err.message.slice(0, 80)}…` : err.message;
+  }
+  return "unknown error";
 }
 
 function errorCode(err: unknown): string | undefined {
@@ -207,17 +262,6 @@ function httpStatus(err: unknown): number | undefined {
   return undefined;
 }
 
-function errorSummary(err: unknown): string {
-  const status = httpStatus(err);
-  if (status !== undefined) return `HTTP ${status}`;
-  const code = errorCode(err);
-  if (code) return code;
-  if (err instanceof Error) {
-    return err.message.length > 80 ? `${err.message.slice(0, 80)}…` : err.message;
-  }
-  return "unknown error";
-}
-
 function modelLabel(model: LanguageModel): string {
   if (typeof model === "string") return model;
   if (model && typeof model === "object" && "modelId" in model) {
@@ -225,8 +269,4 @@ function modelLabel(model: LanguageModel): string {
     if (typeof v === "string") return v;
   }
   return "unknown";
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
