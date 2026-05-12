@@ -61,6 +61,10 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
   // control flow; we translate its callbacks into the FormatterEvent + degraded
   // shapes ADR-0017 requires.
   const errorSummaries: string[] = [];
+  // Tracked separately so degraded + hard-fail messages can quote the *latest*
+  // anthropic failure after a transient retry — matches the hand-rolled
+  // cascade's `first.error = retry.error` overwrite.
+  let lastPrimarySummary: string | undefined;
   let servedBy: LanguageModel = primary;
 
   opts.emit?.({ type: "phase-start", phase: "llm", provider: "anthropic", modelId: primaryId });
@@ -96,7 +100,11 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
     retries,
     onError: (ctx: RetryContext<LanguageModel>) => {
       if (ctx.current.type === "error") {
-        errorSummaries.push(errorSummary(ctx.current.error));
+        const summary = errorSummary(ctx.current.error);
+        errorSummaries.push(summary);
+        if (getModelKey(ctx.current.model) === primaryKey) {
+          lastPrimarySummary = summary;
+        }
       }
     },
     onRetry: (ctx: RetryContext<LanguageModel>) => {
@@ -108,7 +116,7 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
           type: "fallback-engaged",
           from: `anthropic/${primaryId}`,
           to: `google/${fallbackId ?? "unknown"}`,
-          reason: errorSummaries.at(-1) ?? "unknown",
+          reason: lastPrimarySummary ?? "unknown",
         });
         opts.emit?.({
           type: "phase-start",
@@ -129,9 +137,16 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
       system: opts.systemPrompt,
       prompt: opts.userPrompt,
       output: Output.object({ schema: LlmOutputSchema }),
-      // First-attempt deadline. Each retry entry above supplies a fresh
-      // `timeout` so subsequent attempts get their own budget per ADR-0017.
-      abortSignal: AbortSignal.timeout(opts.timeoutMs),
+      // Per-attempt deadlines live on the retry entries above. We deliberately
+      // do NOT set an outer `abortSignal: AbortSignal.timeout(...)` here: it
+      // would flow through ai-retry's `resolveAbortSignal` and compose with
+      // each retry's fresh signal via `AbortSignal.any`, shortening the retry
+      // budget to `min(remaining-base, opts.timeoutMs)` on non-timeout
+      // transients. The initial attempt is bounded by the first retry entry's
+      // `timeout` (ai-retry applies the next-attempt timeout when issuing the
+      // call after a failure; the very first attempt relies on the provider
+      // client's own request deadline to surface an error that the retry
+      // policy can then react to).
       providerOptions: {
         anthropic: {
           thinking: { type: "enabled", budgetTokens: opts.thinkingBudget },
@@ -165,16 +180,22 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
 
     const degraded: DegradedEntry[] = [];
     if (provider === "anthropic" && errorSummaries.length > 0) {
+      // Retried-successfully path: only one primary failure was observed
+      // (transient → retry succeeded), so first == last; keep `errorSummaries[0]`
+      // to match the hand-rolled cascade's `first.error.summary` here.
       degraded.push({
         kind: "warning",
         topic: "llm",
         message: `llm: anthropic ${errorSummaries[0]}, retried successfully`,
       });
     } else if (provider === "google") {
+      // Served-from-google path: the hand-rolled cascade overwrote `first.error`
+      // with the retry-failure summary before engaging fallback, so the
+      // degraded message reflected the *last* primary failure.
       degraded.push({
         kind: "warning",
         topic: "llm",
-        message: `llm: anthropic ${errorSummaries[0] ?? "failed"}, served from google`,
+        message: `llm: anthropic ${lastPrimarySummary ?? "failed"}, served from google`,
       });
     }
 
@@ -189,7 +210,11 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
     // ai-retry throws `RetryError` (from `ai`) with `.errors[]` when every
     // attempt fails; we re-shape to ADR-0017's expected message so downstream
     // formatting + degradedWorkers tests don't have to learn a new shape.
-    const primarySummary = errorSummaries[0] ?? errorSummary(err);
+    // `lastPrimarySummary` matches the hand-rolled cascade's `first.error`
+    // semantic (overwritten by the retry failure when the transient retry
+    // ran), so the message quotes the latest primary failure rather than the
+    // initial one.
+    const primarySummary = lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
     if (!fallback) {
       throw new Error(
         `llm: anthropic failed (${primarySummary}); GOOGLE_GENERATIVE_AI_API_KEY not set, no fallback available`,

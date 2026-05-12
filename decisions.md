@@ -452,7 +452,7 @@ Google as the second provider:
 **Why this swap was worth it (net):**
 - `error.isRetryable(true)` from the AI SDK is a strict superset of the hand-rolled `classifyTransient` — it catches Anthropic's `overloaded_error` (via the provider's `APICallError.isRetryable` override), 408, 409, and SDK-native network errors that the manual classifier missed.
 - `Retry-After` / `Retry-After-Ms` response headers are now honored (capped at 60 s). The hand-rolled cascade hard-coded `RETRY_BACKOFF_MS = 1000` and ignored the header.
-- Per-attempt timeout via `AbortSignal.any()` composition replaces the manual `streamText({ timeout: { totalMs } })` plumbing; behavior is equivalent (each attempt gets a fresh `timeoutMs` budget).
+- Per-retry timeout via `Retry.timeout` on each entry replaces the manual `streamText({ timeout: { totalMs } })` plumbing. We deliberately do *not* pass an outer `abortSignal` on `streamText` — ai-retry composes any base signal with the per-retry fresh signal via `AbortSignal.any`, which would shorten the retry budget to `min(remaining-base, opts.timeoutMs)` on non-timeout transients (e.g. a fast 429). Trade-off: the very first attempt has no explicit per-call deadline and relies on the provider client's request timeout; ai-retry's `timeout` field then governs every retry attempt cleanly.
 - Per-retry `providerOptions: {}` strips `anthropic.thinking` on the Google fallback in one line instead of an inline ternary at the previous `cascade.ts:124`.
 
 **What this *does not* commit to:**
