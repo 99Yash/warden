@@ -34,9 +34,17 @@ export function getCached<T>(queryKey: string): CachedEntry<T> | undefined {
   return { payload: row.payload as T, retrievedAt: row.retrievedAt };
 }
 
+/**
+ * `external_knowledge` is the cache for *externally fetched* sources —
+ * CVE, advisory, changelog, documentation, web, tool, repo_convention.
+ * `api_def` (M11) sources come from local `.d.ts` lookup and have their
+ * own dedicated `type_def_cache` table, so they're excluded here.
+ */
+export type ExternalSourceType = Exclude<SourceType, "api_def">;
+
 export interface PutOptions {
   queryKey: string;
-  sourceType: SourceType;
+  sourceType: ExternalSourceType;
   sourceUrl?: string;
   payload: Record<string, unknown>;
   ttlMs: number;

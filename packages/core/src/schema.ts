@@ -15,6 +15,13 @@ export const SourceTypeEnum = z.enum([
   'web',
   'tool',
   'repo_convention',
+  // M11 (ADR-0026): a type-definition citation produced by `lookupTypeDef`.
+  // Re-uses SourceSchema's M10 {path, line, snippet} triple — `path` =
+  // dts_file (repoRoot-relative, points into node_modules/), `line` =
+  // line_start, `snippet` = the single-line-normalized signature. `id`
+  // carries `${package}@${version}#${symbol}`; `title` carries
+  // `${kind} ${symbol}`. Verified by the API-claim-verifier post-pass.
+  'api_def',
 ]);
 export type SourceType = z.infer<typeof SourceTypeEnum>;
 

@@ -46,7 +46,9 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **citation discipline** — The load-bearing thesis: the LLM cannot author findings without a tool source; it can only triage and format what runners produced. M7 extends the discipline to **questions** — every quoted snippet must be mechanically verifiable. The **substring-verifier** is what enforces it. → ADR-0008, ADR-0021.
 
-**`sources[]`** — Structured citation array on every comment. Source `type` is one of `cve` (NVD/OSV), `advisory` (GitHub Advisory), `changelog`, `documentation`, `web`, `tool` (TSC / ESLint output), `file` (a code snippet from the repo, M7+), `repo_convention`. Each source carries `id` / `url` / `title` and a `retrievedAt` ISO timestamp. → ADR-0008.
+**`sources[]`** — Structured citation array on every comment. Source `type` is one of `cve` (NVD/OSV), `advisory` (GitHub Advisory), `changelog`, `documentation`, `web`, `tool` (TSC / ESLint output), `repo_convention`, `api_def` (type definition from a `node_modules/<pkg>/*.d.ts` lookup, M11+). Each source carries `id` / `url` / `title` and a `retrievedAt` ISO timestamp. → ADR-0008, ADR-0026.
+
+**`api_def` source** — `[M11+]` Source variant carrying a type definition citation from `lookupTypeDef`. Re-uses `SourceSchema`'s M10 triple: `path` = `dts_file` (repoRoot-relative path under `node_modules/`), `line` = `line_start` of the signature, `snippet` = the signature string (single-line whitespace-normalized so the verifier can match it against a concatenated `.d.ts` window). `id` carries `${package}@${version}#${symbol}` where `package` is the **literal import path** including any subpath (e.g., `drizzle-orm/sqlite-core@0.30.0#sqliteTable`); `title` carries `${kind} ${symbol}`. The LLM does not assemble these fields — `lookupTypeDef` returns a pre-shaped `suggestedSource` object the LLM copies verbatim, eliminating partial-triple parse failures. Verified by the **API claim verifier** post-pass — concat-then-substring-match against the cited `.d.ts` window, dispatched on `type`. → ADR-0026.
 
 **evidence** — The concrete file path + single-line range (and optional snippet) that grounds a claim in the code. Surfaced on `ContextCandidate.reasons[]` (M5) and on M7 detector findings; consumed by the substring-verifier.
 
@@ -81,6 +83,8 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 **boss/worker orchestration** — `[spine shipped in M8 (ADR-0023); worker tier still deferred]` The vision-tier pipeline: deterministic execution → parallel specialist workers → boss synthesis → grading. v0 collapses this into a single formatter call. Reintroduced incrementally: sub-agent in M7; **orchestration spine** (dispatch + scratchpad + synthesizer routing existing runners) shipped in M8 per ADR-0023; specialist Sonnet **workers** (adversarial critic, self-aware invariant checker, free-form prose consistency, DeepSec-shaped SAST, etc.) deferred to M9+ — each its own ADR when scheduled. The word **worker** is reserved for *the worker tier* — a specialist LLM in a multi-call pipeline. The M7 cheap-tier LLM runners are **sub-agents**, never workers; the M8 spine dispatches existing runners (detectors + sub-agents per §5) without committing to specialist-LLM workers. → vision.md §3, ADR-0023, ADR-0008.
 
 **self-aware boss model** — `[deferred, M6+]` Direction where the boss model can introspect its own code/limits at runtime. The introspection surface is treated as a hardened jailbreak boundary. → memory: `project_warden_self_aware_boss.md`.
+
+**`lookupTypeDef`** — `[M11+]` AI SDK tool descriptor exposed to the formatter LLM. Input `{ package, symbol }` where `package` is the **literal import path** (`drizzle-orm`, `drizzle-orm/sqlite-core`, `@radix-ui/react-dialog`); the resolver splits `(packageName, subpath)` internally and resolves the `.d.ts` via `exports['./<subpath>']` → `typesVersions` → direct fallback → `@types/*` fallback. Output `LookupTypeDefResult` (discriminated union on `found: boolean`; `found: true` carries a pre-shaped `suggestedSource` the LLM copies verbatim into `Comment.sources[]`; `found: false` carries `reason: "package_not_installed" | "no_types" | "symbol_not_found" | "lookup_error"`). Lives at `packages/core/src/llm/tools/lookup-type-def.ts`; resolver at `packages/core/src/api/lookup-type-def.ts`. Cap: 8 calls per review (`stopWhen: stepCountIs(8)` in cascade). Triggered by the four trigger conditions in the formatter system prompt's "Verifying library API claims" section. → ADR-0026.
 
 ---
 
@@ -120,6 +124,8 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **`.warden/cache.sqlite`** — The single, gitignored, content-addressed cache file the entire system reads from and writes to. Schema lives in `@warden/db`. Safe to delete; `warden init` rebuilds.
 
+**`type_def_cache`** — `[M11+]` SQLite table caching results of `lookupTypeDef` lookups against `node_modules/<pkg>/*.d.ts`. Compound primary key `(package, version, symbol)`; content-addressed in the sense that re-resolving the same triple in the same install state is idempotent. Positive rows carry `signature` / `kind` / `jsdoc` / `dts_file` / `line_start` / `line_end`; negative rows carry `reason`. Grows with usage, not with `node_modules/` size — <1 MB per repo typical. Cache invalidation is automatic via `(package, version)` mismatch when `npm install` bumps versions; old rows for previous versions become unreachable, no explicit prune step. → ADR-0026.
+
 ---
 
 ## 5. Runners — detectors + sub-agents
@@ -145,6 +151,8 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 **M7 detectors** — Three new detectors land in M7: **scalability detector** (load-then-narrow queries, sequential awaits), **deadcode detector** (unused optional params, dead branches via reverse import-graph), **consistency detector** (env-var / CLI-command / file-path claims in docs that diverge from code). → m7-plan.md.
 
 **substring-verifier** — M7 post-pass that confirms LLM-quoted snippets actually appear in their cited files (after whitespace normalisation). Drops citations that don't match; if all citations on a comment drop, drops the comment. Logs an info-level entry on drops. → ADR-0021, m7-plan.md.
+
+**API claim verifier** — `[M11+]` Post-pass extension of the **substring-verifier**, dispatched on `source.type === "api_def"`. Reads the cited `.d.ts` file across `line ± API_DEF_DRIFT` (30 lines either side — wider than M10's 5 because `.d.ts` signatures routinely span 10+ lines), concatenates the window, normalizes whitespace once, and substring-matches the (already single-line normalized) `signature`. The wider drift + concat-then-match is the key difference from M10's per-line algorithm — M10 stays per-line for its single-line snippet consumer; `api_def` widens for multi-line signatures. Failed matches drop the source; if all sources drop, the Comment drops. Same drop semantics + `degradedWorkers` surfacing as M10. The verifier walk dispatches on source `type`; one new branch for `api_def`, all other source types unchanged. → ADR-0026.
 
 **known debt** — Code accepted as-is and excluded from review noise. Suppressed via an optional `.reviewbot/overlay.yaml`. Small, rarely changes, kept narrow on purpose. → ADR-0008.
 
@@ -200,7 +208,7 @@ Named shorthand for things not yet built. Useful when reading docs that referenc
 
 **verify API claims** — Applying citation discipline to LLM claims about library APIs by retrieving `.d.ts` and GitHub source. Shares infrastructure with the leverage category. → memory: `project_warden_verify_api_claims.md`.
 
-**cross-repo retrieval** — Indexing sibling repos + `node_modules` + `.d.ts` files. Unblocks both the leverage category and the API-claim verifier.
+**cross-repo retrieval** — `[narrowed by M11 to `.d.ts` lookup]` Indexing sibling repos + `node_modules` + `.d.ts` files. M11 ships the `.d.ts` lookup subset (per ADR-0026) via `lookupTypeDef` — lookup-on-demand cache, no Voyage call, formatter-only tool exposure. The rest of the bag — `node_modules/<pkg>/src` chunking, sibling-repo indexing, embedding-based `.d.ts` retrieval, webfetch fallback for uninstalled packages — stays deferred for its own future ADRs. M11 ships the API claim verifier half of the dependency cascade; the `leverage` category waits for its own M12+ ADR.
 
 **daemon `JobRunner`** — Real async embedding work, either review-time incremental (Model B) or background subprocess / `warden daemon` (Model C). Gated on dogfood evidence that users skip `warden init` consistently. → ADR-0019.
 
@@ -209,6 +217,8 @@ Named shorthand for things not yet built. Useful when reading docs that referenc
 **sibling-repo scanning** — `--sibling-repo` flag accepting paths to related repos. Auto-discovers integration points (HTTP calls, shared constants, webhook handlers) and flags PRs that modify an integration boundary. Requires a pre-built integration map.
 
 **license scanning** — Deterministic check for copyleft licences (GPL / AGPL) introduced into proprietary code. → ADR-0008 deferred.
+
+**state-of-the-art verification suite** — `[deferred]` Evaluation milestone for proving or falsifying a narrow Warden quality claim, not a standing marketing claim. Combines public code-review benchmarks (CodeReviewBench, c-CRAB, SWRBench, CodeFuse-CR-Bench), adjacent agent benchmarks (SWE-bench Verified for retrieval / context-selection signal only), a private WardenBench holdout, deterministic / one-shot-LLM / Warden-ablation baselines, and metrics for precision, recall, F0.5, P0/P1 recall, false-positive rate, citation verification rate, unsupported-claim rate, accepted-by-developer rate, cost, latency, and degradation rate. → vision.md §12, ADR-0008 deferred.
 
 **committability detector half** — A detector for the genuinely bounded subset of committability anti-patterns (merge-conflict markers, leftover `debugger`, `// TODO(remove before commit)`-style sentinels) — i.e., the patterns that survive the "reliable across ecosystems" test. Consciously parked: the open-tail sub-agent is the v0 implementation, and splitting was rejected in M7 because the supposedly-bounded patterns (dirname conventions, hardcoded path heuristics) turned out to be context-dependent. Revisit if a clean bounded subset surfaces.
 
