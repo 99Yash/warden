@@ -1,14 +1,23 @@
 # Warden
 
-Warden is a local code review CLI for TypeScript and JavaScript repos.
+> Warden is a local code review CLI that runs deterministic tools (tsc, eslint, npm audit), verifies every external claim through citable sources (OSV, .d.ts), and uses an LLM only as a triage and formatting layer. The CLI returns a stable comment contract; the model never invents assertions.
 
-Primary pages:
+## Pages
 
-- https://wrdn.beauty/
-- https://wrdn.beauty/docs/
-- https://wrdn.beauty/examples/
-- https://wrdn.beauty/design/
-- https://wrdn.beauty/notes/
+- [Home](https://wrdn.beauty/): Hero, thesis, pipeline, comment anatomy.
+- [Docs · Overview](https://wrdn.beauty/docs/): What Warden checks and what it explicitly does not.
+- [Docs · Install](https://wrdn.beauty/docs/install/): How to install and run the CLI locally.
+- [Docs · Configuration](https://wrdn.beauty/docs/configuration/): Environment variables and review modes.
+- [Docs · Reading comments](https://wrdn.beauty/docs/reading-comments/): How to read the tier/category/source shape of a comment.
+- [Docs · CI usage](https://wrdn.beauty/docs/ci/): Wiring Warden into a CI step.
+- [Examples](https://wrdn.beauty/examples/): A rendered fixture from Warden reviewing its own codebase.
+- [Design](https://wrdn.beauty/design/): Links into decisions.md, vision.md, and CONTEXT.md.
+- [Notes](https://wrdn.beauty/notes/): Longer-form product and architecture writing.
+- [Notes · The reviewer should bring receipts](https://wrdn.beauty/notes/reviewer-with-receipts/): The product thesis.
 
-The project emphasizes tool-backed findings, citable external verification, and model use as a
-triage and writing layer rather than a source of ungrounded claims.
+## Optional
+
+- [GitHub repository](https://github.com/99Yash/warden)
+- [decisions.md (architectural ADRs)](https://github.com/99Yash/warden/blob/main/decisions.md)
+- [vision.md (long-form thinking framework)](https://github.com/99Yash/warden/blob/main/vision.md)
+- [CONTEXT.md (noun glossary)](https://github.com/99Yash/warden/blob/main/CONTEXT.md)

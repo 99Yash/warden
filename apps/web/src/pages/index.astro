@@ -5,29 +5,41 @@ import MarketingShell from "../components/MarketingShell.astro";
 
 <MarketingShell
   title="Code review that brings receipts"
-  description="Warden is a local code review CLI that turns tool output, citations, and repository context into review comments you can audit."
+  description="Warden is a local code review CLI that runs deterministic tools, verifies every external claim, and only lets the model phrase what the evidence already supports."
 >
   <main>
     <section class="hero-section">
-      <div class="hero-copy">
+      <div class="hero-copy reveal-in">
         <p class="eyebrow">Local code review CLI</p>
-        <h1>Warden</h1>
+        <h1>
+          Reviews with <span class="accent">receipts.</span>
+        </h1>
         <p class="hero-lede">
-          Most AI reviewers ask you to trust a paragraph. Warden starts with the boring evidence:
-          type errors, lint findings, dependency records, source snippets, and citations. The model
-          only gets to turn that trail into a review a human can act on.
+          Most AI reviewers ask you to trust a paragraph. Warden starts with the boring evidence —
+          type errors, lint findings, dependency records, source snippets — and only then lets the
+          model <em>rank, clarify, and phrase</em>. Nothing reaches the comment without a cite.
         </p>
         <div class="hero-actions">
-          <a class="button primary" href="/docs/" data-astro-prefetch>Read docs</a>
-          <a class="button secondary" href="/examples/" data-astro-prefetch>See output</a>
+          <a class="button primary" href="/docs/install/" data-astro-prefetch>
+            Install Warden
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </a>
+          <a class="button secondary" href="/examples/" data-astro-prefetch>See a real review</a>
         </div>
+        <p class="hero-meta">
+          <span>Runs in your repo</span>
+          <span>Static fixtures, not screenshots</span>
+          <span>v0 · personal craft bar</span>
+        </p>
       </div>
-      <AnimatedHero />
+      <div class="reveal-in delay-2">
+        <AnimatedHero />
+      </div>
     </section>
 
     <section class="proof-strip" aria-label="Review contract">
-      <p><strong>Runs in your repo</strong><span>no hosted review backend</span></p>
-      <p><strong>Checks before it writes</strong><span>tools and OSV before prose</span></p>
+      <p><strong>Runs in your repo</strong><span>no hosted review backend, no upload</span></p>
+      <p><strong>Tools before prose</strong><span>tsc, eslint, npm audit, OSV cited first</span></p>
       <p><strong>Asks when unsure</strong><span>questions beat invented certainty</span></p>
       <p><strong>Returns a contract</strong><span>stable JSON for future wrappers</span></p>
     </section>
@@ -35,31 +47,39 @@ import MarketingShell from "../components/MarketingShell.astro";
     <section class="home-band">
       <div class="section-heading">
         <p class="eyebrow">The thesis</p>
-        <h2>A reviewer should know what it can prove.</h2>
+        <h2>A reviewer should know what it can <span class="accent">prove.</span></h2>
+        <p class="section-sub">
+          Confidence is cheap. The discipline is what makes a review worth reading. Warden splits the
+          work into three honest layers — evidence, verification, prose — and refuses to let the
+          model skip ahead.
+        </p>
       </div>
       <div class="feature-grid">
         <article>
-          <span class="feature-kicker">01</span>
-          <h3>The facts come first.</h3>
+          <span class="feature-kicker">01 · EVIDENCE</span>
+          <h3>The facts come <em>first.</em></h3>
           <p>
-            TypeScript, ESLint, duplication checks, dependency audit output, and repository snippets
-            form the evidence layer. Warden can be useful only after that layer exists.
+            TypeScript, ESLint, duplication checks, dependency audits, and repository snippets form
+            the evidence layer. Warden is allowed to be useful only after that layer exists — never
+            before.
           </p>
         </article>
         <article>
-          <span class="feature-kicker">02</span>
-          <h3>External claims carry receipts.</h3>
+          <span class="feature-kicker">02 · VERIFICATION</span>
+          <h3>External claims carry <em>receipts.</em></h3>
           <p>
-            Vulnerability claims are checked against OSV before they reach the final review. If a
-            source cannot be checked, the claim should not survive.
+            Vulnerability claims are cross-checked against OSV before they reach the final review.
+            Library API claims are checked against the package's own <code>.d.ts</code>. If a source
+            cannot be verified, the claim does not survive.
           </p>
         </article>
         <article>
-          <span class="feature-kicker">03</span>
-          <h3>The output is built to travel.</h3>
+          <span class="feature-kicker">03 · CONTRACT</span>
+          <h3>Output built to <em>travel.</em></h3>
           <p>
             The CLI is the first surface, not the last. Every run returns stable comments with ids,
-            tiers, categories, sources, and degradation notes that other wrappers can render later.
+            tiers, categories, sources, and degradation notes — the same shape a future PR bot or
+            Slack wrapper would render.
           </p>
         </article>
       </div>
@@ -68,29 +88,123 @@ import MarketingShell from "../components/MarketingShell.astro";
     <section class="workflow-band">
       <div class="section-heading">
         <p class="eyebrow">Pipeline</p>
-        <h2>Quiet machinery, readable review.</h2>
+        <h2>Quiet machinery, <span class="accent">readable</span> review.</h2>
+        <p class="section-sub">
+          Four phases, in order. Each one is allowed to refuse the next: if the evidence layer is
+          thin, verification stays quiet; if verification finds drift, prose gets cut.
+        </p>
       </div>
       <ol class="workflow">
-        <li><span>Detect</span><p>Find the workspace shape and the diff that actually needs review.</p></li>
-        <li><span>Run</span><p>Execute the tools that can speak with mechanical confidence.</p></li>
-        <li><span>Verify</span><p>Attach sources to claims that reach outside the codebase.</p></li>
-        <li><span>Write</span><p>Let the model rank, clarify, and phrase the final comments.</p></li>
+        <li>
+          <span>Detect</span>
+          <p>Find the workspace shape and the diff that actually needs review. Prune what's noise.</p>
+        </li>
+        <li>
+          <span>Run</span>
+          <p>Execute the tools that can speak with mechanical confidence — type, lint, audit, dedup.</p>
+        </li>
+        <li>
+          <span>Verify</span>
+          <p>Attach sources to claims that reach outside the codebase. OSV for vulns, <code>.d.ts</code> for APIs.</p>
+        </li>
+        <li>
+          <span>Write</span>
+          <p>Let the model rank, clarify, and phrase what survived. Anything without a cite is dropped.</p>
+        </li>
       </ol>
+    </section>
+
+    <section class="anatomy-band">
+      <div class="anatomy-wrap">
+        <div>
+          <p class="eyebrow">Anatomy</p>
+          <h2>What lands in a <span class="accent">comment.</span></h2>
+          <p class="section-sub">
+            Every Warden comment is a small receipt: a tiered claim, a category, a confidence
+            number, and the sources that earned it the right to interrupt you.
+          </p>
+          <ul>
+            <li>
+              <span class="anatomy-key">Tier</span>
+              <div>
+                <strong>Block · Fix · Consider</strong>
+                <p>Three steps of actionability, never inflated. Tier 1 is what would block a merge.</p>
+              </div>
+            </li>
+            <li>
+              <span class="anatomy-key">Category</span>
+              <div>
+                <strong>correctness, security, scalability, …</strong>
+                <p>Reading order, not severity. Correctness questions before style ones.</p>
+              </div>
+            </li>
+            <li>
+              <span class="anatomy-key">Sources</span>
+              <div>
+                <strong>Path, line, snippet — verified</strong>
+                <p>Every external claim must point at a real artifact. The verifier substring-matches before the comment ships.</p>
+              </div>
+            </li>
+            <li>
+              <span class="anatomy-key">Degraded</span>
+              <div>
+                <strong>What didn't run, said out loud</strong>
+                <p>If a worker fails, the run admits it. Silence is the failure mode Warden refuses.</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <aside class="receipt" aria-label="Sample comment receipt">
+          <div class="receipt-row">
+            <span class="receipt-key">id</span>
+            <span class="receipt-val">w-7c8f3a · stable across runs</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-key">tier</span>
+            <span class="receipt-val tier-1">1 · Block</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-key">category</span>
+            <span class="receipt-val">vulnerability</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-key">confidence</span>
+            <span class="receipt-val">96%</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-key">file</span>
+            <span class="receipt-val">package-lock.json:2418</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-key">claim</span>
+            <span class="receipt-val">
+              <span class="receipt-emph">semver</span> &lt; 7.5.2 — ReDoS via crafted version range.
+            </span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-key">source</span>
+            <span class="receipt-val">OSV-2023-2419 · osv.dev</span>
+          </div>
+          <div class="receipt-quote">
+            "Vulnerable versions of semver are susceptible to Regular Expression Denial of Service..."
+          </div>
+        </aside>
+      </div>
     </section>
 
     <section class="closing-band">
       <div>
         <p class="eyebrow">Design record</p>
-        <h2>Personal tool, public craft bar.</h2>
+        <h2>Personal tool, <span class="accent">public</span> craft bar.</h2>
         <p>
           Warden is being built for one person first, but not as a throwaway. The decisions are
-          written down, the vocabulary is named, and the site stays static so it does not pretend to
-          be a hosted product before the review engine earns that shape.
+          written down. The vocabulary is named. The site stays static so it never pretends to be a
+          hosted product before the review engine earns that shape.
         </p>
       </div>
       <div class="closing-actions">
         <a class="button primary" href="/design/" data-astro-prefetch>Read design notes</a>
-        <a class="button secondary" href="/notes/" data-astro-prefetch>Read notes</a>
+        <a class="button secondary" href="/notes/" data-astro-prefetch>Field notes</a>
       </div>
     </section>
   </main>

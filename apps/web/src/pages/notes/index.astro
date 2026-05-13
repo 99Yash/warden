@@ -10,7 +10,7 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 >
   <section class="notes-page">
     <p class="eyebrow">Field notes</p>
-    <h2>Longer arguments, outside the landing page.</h2>
+    <h2>Longer arguments, <em>outside</em> the landing page.</h2>
     <p>
       The homepage has one job: explain why Warden deserves a look. Notes are where the underlying
       bets can be argued in plain English: why local-first matters, why citations are the product,
@@ -18,9 +18,9 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
     </p>
 
     <div class="note-list">
-      <a href="/notes/reviewer-with-receipts/">
+      <a href="/notes/reviewer-with-receipts/" data-astro-prefetch>
         <span>First draft</span>
-        <strong>The reviewer should bring receipts</strong>
+        <strong>The reviewer should bring <em>receipts</em></strong>
         <p>
           Why Warden treats the model as a writer, not a witness, and why every confident review
           comment should be able to point at evidence.
@@ -29,3 +29,13 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
     </div>
   </section>
 </StarlightPage>
+
+<style>
+  .notes-page h2 em,
+  .note-list strong em {
+    font-family: var(--warden-font-serif);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--warden-orange);
+  }
+</style>

@@ -3,6 +3,9 @@ import starlight from "@astrojs/starlight";
 
 export default defineConfig({
   site: "https://wrdn.beauty",
+  markdown: {
+    smartypants: false,
+  },
   devToolbar: {
     enabled: false,
   },
@@ -22,11 +25,12 @@ export default defineConfig({
       titleDelimiter: "-",
       components: {
         Head: "./src/components/StarlightHead.astro",
+        Header: "./src/components/DocsHeader.astro",
+        PageTitle: "./src/components/DocsPageTitle.astro",
       },
       sidebar: [
-        { label: "Home", link: "/", attrs: { "data-astro-prefetch": true } },
         {
-          label: "Docs",
+          label: "Getting started",
           items: [
             { label: "Overview", link: "/docs/", attrs: { "data-astro-prefetch": true } },
             { label: "Install", link: "/docs/install/", attrs: { "data-astro-prefetch": true } },
@@ -43,9 +47,14 @@ export default defineConfig({
             { label: "CI usage", link: "/docs/ci/", attrs: { "data-astro-prefetch": true } },
           ],
         },
-        { label: "Examples", link: "/examples/", attrs: { "data-astro-prefetch": true } },
-        { label: "Design", link: "/design/", attrs: { "data-astro-prefetch": true } },
-        { label: "Notes", link: "/notes/", attrs: { "data-astro-prefetch": true } },
+        {
+          label: "Project",
+          items: [
+            { label: "Examples", link: "/examples/", attrs: { "data-astro-prefetch": true } },
+            { label: "Design record", link: "/design/", attrs: { "data-astro-prefetch": true } },
+            { label: "Field notes", link: "/notes/", attrs: { "data-astro-prefetch": true } },
+          ],
+        },
       ],
     }),
   ],
