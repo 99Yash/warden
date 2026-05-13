@@ -18,11 +18,11 @@ scalability, consistency, deadcode, committability, clarity, style, deduplicatio
 
 ## Sources
 
-Comments include sources where Warden can cite a tool, repository line, advisory, or external
-record. A claim without acceptable grounding should be dropped rather than shown.
+Comments include sources when Warden can cite a tool, repository line, advisory, or external
+record. A claim without acceptable grounding should be dropped rather than dressed up as certainty.
 
 ## Degraded workers
 
-The metadata can include degraded entries when a worker is missing context or had a partial failure.
+The metadata can include degraded entries when a runner is missing context or had a partial failure.
 Actionable entries appear in the normal CLI output; warnings and info are available in JSON or verbose
 mode.

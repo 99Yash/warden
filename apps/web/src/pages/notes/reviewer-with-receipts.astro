@@ -1,0 +1,77 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "The reviewer should bring receipts",
+    description: "The product thesis behind Warden's citation-first code review pipeline.",
+  }}
+>
+  <article class="note-article">
+    <p class="eyebrow">Product thesis</p>
+    <p class="note-lede">
+      A code review comment is an interruption. It asks somebody to stop, re-read their own work,
+      and consider changing course. If that interruption comes from a machine, the bar should be
+      higher, not lower.
+    </p>
+
+    <p>
+      That is the small bet behind Warden. The useful part of an AI reviewer is not confidence.
+      Confidence is cheap. The useful part is the discipline around what it is allowed to be
+      confident about.
+    </p>
+
+    <h2>The model is a writer, not a witness.</h2>
+    <p>
+      Warden starts with tools that can produce facts: TypeScript, ESLint, dependency audit output,
+      duplication checks, deterministic detectors, and source snippets from the repository. Those
+      facts are not glamorous. They are also the only reason the final review deserves attention.
+    </p>
+    <p>
+      The model enters after the evidence exists. Its job is to rank, connect, clarify, and phrase.
+      It can turn a pile of diagnostics into a readable comment. It can ask a careful question when
+      intent is unclear. It should not be treated as the source of truth for a CVE, a library API, or
+      a claim about what the codebase does.
+    </p>
+
+    <h2>Local-first is not nostalgia.</h2>
+    <p>
+      The CLI is the first product surface because it is the smallest honest loop. It runs where the
+      repository already lives. It can use the same type checker, the same lockfile, the same local
+      cache, and the same diff a developer is about to review. There is no hosted backend pretending
+      to understand a project before the local engine has proved it can help.
+    </p>
+    <p>
+      That choice also keeps the future open. A GitHub bot, a CI wrapper, or an interactive triage
+      app can come later because the core returns a typed review contract instead of terminal-only
+      prose. The CLI is not a dead end. It is the place where the review logic gets good before
+      distribution becomes the problem.
+    </p>
+
+    <h2>Citations are part of the interface.</h2>
+    <p>
+      A citation is not decoration. It is how the reviewer says, "Here is why I am allowed to say
+      this." Warden verifies external claims before they reach the final comment, and it drops claims
+      that cannot be grounded. That makes the product less magical, but much more useful.
+    </p>
+    <p>
+      The aim is not to flood a pull request with every possible issue. The aim is to produce a small
+      set of comments that are specific, ranked, and auditable. If Warden is unsure, it should ask.
+      If it cannot verify, it should stay quiet.
+    </p>
+
+    <h2>The public surface stays honest too.</h2>
+    <p>
+      This site is static on purpose. The example output comes from a checked-in fixture. The design
+      notes link back to the actual decision record. There is no demo box quietly calling a hosted
+      reviewer, no fake sample repo invented to flatter the tool, and no claim that the bot or
+      triage app already exists.
+    </p>
+    <p>
+      Warden is a personal tool with a public craft bar. The reason to share it is not that every
+      future surface has shipped. The reason is that the core idea is sharp enough to inspect: an AI
+      reviewer should bring evidence before it brings prose.
+    </p>
+  </article>
+</StarlightPage>

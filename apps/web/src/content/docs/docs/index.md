@@ -3,18 +3,19 @@ title: Overview
 description: What Warden does and how to use it.
 ---
 
-Warden is an AI code review CLI for TypeScript and JavaScript repos.
+Warden is a local code review CLI for TypeScript and JavaScript repos.
 
-It runs deterministic tooling first, verifies external claims, then asks an LLM to triage and format
-the review. The model is not the source of truth; it is the final presentation layer.
+It runs the checks that can be trusted mechanically, verifies claims that reach outside the
+codebase, and then uses a model for the part models are good at: sorting, phrasing, and asking when
+intent is unclear.
 
 ## Review flow
 
 1. Detect the repository shape and diff scope.
 2. Run TypeScript, ESLint, dependency audit, duplication, and deterministic detectors.
-3. Verify external claims before showing them.
+3. Verify external claims before they become comments.
 4. Select adjacent code context.
-5. Produce a typed `CommentSet`.
+5. Produce a typed `CommentSet` for the CLI and future wrappers.
 
 ## Commands
 
@@ -24,9 +25,9 @@ warden check
 warden review
 ```
 
-`warden check` is deterministic-only. `warden review` adds the LLM triage and formatter.
+`warden check` is deterministic-only. `warden review` adds model-assisted triage and wording.
 
 ## Output contract
 
 Every review produces comments with stable ids, file ranges, tiers, categories, confidence, and
-sources. Future wrappers can consume the same JSON without scraping terminal output.
+sources. Future wrappers can consume the same JSON contract without scraping terminal output.

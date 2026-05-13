@@ -4,61 +4,62 @@ import MarketingShell from "../components/MarketingShell.astro";
 ---
 
 <MarketingShell
-  title="AI code review with receipts"
-  description="Warden is an AI code review CLI that runs deterministic tools, verifies external claims, and uses an LLM only for triage."
+  title="Code review that brings receipts"
+  description="Warden is a local code review CLI that turns tool output, citations, and repository context into review comments you can audit."
 >
   <main>
     <section class="hero-section">
       <div class="hero-copy">
-        <p class="eyebrow">AI code review CLI</p>
+        <p class="eyebrow">Local code review CLI</p>
         <h1>Warden</h1>
         <p class="hero-lede">
-          Deterministic tools produce the facts. Citable sources verify external claims. The LLM
-          gets the narrow job it is good at: triage, wording, and ordering.
+          Most AI reviewers ask you to trust a paragraph. Warden starts with the boring evidence:
+          type errors, lint findings, dependency records, source snippets, and citations. The model
+          only gets to turn that trail into a review a human can act on.
         </p>
         <div class="hero-actions">
           <a class="button primary" href="/docs/" data-astro-prefetch>Read docs</a>
-          <a class="button secondary" href="/examples/" data-astro-prefetch>View output</a>
+          <a class="button secondary" href="/examples/" data-astro-prefetch>See output</a>
         </div>
       </div>
       <AnimatedHero />
     </section>
 
     <section class="proof-strip" aria-label="Review contract">
-      <p><strong>TSC and ESLint</strong><span>structured local findings</span></p>
-      <p><strong>npm audit and OSV</strong><span>CVE claims with receipts</span></p>
-      <p><strong>LLM formatter</strong><span>triage without free-form invention</span></p>
-      <p><strong>CommentSet JSON</strong><span>ready for future wrappers</span></p>
+      <p><strong>Runs in your repo</strong><span>no hosted review backend</span></p>
+      <p><strong>Checks before it writes</strong><span>tools and OSV before prose</span></p>
+      <p><strong>Asks when unsure</strong><span>questions beat invented certainty</span></p>
+      <p><strong>Returns a contract</strong><span>stable JSON for future wrappers</span></p>
     </section>
 
     <section class="home-band">
       <div class="section-heading">
-        <p class="eyebrow">What makes it different</p>
-        <h2>Warden keeps the reviewer honest.</h2>
+        <p class="eyebrow">The thesis</p>
+        <h2>A reviewer should know what it can prove.</h2>
       </div>
       <div class="feature-grid">
         <article>
           <span class="feature-kicker">01</span>
-          <h3>Facts come from tools.</h3>
+          <h3>The facts come first.</h3>
           <p>
-            TypeScript, ESLint, duplication checks, dependency audit output, and deterministic
-            detectors are the evidence layer. The model receives claims; it does not invent them.
+            TypeScript, ESLint, duplication checks, dependency audit output, and repository snippets
+            form the evidence layer. Warden can be useful only after that layer exists.
           </p>
         </article>
         <article>
           <span class="feature-kicker">02</span>
-          <h3>External claims need receipts.</h3>
+          <h3>External claims carry receipts.</h3>
           <p>
-            Vulnerabilities are cross-checked through OSV before they appear. Unverified advisories
-            are dropped instead of laundered into confident prose.
+            Vulnerability claims are checked against OSV before they reach the final review. If a
+            source cannot be checked, the claim should not survive.
           </p>
         </article>
         <article>
           <span class="feature-kicker">03</span>
-          <h3>The output is a contract.</h3>
+          <h3>The output is built to travel.</h3>
           <p>
-            Every run returns a typed CommentSet with stable ids, tiers, categories, citations, and
-            degraded-worker metadata future web or bot surfaces can consume.
+            The CLI is the first surface, not the last. Every run returns stable comments with ids,
+            tiers, categories, sources, and degradation notes that other wrappers can render later.
           </p>
         </article>
       </div>
@@ -67,26 +68,30 @@ import MarketingShell from "../components/MarketingShell.astro";
     <section class="workflow-band">
       <div class="section-heading">
         <p class="eyebrow">Pipeline</p>
-        <h2>Local first, citation first.</h2>
+        <h2>Quiet machinery, readable review.</h2>
       </div>
       <ol class="workflow">
-        <li><span>Detect</span><p>Find the JS/TS workspace shape and diff scope.</p></li>
-        <li><span>Run</span><p>Execute deterministic tools and prune known noise before review.</p></li>
-        <li><span>Verify</span><p>Check dependency and API claims against citable sources.</p></li>
-        <li><span>Format</span><p>Ask the LLM to rank, clarify, and render the review.</p></li>
+        <li><span>Detect</span><p>Find the workspace shape and the diff that actually needs review.</p></li>
+        <li><span>Run</span><p>Execute the tools that can speak with mechanical confidence.</p></li>
+        <li><span>Verify</span><p>Attach sources to claims that reach outside the codebase.</p></li>
+        <li><span>Write</span><p>Let the model rank, clarify, and phrase the final comments.</p></li>
       </ol>
     </section>
 
     <section class="closing-band">
       <div>
-        <p class="eyebrow">Current shape</p>
-        <h2>Built as a CLI. Ready for wrappers later.</h2>
+        <p class="eyebrow">Design record</p>
+        <h2>Personal tool, public craft bar.</h2>
         <p>
-          The public site is intentionally static: docs, examples, design notes, and rendered
-          fixtures. The interactive triage app and GitHub bot remain separate future surfaces.
+          Warden is being built for one person first, but not as a throwaway. The decisions are
+          written down, the vocabulary is named, and the site stays static so it does not pretend to
+          be a hosted product before the review engine earns that shape.
         </p>
       </div>
-      <a class="button primary" href="/design/" data-astro-prefetch>Read design notes</a>
+      <div class="closing-actions">
+        <a class="button primary" href="/design/" data-astro-prefetch>Read design notes</a>
+        <a class="button secondary" href="/notes/" data-astro-prefetch>Read notes</a>
+      </div>
     </section>
   </main>
 </MarketingShell>

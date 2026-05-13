@@ -277,6 +277,7 @@ body.marketing-shell > * {
 }
 
 .hero-actions,
+.closing-actions,
 .comment-badges,
 .terminal-bar,
 .commentset-summary,
@@ -476,11 +477,18 @@ body.marketing-shell > * {
 }
 
 .section-heading h2,
-.closing-band h2,
+.closing-band h2 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 1;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
 .example-intro h2,
 .design-page h2 {
   margin: 0;
-  font-size: clamp(2rem, 5vw, 4rem);
+  font-size: clamp(1.9rem, 4vw, 3rem);
   line-height: 1;
   letter-spacing: 0;
   text-wrap: balance;
@@ -593,14 +601,100 @@ body.marketing-shell > * {
   max-width: 44rem;
 }
 
+.closing-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .example-intro,
-.design-page {
+.design-page,
+.notes-page,
+.note-article {
   margin-bottom: 2rem;
 }
 
 .example-intro p,
-.design-page > p {
+.design-page > p,
+.notes-page > p {
   max-width: 48rem;
+}
+
+.notes-page h2 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 0.98;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.notes-page > p,
+.note-lede,
+.note-article p {
+  color: var(--warden-muted);
+  line-height: 1.7;
+}
+
+.note-list {
+  display: grid;
+  gap: 1rem;
+  max-width: 42rem;
+  margin-top: 2rem;
+}
+
+.note-list a {
+  min-width: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--warden-line);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+  background: var(--warden-panel);
+  box-shadow: var(--warden-surface-shadow);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.note-list a:hover {
+  border-color: color-mix(in srgb, var(--warden-green) 55%, var(--warden-line));
+  box-shadow: var(--warden-surface-shadow-hover);
+  transform: translateY(-1px);
+}
+
+.note-list span {
+  color: var(--warden-orange);
+  font-family: var(--sl-font-mono);
+  font-size: 0.78rem;
+}
+
+.note-list strong {
+  display: block;
+  margin-top: 0.75rem;
+  font-size: 1.2rem;
+}
+
+.note-list p {
+  margin-bottom: 0;
+  color: var(--warden-muted);
+  line-height: 1.6;
+}
+
+.note-article {
+  max-width: 48rem;
+}
+
+.note-lede {
+  margin-top: 1.25rem;
+  font-size: 1.22rem;
+}
+
+.note-article h2 {
+  margin: 2.4rem 0 0.75rem;
+  font-size: clamp(1.45rem, 3vw, 2.15rem);
+  line-height: 1.12;
+  letter-spacing: 0;
 }
 
 .commentset {
@@ -826,6 +920,7 @@ body.marketing-shell > * {
   }
 
   .closing-band,
+  .closing-actions,
   .commentset-summary,
   .review-comment header {
     align-items: stretch;

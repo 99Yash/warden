@@ -45,6 +45,7 @@ export default defineConfig({
         },
         { label: "Examples", link: "/examples/", attrs: { "data-astro-prefetch": true } },
         { label: "Design", link: "/design/", attrs: { "data-astro-prefetch": true } },
+        { label: "Notes", link: "/notes/", attrs: { "data-astro-prefetch": true } },
       ],
     }),
   ],
