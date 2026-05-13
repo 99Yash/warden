@@ -1,0 +1,38 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Design",
+    description: "Links into Warden's architectural decisions and long-form design notes.",
+  }}
+>
+  <section class="design-page">
+    <p class="eyebrow">Architecture notes</p>
+    <h2>Why Warden is shaped this way</h2>
+    <p>
+      Warden's public surface is intentionally smaller than the internal design record. This page
+      points curious readers to the source documents without turning the site into a second copy of
+      the ADR archive.
+    </p>
+
+    <div class="link-grid">
+      <a href="https://github.com/99Yash/warden/blob/main/decisions.md">
+        <span>decisions.md</span>
+        <strong>Architectural Decisions</strong>
+        <p>Every accepted direction, rejection, caveat, and milestone boundary.</p>
+      </a>
+      <a href="https://github.com/99Yash/warden/blob/main/vision.md">
+        <span>vision.md</span>
+        <strong>Thinking Framework</strong>
+        <p>The original long-form analysis that predates the current milestone sequence.</p>
+      </a>
+      <a href="https://github.com/99Yash/warden/blob/main/CONTEXT.md">
+        <span>CONTEXT.md</span>
+        <strong>Noun Glossary</strong>
+        <p>The project vocabulary agents and future contributors should reuse.</p>
+      </a>
+    </div>
+  </section>
+</StarlightPage>

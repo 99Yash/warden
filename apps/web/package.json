@@ -1,0 +1,20 @@
+{
+  "name": "@warden/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "check-types": "astro check",
+    "gen-fixtures": "node ./scripts/gen-fixtures.mjs"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@astrojs/starlight": "^0.39.2",
+    "@warden/core": "workspace:*",
+    "astro": "^6.3.1"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

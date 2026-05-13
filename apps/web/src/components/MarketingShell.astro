@@ -1,0 +1,39 @@
+---
+import { ClientRouter } from "astro:transitions";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.svg" />
+    <title>{title} - Warden</title>
+    <ClientRouter />
+  </head>
+  <body class="marketing-shell">
+    <header class="site-header">
+      <a class="brand" href="/" data-astro-prefetch aria-label="Warden home">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <span>Warden</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="/docs/" data-astro-prefetch>Docs</a>
+        <a href="/examples/" data-astro-prefetch>Examples</a>
+        <a href="/design/" data-astro-prefetch>Design</a>
+        <a href="https://github.com/99Yash/warden">GitHub</a>
+      </nav>
+    </header>
+    <slot />
+  </body>
+</html>

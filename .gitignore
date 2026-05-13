@@ -9,6 +9,9 @@ dist
 build
 *.tsbuildinfo
 
+# Astro generated types/cache
+.astro
+
 # Environment variables
 .env
 .env*.local

@@ -12,6 +12,7 @@
     "db:generate": "turbo run db:generate --filter=@warden/db",
     "db:migrate": "turbo run db:migrate --filter=@warden/db",
     "db:studio": "turbo run db:studio --filter=@warden/db",
+    "gen-fixtures": "pnpm --filter @warden/web gen-fixtures",
     "warden": "pnpm --filter @warden/cli warden"
   },
   "devDependencies": {

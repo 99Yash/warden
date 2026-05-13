@@ -1,0 +1,99 @@
+{
+  "comments": [
+    {
+      "id": "sample-contract-check-env",
+      "file": "packages/cli/src/index.ts",
+      "lineStart": 60,
+      "lineEnd": 60,
+      "tier": 2,
+      "category": "contract",
+      "kind": "assertion",
+      "claim": "`warden check` still validates provider environment before any deterministic checks run.",
+      "explanation": "The check command is described as deterministic-only and no-LLM, but the shared startup path calls `wardenEnv()` before acquiring the diff. Users without review credentials can be blocked before they reach the deterministic path.",
+      "suggestedAction": "Split required environment validation by mode so `check` only validates the variables it actually needs.",
+      "sources": [
+        {
+          "type": "repo_convention",
+          "title": "Shared CLI startup path",
+          "retrievedAt": "2026-05-12T00:00:00.000Z",
+          "path": "packages/cli/src/index.ts",
+          "line": 60,
+          "snippet": "  wardenEnv();"
+        },
+        {
+          "type": "repo_convention",
+          "title": "check command description",
+          "retrievedAt": "2026-05-12T00:00:00.000Z",
+          "path": "packages/cli/src/index.ts",
+          "line": 164,
+          "snippet": "      \"Fast deterministic-only review (TSC + ESLint + npm audit + OSV verification). No LLM call. Suitable for pre-commit / CI gating.\","
+        }
+      ],
+      "confidence": 0.92
+    },
+    {
+      "id": "sample-consistency-readme-index",
+      "file": "README.md",
+      "lineStart": 41,
+      "lineEnd": 46,
+      "tier": 2,
+      "category": "consistency",
+      "kind": "question",
+      "claim": "Should the quick-start distinguish the optional semantic index from the required review path?",
+      "explanation": "The README puts `pnpm warden init` before both `check` and `review`, while the environment table says `VOYAGE_API_KEY` is required for init and review falls back to cheap signals when it is unset. Readers may interpret embeddings as mandatory for every review.",
+      "suggestedAction": "Clarify that `init` improves review context quality but the CLI can still run without the semantic index.",
+      "sources": [
+        {
+          "type": "repo_convention",
+          "title": "README setup order",
+          "retrievedAt": "2026-05-12T00:00:00.000Z",
+          "path": "README.md",
+          "line": 42,
+          "snippet": "pnpm warden init"
+        },
+        {
+          "type": "repo_convention",
+          "title": "README Voyage fallback note",
+          "retrievedAt": "2026-05-12T00:00:00.000Z",
+          "path": "README.md",
+          "line": 54,
+          "snippet": "| `VOYAGE_API_KEY`               | Required for `warden init`. Enables the semantic context selector in `warden review` (ADR-0019); when unset, review falls back to cheap signals only. |"
+        }
+      ],
+      "confidence": 0.84
+    },
+    {
+      "id": "sample-correctness-banner",
+      "file": "packages/core/src/banner/index.ts",
+      "lineStart": 53,
+      "lineEnd": 54,
+      "tier": 1,
+      "category": "correctness",
+      "kind": "assertion",
+      "claim": "An empty chunk store is treated as a missing index before model metadata is inspected.",
+      "explanation": "This is the right ordering for the banner: a repository with no chunks should produce a direct `no-index` action instead of falling through into model-age or embedding checks that cannot be meaningful yet.",
+      "suggestedAction": "Keep the `chunkCount === 0` guard ahead of locked-model reads when editing this path.",
+      "sources": [
+        {
+          "type": "repo_convention",
+          "title": "Banner state ordering",
+          "retrievedAt": "2026-05-12T00:00:00.000Z",
+          "path": "packages/core/src/banner/index.ts",
+          "line": 54,
+          "snippet": "  if (chunkCount === 0) return { kind: \"no-index\" };"
+        }
+      ],
+      "confidence": 0.96
+    }
+  ],
+  "metadata": {
+    "durationMs": 7428,
+    "degradedWorkers": [
+      {
+        "kind": "actionable",
+        "topic": "context",
+        "message": "context: semantic index missing - run warden init to enable embedding-backed context selection."
+      }
+    ]
+  }
+}

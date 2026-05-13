@@ -1,0 +1,13 @@
+# Warden
+
+Warden is an AI code review CLI for TypeScript and JavaScript repos.
+
+Primary pages:
+
+- https://wrdn.beauty/
+- https://wrdn.beauty/docs/
+- https://wrdn.beauty/examples/
+- https://wrdn.beauty/design/
+
+The project emphasizes deterministic tooling, citable external verification, and LLM use as a
+triage and formatting layer rather than a source of ungrounded claims.

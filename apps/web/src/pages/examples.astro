@@ -1,0 +1,27 @@
+---
+import type { CommentSet } from "@warden/core";
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import CommentSetRenderer from "../components/CommentSetRenderer.astro";
+import fixture from "../fixtures/warden-on-warden.json";
+
+const commentSet = fixture as CommentSet;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Examples",
+    description: "Rendered Warden CommentSet output from the checked-in showcase fixture.",
+  }}
+>
+  <section class="example-intro">
+    <p class="eyebrow">Showcase fixture</p>
+    <h2>Rendered review output</h2>
+    <p>
+      This page renders the same typed CommentSet shape emitted by the CLI. The checked-in fixture
+      keeps the static build deterministic; regenerate it with <code>pnpm gen-fixtures</code> before
+      a public deploy.
+    </p>
+  </section>
+
+  <CommentSetRenderer commentSet={commentSet} />
+</StarlightPage>

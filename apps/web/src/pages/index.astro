@@ -1,0 +1,92 @@
+---
+import AnimatedHero from "../components/AnimatedHero.astro";
+import MarketingShell from "../components/MarketingShell.astro";
+---
+
+<MarketingShell
+  title="AI code review with receipts"
+  description="Warden is an AI code review CLI that runs deterministic tools, verifies external claims, and uses an LLM only for triage."
+>
+  <main>
+    <section class="hero-section">
+      <div class="hero-copy">
+        <p class="eyebrow">AI code review CLI</p>
+        <h1>Warden</h1>
+        <p class="hero-lede">
+          Deterministic tools produce the facts. Citable sources verify external claims. The LLM
+          gets the narrow job it is good at: triage, wording, and ordering.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="/docs/" data-astro-prefetch>Read docs</a>
+          <a class="button secondary" href="/examples/" data-astro-prefetch>View output</a>
+        </div>
+      </div>
+      <AnimatedHero />
+    </section>
+
+    <section class="proof-strip" aria-label="Review contract">
+      <p><strong>TSC and ESLint</strong><span>structured local findings</span></p>
+      <p><strong>npm audit and OSV</strong><span>CVE claims with receipts</span></p>
+      <p><strong>LLM formatter</strong><span>triage without free-form invention</span></p>
+      <p><strong>CommentSet JSON</strong><span>ready for future wrappers</span></p>
+    </section>
+
+    <section class="home-band">
+      <div class="section-heading">
+        <p class="eyebrow">What makes it different</p>
+        <h2>Warden keeps the reviewer honest.</h2>
+      </div>
+      <div class="feature-grid">
+        <article>
+          <span class="feature-kicker">01</span>
+          <h3>Facts come from tools.</h3>
+          <p>
+            TypeScript, ESLint, duplication checks, dependency audit output, and deterministic
+            detectors are the evidence layer. The model receives claims; it does not invent them.
+          </p>
+        </article>
+        <article>
+          <span class="feature-kicker">02</span>
+          <h3>External claims need receipts.</h3>
+          <p>
+            Vulnerabilities are cross-checked through OSV before they appear. Unverified advisories
+            are dropped instead of laundered into confident prose.
+          </p>
+        </article>
+        <article>
+          <span class="feature-kicker">03</span>
+          <h3>The output is a contract.</h3>
+          <p>
+            Every run returns a typed CommentSet with stable ids, tiers, categories, citations, and
+            degraded-worker metadata future web or bot surfaces can consume.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="workflow-band">
+      <div class="section-heading">
+        <p class="eyebrow">Pipeline</p>
+        <h2>Local first, citation first.</h2>
+      </div>
+      <ol class="workflow">
+        <li><span>Detect</span><p>Find the JS/TS workspace shape and diff scope.</p></li>
+        <li><span>Run</span><p>Execute deterministic tools and prune known noise before review.</p></li>
+        <li><span>Verify</span><p>Check dependency and API claims against citable sources.</p></li>
+        <li><span>Format</span><p>Ask the LLM to rank, clarify, and render the review.</p></li>
+      </ol>
+    </section>
+
+    <section class="closing-band">
+      <div>
+        <p class="eyebrow">Current shape</p>
+        <h2>Built as a CLI. Ready for wrappers later.</h2>
+        <p>
+          The public site is intentionally static: docs, examples, design notes, and rendered
+          fixtures. The interactive triage app and GitHub bot remain separate future surfaces.
+        </p>
+      </div>
+      <a class="button primary" href="/design/" data-astro-prefetch>Read design notes</a>
+    </section>
+  </main>
+</MarketingShell>

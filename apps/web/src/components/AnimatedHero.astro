@@ -1,0 +1,40 @@
+---
+import type { CommentSet } from "@warden/core";
+import fixture from "../fixtures/warden-on-warden.json";
+
+const commentSet = fixture as CommentSet;
+const heroComments = commentSet.comments.slice(0, 3);
+---
+
+<section class="hero-demo" aria-label="Warden review output preview">
+  <div class="terminal-window">
+    <div class="terminal-bar" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+    <div class="terminal-body">
+      <p class="prompt">$ warden review --base main</p>
+      <p class="phase ok">ecosystem detected: TypeScript workspace</p>
+      <p class="phase ok">deterministic tools complete: tsc, eslint, npm audit, OSV</p>
+      <p class="phase active">drafting cited review...</p>
+      <div class="finding-list">
+        {
+          heroComments.map((comment) => (
+            <article class={`mini-finding tier-${comment.tier}`}>
+              <p class="mini-meta">
+                <span>T{comment.tier}</span>
+                <span>{comment.category}</span>
+                <span>{Math.round(comment.confidence * 100)}%</span>
+              </p>
+              <p class="mini-file">
+                {comment.file}:{comment.lineStart}
+              </p>
+              <p class="mini-claim">{comment.claim}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>

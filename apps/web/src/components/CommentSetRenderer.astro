@@ -1,0 +1,133 @@
+---
+import type { Category, Comment, CommentSet, Source, Tier } from "@warden/core";
+
+interface Props {
+  commentSet: CommentSet;
+  compact?: boolean;
+}
+
+const { commentSet, compact = false } = Astro.props;
+
+const priority: Category[] = [
+  "correctness",
+  "security",
+  "vulnerability",
+  "contract",
+  "scalability",
+  "consistency",
+  "deadcode",
+  "committability",
+  "clarity",
+  "style",
+  "dedup",
+  "tests",
+];
+
+const comments = [...commentSet.comments].sort((a, b) => {
+  const pa = priority.indexOf(a.category);
+  const pb = priority.indexOf(b.category);
+  if (pa !== pb) return pa - pb;
+  if (a.tier !== b.tier) return a.tier - b.tier;
+  return b.confidence - a.confidence;
+});
+
+function tierLabel(tier: Tier): string {
+  if (tier === 1) return "Block";
+  if (tier === 2) return "Fix";
+  return "Consider";
+}
+
+function categoryLabel(category: Category): string {
+  return category.replaceAll("_", " ");
+}
+
+function sourceLabel(source: Source): string {
+  if (source.path && source.line) return `${source.path}:${source.line}`;
+  if (typeof source.title === "string") return source.title;
+  if (typeof source.id === "string") return source.id;
+  return sourceHref(source) ?? String(source.type);
+}
+
+function sourceHref(source: Source): string | undefined {
+  if (!source.url) return undefined;
+  return String(source.url);
+}
+
+function confidence(comment: Comment): string {
+  return `${Math.round(comment.confidence * 100)}% confidence`;
+}
+---
+
+<section class:list={["commentset", { compact }]} aria-label="Rendered Warden comment set">
+  <div class="commentset-summary">
+    <div>
+      <p class="eyebrow">CommentSet</p>
+      <h2>{comments.length} cited findings</h2>
+    </div>
+    <dl>
+      <div>
+        <dt>Runtime</dt>
+        <dd>{commentSet.metadata.durationMs.toLocaleString()}ms</dd>
+      </div>
+      <div>
+        <dt>Degraded</dt>
+        <dd>{commentSet.metadata.degradedWorkers.length}</dd>
+      </div>
+    </dl>
+  </div>
+
+  {
+    commentSet.metadata.degradedWorkers.length > 0 && (
+      <div class="degraded-strip">
+        {commentSet.metadata.degradedWorkers.map((entry) => (
+          <p>
+            <strong>{entry.topic}</strong>
+            <span>{entry.message}</span>
+          </p>
+        ))}
+      </div>
+    )
+  }
+
+  <div class="comments">
+    {
+      comments.map((comment) => (
+        <article class={`review-comment tier-${comment.tier}`}>
+          <header>
+            <div>
+              <p class="comment-location">
+                {comment.file}:{comment.lineStart}
+                {comment.lineEnd !== comment.lineStart ? `-${comment.lineEnd}` : ""}
+              </p>
+              <h3>{comment.claim}</h3>
+            </div>
+            <div class="comment-badges" aria-label="Comment metadata">
+              <span>{tierLabel(comment.tier)}</span>
+              <span>{categoryLabel(comment.category)}</span>
+              <span>{confidence(comment)}</span>
+            </div>
+          </header>
+          <p>{comment.explanation}</p>
+          {comment.suggestedAction && <p class="suggested-action">{comment.suggestedAction}</p>}
+          {comment.sources.length > 0 && (
+            <footer>
+              <span>Sources</span>
+              <ul>
+                {comment.sources.map((source) => (
+                  <li>
+                    {sourceHref(source) ? (
+                      <a href={sourceHref(source)}>{sourceLabel(source)}</a>
+                    ) : (
+                      <code>{sourceLabel(source)}</code>
+                    )}
+                    {source.snippet && <q>{source.snippet}</q>}
+                  </li>
+                ))}
+              </ul>
+            </footer>
+          )}
+        </article>
+      ))
+    }
+  </div>
+</section>
