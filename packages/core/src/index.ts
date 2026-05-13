@@ -60,6 +60,17 @@ export {
   type VerifyCitationsInput,
   type VerifyCitationsOutput,
 } from "./llm/verify-citations.js";
+export {
+  lookupTypeDef,
+  type LookupTypeDefResult,
+  type NotFoundReason as TypeDefNotFoundReason,
+  type SuggestedApiDefSource,
+  type TypeDefKind,
+} from "./api/index.js";
+export {
+  makeLookupTypeDefTool,
+  type MakeLookupTypeDefToolOptions,
+} from "./llm/tools/lookup-type-def.js";
 export type { ToolFinding } from "./runners/types.js";
 export type { AuditAdvisory, AuditSeverity } from "./runners/audit.js";
 export { verifyOsv, type OsvRecord, type VerifiedAdvisory } from "./verify/osv.js";
@@ -519,6 +530,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
       diff: input.diff,
       retrievedContext: ctxFromSelector,
       changed,
+      repoRoot: input.repoRoot,
       emit: input.emit,
     });
   }

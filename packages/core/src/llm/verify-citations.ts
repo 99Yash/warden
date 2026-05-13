@@ -28,6 +28,16 @@ import type { Comment, DegradedEntry, Source } from "../schema.js";
  */
 
 const LINE_DRIFT = 5;
+/**
+ * M11 (ADR-0026 §14): wider drift for `api_def` sources. Real-world `.d.ts`
+ * signatures span lines routinely — generics + JSDoc + overload sets — so
+ * per-line match (M10's algorithm) would never find a line containing the
+ * whole collapsed signature. The `api_def` branch concatenates a
+ * `± API_DEF_DRIFT` line window, normalizes whitespace, and substring-
+ * matches the (already single-line-normalized) signature once. 30 covers
+ * signatures up to 61 lines wide; real signatures almost always fit.
+ */
+const API_DEF_DRIFT = 30;
 // Hard sanity cap on lines streamed per file. Real source files are well
 // below this; the cap exists to keep memory bounded on a pathological input
 // (e.g., a minified bundle accidentally fed in as a citation target).
@@ -150,6 +160,14 @@ async function verifyOne(
   const norm = normalizeWhitespace(stripped);
   if (norm.length === 0) return false;
 
+  // M11 (ADR-0026 §14): `api_def` sources need a wider drift + concat-
+  // then-match because `.d.ts` signatures span multiple lines. M10's
+  // per-line match is unchanged for every other source type — widening it
+  // for non-`api_def` would loosen verification for no benefit.
+  if (source.type === "api_def") {
+    return verifyApiDef(abs, source.line, norm, cache);
+  }
+
   const upToLine = source.line + LINE_DRIFT;
   const entry = await ensureLinesUpTo(abs, upToLine, cache);
   if (entry === null) return false;
@@ -161,6 +179,33 @@ async function verifyOne(
     if (candidate.length > 0 && candidate.includes(norm)) return true;
   }
   return false;
+}
+
+/**
+ * `api_def`-branch verification: concatenate the `± API_DEF_DRIFT` window,
+ * normalize whitespace, then substring-match. The resolver stores
+ * `signature` already collapsed to a single line via the same
+ * `normalizeWhitespace` rule, so file-window normalization is reciprocal.
+ *
+ * False-positive risk is bounded by the tight 61-line window and pinned by
+ * the symbol name being part of the signature — random matches across
+ * unrelated declarations require a token sequence real `.d.ts` files
+ * don't produce.
+ */
+async function verifyApiDef(
+  abs: string,
+  line: number,
+  normalizedSignature: string,
+  cache: Map<string, FileLines | null>,
+): Promise<boolean> {
+  const upToLine = line + API_DEF_DRIFT;
+  const entry = await ensureLinesUpTo(abs, upToLine, cache);
+  if (entry === null) return false;
+  const start = Math.max(1, line - API_DEF_DRIFT);
+  const end = Math.min(entry.lines.length, line + API_DEF_DRIFT);
+  if (end < start) return false;
+  const windowText = entry.lines.slice(start - 1, end).join(" ");
+  return normalizeWhitespace(windowText).includes(normalizedSignature);
 }
 
 /**

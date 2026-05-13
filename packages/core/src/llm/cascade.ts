@@ -5,16 +5,33 @@ import {
   getBossModel,
   getModelKey,
   Output,
+  stepCountIs,
   streamText,
   timeout as timeoutCondition,
   type LanguageModel,
   type Retries,
   type RetryContext,
   type SuccessContext,
+  type ToolSet,
 } from "@warden/ai";
 import type { DegradedEntry } from "../schema.js";
 import type { FormatterListener } from "./events.js";
 import { LlmOutputSchema, type LlmOutput } from "./schema.js";
+
+/**
+ * Container for `tool({ ... })` descriptors keyed by name. Aliases AI SDK
+ * v6's `ToolSet` so the public surface stays stable across SDK shifts and
+ * concrete `Tool<X, Y>` values (with inferred input/output) assign cleanly
+ * — the SDK's union-shaped `ToolSet` is what `streamText` consumes.
+ */
+export type ToolMap = ToolSet;
+
+/**
+ * Tool-use loop cap (ADR-0026 §6). 8 is loose enough that real reviews
+ * (typically <=5 library API claims worth verifying) don't hit it, tight
+ * enough that pathological loops terminate. Tuned in M12+ from dogfood.
+ */
+const TOOL_USE_STEP_CAP = 8;
 
 /**
  * The ADR-0017 cascade: try Anthropic → retry once on transient → fall back
@@ -36,6 +53,14 @@ export interface CascadeOptions {
   /** Hard timeout per provider attempt (ms). */
   timeoutMs: number;
   emit?: FormatterListener;
+  /**
+   * M11 (ADR-0026): tool descriptors the LLM may invoke. When set,
+   * `streamText` runs the AI SDK v6 tool-use loop capped at
+   * `TOOL_USE_STEP_CAP` steps. Tool execution errors are swallowed inside
+   * the tool's own `execute()` per ADR-0026 §9 — they don't bubble to
+   * ai-retry's transient path.
+   */
+  tools?: ToolMap;
 }
 
 export interface CascadeResult {
@@ -147,6 +172,10 @@ export async function callWithCascade(opts: CascadeOptions): Promise<CascadeResu
       // call after a failure; the very first attempt relies on the provider
       // client's own request deadline to surface an error that the retry
       // policy can then react to).
+      tools: opts.tools,
+      // The tool-use loop runs *inside* a single `streamText` call as
+      // multiple steps; `stopWhen` is the only structural cap. ADR-0026 §6.
+      stopWhen: opts.tools ? [stepCountIs(TOOL_USE_STEP_CAP)] : undefined,
       providerOptions: {
         anthropic: {
           thinking: { type: "enabled", budgetTokens: opts.thinkingBudget },

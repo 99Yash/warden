@@ -951,6 +951,21 @@ Following UReview's approach: after a PR is merged, re-run the agent on the fina
 
 Track all of these from day one, but set expectations with the team that early numbers will be rough. The feedback loop (Phase 8) is what drives improvement — the metrics just measure the rate of improvement.
 
+### Deferred: state-of-the-art verification
+
+"State of the art" is not a standing product claim. Treat it as a future evaluation milestone with a frozen protocol, public baselines, and a hidden holdout set. The claim must be scoped narrowly — for example, "high-signal, citation-grounded TypeScript/Node PR review under a fixed cost and latency budget" — and revalidated over time as models and competing agents move.
+
+The deferred suite should combine:
+
+- Public code-review benchmarks such as CodeReviewBench, c-CRAB, SWRBench, and CodeFuse-CR-Bench
+- Adjacent agent benchmarks such as SWE-bench Verified, used only for retrieval / context-selection signal rather than as proof of review quality
+- A private WardenBench made from real PRs, seeded cross-file regressions, dependency / API misuse cases, security advisories requiring OSV-backed citations, and false-positive traps where the correct behavior is silence
+- Baselines against deterministic tools alone, one-shot frontier LLM review, Warden ablations, and accessible commercial / open review agents
+
+Primary metrics: precision, recall, F1 / F0.5, P0/P1 recall, false positives per PR, duplicate rate, line-localization accuracy, citation verification rate, unsupported-claim rate, accepted-by-developer rate, cost per review, latency, and degradation / crash rate.
+
+This deserves its own ADR when scheduled. Until then, Warden should avoid broad "best AI code reviewer" language and prefer falsifiable, protocol-backed claims.
+
 ---
 
 ## 13. Phase 9: Escape Hatches — Rewrites, Migrations, Overrides

@@ -18,6 +18,15 @@ export interface CacheKeyInputs {
   /** Stable comment ids passed to the LLM, sorted for hash determinism. */
   inputCommentIds: string[];
   diffHash: string;
+  /**
+   * M11 (ADR-0026): hash of the repo's lockfile (`pnpm-lock.yaml` /
+   * `package-lock.json` / `yarn.lock`). Captures the set + versions of
+   * installed packages, which the formatter's `lookupTypeDef` tool reads
+   * from. An `npm install` that mutates the lockfile shifts the cache key
+   * so the next review re-runs against the new dependency state. Empty
+   * string when no lockfile is found — fine for pre-init repos.
+   */
+  dependenciesHash: string;
 }
 
 export interface CachedLlmReview {
@@ -35,6 +44,7 @@ export function computeCacheKey(inputs: CacheKeyInputs): string {
     inputs.userTemplateHash,
     ids,
     inputs.diffHash,
+    inputs.dependenciesHash,
   ].join("\n");
   return createHash("sha256").update(material).digest("hex");
 }
