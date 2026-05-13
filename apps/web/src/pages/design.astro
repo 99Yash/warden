@@ -10,7 +10,7 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 >
   <section class="design-page">
     <p class="eyebrow">Architecture notes</p>
-    <h2>The work is mostly choosing what not to build.</h2>
+    <h2>The work is mostly choosing what <em>not</em> to build.</h2>
     <p>
       Warden has a public surface, but the real project is the discipline behind it: what gets
       verified, what stays local, what is deferred, and where the model is not allowed to improvise.
@@ -18,21 +18,31 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
     </p>
 
     <div class="link-grid">
-      <a href="https://github.com/99Yash/warden/blob/main/decisions.md">
+      <a href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">
         <span>decisions.md</span>
-        <strong>Architectural Decisions</strong>
+        <strong>Architectural <em>Decisions</em></strong>
         <p>The choices, rejections, caveats, and milestone boundaries that keep scope honest.</p>
       </a>
-      <a href="https://github.com/99Yash/warden/blob/main/vision.md">
+      <a href="https://github.com/99Yash/warden/blob/main/vision.md" rel="noreferrer">
         <span>vision.md</span>
-        <strong>Thinking Framework</strong>
+        <strong>Thinking <em>Framework</em></strong>
         <p>The original long-form argument for a reviewer that derives knowledge instead of assuming it.</p>
       </a>
-      <a href="https://github.com/99Yash/warden/blob/main/CONTEXT.md">
+      <a href="https://github.com/99Yash/warden/blob/main/CONTEXT.md" rel="noreferrer">
         <span>CONTEXT.md</span>
-        <strong>Noun Glossary</strong>
+        <strong>Noun <em>Glossary</em></strong>
         <p>The shared vocabulary for comments, findings, citations, runners, and deferred surfaces.</p>
       </a>
     </div>
   </section>
 </StarlightPage>
+
+<style>
+  .design-page h2 em,
+  .link-grid strong em {
+    font-family: var(--warden-font-serif);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--warden-orange);
+  }
+</style>

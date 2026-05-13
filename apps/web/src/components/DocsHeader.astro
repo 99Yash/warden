@@ -1,0 +1,42 @@
+---
+import Search from "@astrojs/starlight/components/Search.astro";
+import SiteTitle from "@astrojs/starlight/components/SiteTitle.astro";
+import ThemeSelect from "@astrojs/starlight/components/ThemeSelect.astro";
+
+const navItems = [
+  { href: "/docs/", label: "Developer Docs" },
+  { href: "/examples/", label: "Examples" },
+  { href: "/design/", label: "Design" },
+  { href: "/notes/", label: "Notes" },
+];
+
+const pathname = Astro.url.pathname;
+---
+
+<div class="docs-header">
+  <div class="docs-header-left">
+    <SiteTitle />
+    <nav class="docs-top-nav" aria-label="Documentation sections">
+      {
+        navItems.map((item) => (
+          <a
+            aria-current={pathname.startsWith(item.href) ? "page" : undefined}
+            data-astro-prefetch
+            href={item.href}
+          >
+            {item.label}
+          </a>
+        ))
+      }
+    </nav>
+  </div>
+  <div class="docs-header-search">
+    <Search />
+  </div>
+  <div class="docs-header-actions">
+    <a class="docs-header-button" href="https://github.com/99Yash/warden" rel="noreferrer">
+      GitHub
+    </a>
+    <ThemeSelect />
+  </div>
+</div>

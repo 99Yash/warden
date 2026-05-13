@@ -15,13 +15,22 @@ const commentSet = fixture as CommentSet;
 >
   <section class="example-intro">
     <p class="eyebrow">Warden on Warden</p>
-    <h2>A review you can inspect.</h2>
+    <h2>A review you can <em>inspect.</em></h2>
     <p>
       This is a checked-in review fixture from Warden's own codebase. It is static on purpose: no
       deploy-time API key, no hidden prompt call, no fictional sample dressed up as proof. The page
-      renders the same comment shape the CLI emits.
+      renders the same comment shape the CLI emits — tier, category, confidence, sources.
     </p>
   </section>
 
   <CommentSetRenderer commentSet={commentSet} />
 </StarlightPage>
+
+<style>
+  .example-intro h2 em {
+    font-family: var(--warden-font-serif);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--warden-orange);
+  }
+</style>

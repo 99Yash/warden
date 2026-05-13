@@ -1,0 +1,17 @@
+---
+const title = Astro.locals.starlightRoute.entry.data.title;
+const pathname = Astro.url.pathname;
+
+const sectionLabel = pathname.includes("/configuration/")
+  ? "Configuration"
+  : pathname.includes("/reading-comments/")
+    ? "Comment contract"
+    : pathname.includes("/ci/")
+      ? "Automation"
+      : pathname.includes("/install/")
+        ? "Setup"
+        : "Getting started";
+---
+
+<p class="docs-page-kicker">{sectionLabel}</p>
+<h1 id="_top">{title}</h1>
