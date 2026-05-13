@@ -19,7 +19,11 @@
     "smoke:m9-large-refactor": "node --import tsx/esm scripts/smoke-m9-large-refactor.mts",
     "smoke:m10-verifier": "node --import tsx/esm scripts/smoke-m10-verifier.mts",
     "smoke:m10-consistency": "node --import tsx/esm scripts/smoke-m10-consistency.mts",
-    "smoke:m10": "pnpm smoke:m10-verifier && pnpm smoke:m10-consistency"
+    "smoke:m10": "pnpm smoke:m10-verifier && pnpm smoke:m10-consistency",
+    "smoke:m11-lookup": "node --import tsx/esm scripts/smoke-m11-lookup.mts",
+    "smoke:m11-verifier": "node --import tsx/esm scripts/smoke-m11-verifier.mts",
+    "smoke:m11-no-node-modules": "node --import tsx/esm scripts/smoke-m11-no-node-modules.mts",
+    "smoke:m11": "pnpm smoke:m11-lookup && pnpm smoke:m11-verifier && pnpm smoke:m11-no-node-modules"
   },
   "dependencies": {
     "@warden/core": "workspace:*",

@@ -1,10 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { stableCommentId } from "../comment-id.js";
 import type { Comment, DegradedEntry, RetrievedContext } from "../schema.js";
-import { callWithCascade } from "./cascade.js";
+import { callWithCascade, type ToolMap } from "./cascade.js";
 import { computeCacheKey, getLlmCached, hashString, putLlmCached } from "./cache.js";
 import type { FormatterListener } from "./events.js";
 import { loadSystemPrompt, loadUserPrompt } from "./prompt-loader.js";
 import type { LlmOutput, Question, RevisedComment } from "./schema.js";
+import { makeLookupTypeDefTool } from "./tools/lookup-type-def.js";
 
 /**
  * The M4 LLM formatter (ADR-0008 + Q1 A+C decision).
@@ -29,6 +32,14 @@ export interface FormatInput {
   vulnComments: Comment[];
   /** M4 always passes `{ chunks: [] }`; M5 selector populates. */
   retrievedContext: RetrievedContext;
+  /**
+   * M11 (ADR-0026): repo root used for (a) `dependenciesHash` lockfile
+   * read in the cache key, (b) the `lookupTypeDef` tool's `node_modules/`
+   * walk. Optional for backward compatibility with M4-era callers that
+   * don't thread it through yet — when omitted, the cache key falls back
+   * to an empty `dependenciesHash` and the tool is not registered.
+   */
+  repoRoot?: string;
   /** Override the Anthropic extended-thinking budget. Default 4096. */
   thinkingBudget?: number;
   /** Hard timeout per provider attempt (ms). Default 60_000. */
@@ -65,6 +76,7 @@ export async function formatReview(input: FormatInput): Promise<FormatResult> {
     userTemplateHash: hashString(userPrompt),
     inputCommentIds: allInputComments.map((c) => c.id),
     diffHash: hashString(input.diff),
+    dependenciesHash: input.repoRoot ? readDependenciesHash(input.repoRoot) : "",
   });
 
   const cached = getLlmCached(cacheKey);
@@ -82,12 +94,27 @@ export async function formatReview(input: FormatInput): Promise<FormatResult> {
     };
   }
 
+  // M11 (ADR-0026): collector the lookup-type-def tool pushes into on the
+  // first `node_modules/`-missing detection. Lives across the
+  // streamText/tool-use loop for the duration of this single review.
+  const toolDegraded: DegradedEntry[] = [];
+  let tools: ToolMap | undefined;
+  if (input.repoRoot) {
+    tools = {
+      lookupTypeDef: makeLookupTypeDefTool({
+        repoRoot: input.repoRoot,
+        degraded: toolDegraded,
+      }),
+    };
+  }
+
   const cascade = await callWithCascade({
     systemPrompt,
     userPrompt,
     thinkingBudget: input.thinkingBudget ?? readThinkingBudgetFromEnv() ?? DEFAULT_THINKING_BUDGET,
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     emit: input.emit,
+    tools,
   });
 
   putLlmCached({
@@ -108,7 +135,33 @@ export async function formatReview(input: FormatInput): Promise<FormatResult> {
     durationMs: cascade.durationMs,
   });
 
-  return { comments: merged, degraded: cascade.degraded, cacheHit: false };
+  return {
+    comments: merged,
+    degraded: [...cascade.degraded, ...toolDegraded],
+    cacheHit: false,
+  };
+}
+
+/**
+ * Hash the first lockfile we find under `repoRoot`. ADR-0026 §6:
+ * lockfile is the canonical proxy for "what packages and versions are
+ * installed." Single file, single hash, single read. Order matches
+ * pnpm-first, then npm, then yarn — preference for monorepo-shaped repos.
+ *
+ * Read failures (file present but unreadable) return an empty string,
+ * same as the "no lockfile" branch — better than throwing and aborting
+ * the review.
+ */
+function readDependenciesHash(repoRoot: string): string {
+  for (const file of ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"]) {
+    try {
+      const content = readFileSync(join(repoRoot, file), "utf8");
+      return hashString(content);
+    } catch {
+      // try next
+    }
+  }
+  return "";
 }
 
 /**

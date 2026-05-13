@@ -34,6 +34,10 @@ export interface SynthesizeInput {
   /** Diff-scope filter for findings; omit when running on a fixture without
    * a parsed diff. */
   changed?: ChangedFile[];
+  /** M11 (ADR-0026): repo root threaded into `formatReview` for the
+   * lockfile hash + `lookupTypeDef` tool. Omit on fixture runs without
+   * a real repo. */
+  repoRoot?: string;
   emit?: FormatterListener;
 }
 
@@ -62,6 +66,7 @@ export async function synthesize(input: SynthesizeInput): Promise<SynthesizeOutp
     toolComments,
     vulnComments: input.vulnComments,
     retrievedContext: input.retrievedContext,
+    repoRoot: input.repoRoot,
     emit: input.emit,
   });
 
