@@ -13,5 +13,39 @@ const sectionLabel = pathname.includes("/configuration/")
         : "Getting started";
 ---
 
-<p class="docs-page-kicker">{sectionLabel}</p>
-<h1 id="_top">{title}</h1>
+<div class="docs-title-row">
+  <div class="docs-title-copy">
+    <p class="docs-page-kicker">{sectionLabel}</p>
+    <h1 id="_top">{title}</h1>
+  </div>
+  <button class="docs-copy-button" type="button" data-copy-page aria-label="Copy page link">
+    <span class="docs-copy-icon" aria-hidden="true"></span>
+    <span data-copy-page-label>Copy page</span>
+  </button>
+</div>
+
+<script is:inline>
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-copy-page]");
+
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    const label = button.querySelector("[data-copy-page-label]");
+    const original = label?.textContent ?? "Copy page";
+
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      if (label) label.textContent = "Copied";
+      button.dataset.copied = "true";
+      window.setTimeout(() => {
+        if (label) label.textContent = original;
+        delete button.dataset.copied;
+      }, 1300);
+    } catch {
+      if (label) label.textContent = "Copy failed";
+      window.setTimeout(() => {
+        if (label) label.textContent = original;
+      }, 1300);
+    }
+  });
+</script>
