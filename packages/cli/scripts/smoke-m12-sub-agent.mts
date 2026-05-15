@@ -157,6 +157,39 @@ if (typeof callable.execute !== "function") {
 }
 
 // ---------------------------------------------------------------------------
+// 3b. Path-escape: a malformed/malicious diff path that resolves outside
+//     repoRoot must surface a warning degraded entry (Copilot PR #14
+//     comment — mirrors committability's posture).
+// ---------------------------------------------------------------------------
+
+process.stdout.write(`\n[3b] path-escape surfaces warning degraded\n`);
+// Re-use the workspace fixture (has a manifest + a dep, so the runner
+// doesn't short-circuit). The "../../etc/passwd" path resolves outside
+// WS_ROOT and `buildFileInput` should return null → degraded entry.
+const escapeResult = await runLeverageLibraries({
+  repoRoot: WS_ROOT,
+  changed: [
+    { path: "../../etc/passwd", addedLines: [1] },
+    { path: "packages/db/src/queries.ts", addedLines: [1, 2] },
+  ],
+  timeoutMs: 8_000,
+});
+const escapeWarnings = escapeResult.degraded.filter(
+  (d) =>
+    d.topic === "leverage-libraries" &&
+    d.kind === "warning" &&
+    d.message.includes("path escapes repoRoot"),
+);
+assert(
+  escapeWarnings.length === 1,
+  `exactly one path-escape warning (got ${escapeWarnings.length})`,
+);
+assert(
+  escapeWarnings[0]?.message.includes("../../etc/passwd"),
+  "warning names the offending path",
+);
+
+// ---------------------------------------------------------------------------
 // 4. Runner-contract shape: name, findings empty, questions non-undefined.
 // ---------------------------------------------------------------------------
 

@@ -129,7 +129,19 @@ export async function runLeverageLibraries(
   for (const cf of input.changed) {
     try {
       const fi = await buildFileInput(input.repoRoot, cf);
-      if (fi === null) continue;
+      if (fi === null) {
+        // `buildFileInput` returns null when `resolveWithinRoot` rejects the
+        // path — i.e. the diff names a file that escapes `repoRoot` (a
+        // malformed or malicious diff). Mirror committability: surface a
+        // warning so the operator can see it instead of silently dropping
+        // the file from the sub-agent's view.
+        degraded.push({
+          kind: "warning",
+          topic: "leverage-libraries",
+          message: `leverage-libraries: dropped ${cf.path} — path escapes repoRoot`,
+        });
+        continue;
+      }
       fileInputs.push(fi);
     } catch (err) {
       degraded.push({

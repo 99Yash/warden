@@ -335,7 +335,23 @@ function emit(
   const startLine = start.line + 1;
   const endLine = end.line + 1;
   if (!anyAddedInRange(startLine, endLine, addedLines)) return;
-  const snippet = collapseWhitespace(node.getText(sf));
+  // Evidence is only attached when the matched construct lives on a single
+  // line. The M10 global verifier (`verify-citations.ts`) reads candidate
+  // lines individually and substring-matches the normalized snippet against
+  // each one; a `collapseWhitespace(node.getText())` snippet built from a
+  // multi-line construct would fail to match any single line and the
+  // verifier would drop the source — and since toComment() emits exactly
+  // one source for tool findings, the whole leverage Comment would
+  // disappear. Leaving the triple undefined lets the verifier skip the
+  // source (it only checks fully-populated triples).
+  const evidence =
+    startLine === endLine
+      ? {
+          path: filePath,
+          line: startLine,
+          snippet: collapseWhitespace(node.getText(sf)),
+        }
+      : undefined;
   findings.push({
     source: "leverage",
     file: filePath,
@@ -345,11 +361,7 @@ function emit(
     severity: "warning",
     ruleId,
     message: claim,
-    evidence: {
-      path: filePath,
-      line: startLine,
-      snippet,
-    },
+    ...(evidence ? { evidence } : {}),
   });
 }
 

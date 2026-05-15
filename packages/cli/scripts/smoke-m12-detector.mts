@@ -180,6 +180,47 @@ assert(
 );
 
 // ---------------------------------------------------------------------------
+// 4b. Multi-line construct — evidence MUST be undefined (otherwise the M10
+//     line-by-line verifier would drop the leverage source and the whole
+//     Comment with it, since toComment emits exactly one source for tool
+//     findings). Copilot PR #14 caught this; regression-guard it.
+// ---------------------------------------------------------------------------
+
+process.stdout.write(`\n[4b] leverage — multi-line construct leaves evidence undefined\n`);
+const mlPath = "src/multiline.ts";
+writeFileSync(
+  resolve(TMP_ROOT, mlPath),
+  [
+    `export function check(entries: { active: boolean }[]) {`,
+    `  if (`,
+    `    entries.find(`,
+    `      (e) => e.active`,
+    `    ) !== undefined`,
+    `  ) return true;`,
+    `  return false;`,
+    `}`,
+    ``,
+  ].join("\n"),
+);
+const mlResult = await runLeverage({
+  repoRoot: TMP_ROOT,
+  changed: [{ path: mlPath, addedLines: [1, 2, 3, 4, 5, 6, 7, 8] }],
+});
+const mlFindings = mlResult.findings.filter((f) => f.ruleId === "some");
+assert(
+  mlFindings.length === 1,
+  `multi-line some finding still fires (got ${mlFindings.length})`,
+);
+assert(
+  mlFindings[0]?.evidence === undefined,
+  "multi-line finding leaves evidence undefined (verifier would drop a collapsed snippet otherwise)",
+);
+assert(
+  (mlFindings[0]?.endLine ?? mlFindings[0]?.line) !== mlFindings[0]?.line,
+  "multi-line finding's endLine differs from line (sanity)",
+);
+
+// ---------------------------------------------------------------------------
 // 5. Mapping through toComment — category leverage, kind assertion, tier 2,
 //    snippet evidence flows to source.path/line/snippet.
 // ---------------------------------------------------------------------------
