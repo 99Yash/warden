@@ -102,10 +102,26 @@ interface SymbolEntry {
 
 type SymbolTable = Map<string, SymbolEntry>;
 
+export interface LookupTypeDefOptions {
+  /**
+   * M12 (ADR-0027): additional search roots to probe before falling back to
+   * `repoRoot`. In a pnpm workspace, an installed package may live only in
+   * `packages/<name>/node_modules` rather than the workspace root — without
+   * this list a literal `repoRoot` resolution returns `package_not_installed`
+   * even though the package IS installed for the touched workspace package.
+   *
+   * Roots are tried in array order, then `repoRoot` last. The first root
+   * whose `node_modules/<packageName>/package.json` exists wins; resolution
+   * proceeds against that root for the rest of the call.
+   */
+  packageSearchRoots?: string[];
+}
+
 export async function lookupTypeDef(
   repoRoot: string,
   pkg: string,
   symbol: string,
+  options?: LookupTypeDefOptions,
 ): Promise<LookupTypeDefResult> {
   // 1. Split into (packageName, subpath).
   const split = splitImportPath(pkg);
@@ -119,20 +135,35 @@ export async function lookupTypeDef(
   }
   const { packageName, subpath } = split;
 
-  // 2. Read installed version. Missing → package_not_installed (not cached,
-  //    version unknown).
-  const packageJsonPath = join(repoRoot, "node_modules", packageName, "package.json");
-  let pkgJson: Record<string, unknown>;
-  let version: string;
-  try {
-    const raw = await fs.readFile(packageJsonPath, "utf8");
-    pkgJson = JSON.parse(raw) as Record<string, unknown>;
-    const v = pkgJson["version"];
-    if (typeof v !== "string" || v.length === 0) {
-      return { found: false, package: pkg, symbol, reason: "package_not_installed" };
+  // 2. Read installed version. Try `packageSearchRoots` in order, then
+  //    `repoRoot`. First root whose `node_modules/<packageName>/package.json`
+  //    exists wins resolution. Missing across all roots → package_not_installed
+  //    (not cached, version unknown).
+  const roots: string[] = [];
+  if (options?.packageSearchRoots) {
+    for (const r of options.packageSearchRoots) if (!roots.includes(r)) roots.push(r);
+  }
+  if (!roots.includes(repoRoot)) roots.push(repoRoot);
+
+  let pkgJson: Record<string, unknown> | undefined;
+  let version: string | undefined;
+  let effectiveRoot: string | undefined;
+  for (const root of roots) {
+    const packageJsonPath = join(root, "node_modules", packageName, "package.json");
+    try {
+      const raw = await fs.readFile(packageJsonPath, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const v = parsed["version"];
+      if (typeof v !== "string" || v.length === 0) continue;
+      pkgJson = parsed;
+      version = v;
+      effectiveRoot = root;
+      break;
+    } catch {
+      continue;
     }
-    version = v;
-  } catch {
+  }
+  if (!pkgJson || !version || !effectiveRoot) {
     return { found: false, package: pkg, symbol, reason: "package_not_installed" };
   }
 
@@ -143,7 +174,7 @@ export async function lookupTypeDef(
   try {
     // 4. Resolve .d.ts file path(s) to try.
     const dtsCandidates = await resolveDtsCandidates({
-      repoRoot,
+      repoRoot: effectiveRoot,
       packageName,
       subpath,
       packageJson: pkgJson,
@@ -166,6 +197,11 @@ export async function lookupTypeDef(
       lastEntrypoint = candidate;
       const hit = table.get(symbol);
       if (hit) {
+        // dts_file is relative to the *original* repoRoot (callers anchor
+        // path comparisons against `repoRoot`, not the workspace package
+        // root). The verifier post-pass reads files at `path.join(repoRoot,
+        // dts_file)`; using the effectiveRoot here would produce paths the
+        // verifier can't resolve.
         const dtsRel = toRepoRelative(repoRoot, hit.dtsAbsPath);
         return writeCachePositive(pkg, version, symbol, hit, dtsRel);
       }

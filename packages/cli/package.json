@@ -23,7 +23,10 @@
     "smoke:m11-lookup": "node --import tsx/esm scripts/smoke-m11-lookup.mts",
     "smoke:m11-verifier": "node --import tsx/esm scripts/smoke-m11-verifier.mts",
     "smoke:m11-no-node-modules": "node --import tsx/esm scripts/smoke-m11-no-node-modules.mts",
-    "smoke:m11": "pnpm smoke:m11-lookup && pnpm smoke:m11-verifier && pnpm smoke:m11-no-node-modules"
+    "smoke:m11": "pnpm smoke:m11-lookup && pnpm smoke:m11-verifier && pnpm smoke:m11-no-node-modules",
+    "smoke:m12-detector": "node --import tsx/esm scripts/smoke-m12-detector.mts",
+    "smoke:m12-sub-agent": "node --import tsx/esm scripts/smoke-m12-sub-agent.mts",
+    "smoke:m12": "pnpm smoke:m12-detector && pnpm smoke:m12-sub-agent"
   },
   "dependencies": {
     "@warden/core": "workspace:*",

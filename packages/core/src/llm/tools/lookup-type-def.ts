@@ -43,6 +43,15 @@ export interface MakeLookupTypeDefToolOptions {
   /** Mutable collector — the tool pushes one entry the first time
    * `node_modules/` is found missing within a single review. */
   degraded: DegradedEntry[];
+  /**
+   * M12 (ADR-0027): additional roots whose `node_modules/` directories should
+   * be probed before falling back to `repoRoot`. In a pnpm workspace, an
+   * installed package may live only in `packages/<name>/node_modules`. The
+   * resolver tries each root in array order. The "no `node_modules/`"
+   * degraded entry only fires when NONE of the roots (including `repoRoot`)
+   * has a `node_modules/` directory at all.
+   */
+  packageSearchRoots?: string[];
 }
 
 export function makeLookupTypeDefTool(opts: MakeLookupTypeDefToolOptions) {
@@ -59,8 +68,14 @@ export function makeLookupTypeDefTool(opts: MakeLookupTypeDefToolOptions) {
     ].join(" "),
     inputSchema: InputSchema,
     execute: async (args: z.infer<typeof InputSchema>): Promise<LookupTypeDefResult> => {
-      const nmDir = path.join(opts.repoRoot, "node_modules");
-      if (!fs.existsSync(nmDir)) {
+      const probeRoots = [
+        ...(opts.packageSearchRoots ?? []),
+        opts.repoRoot,
+      ];
+      const anyHasNodeModules = probeRoots.some((root) =>
+        fs.existsSync(path.join(root, "node_modules")),
+      );
+      if (!anyHasNodeModules) {
         if (!noNodeModulesEmitted) {
           opts.degraded.push({
             kind: "actionable",
@@ -77,7 +92,9 @@ export function makeLookupTypeDefTool(opts: MakeLookupTypeDefToolOptions) {
           reason: "package_not_installed",
         };
       }
-      return lookupTypeDef(opts.repoRoot, args.package, args.symbol);
+      return lookupTypeDef(opts.repoRoot, args.package, args.symbol, {
+        packageSearchRoots: opts.packageSearchRoots,
+      });
     },
   });
 }
