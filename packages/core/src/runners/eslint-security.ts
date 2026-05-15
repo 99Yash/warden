@@ -121,6 +121,7 @@ export async function runEslintSecurity(
 
   const findings: ToolFinding[] = [];
   const degraded: DegradedEntry[] = [];
+  const unexpectedRules = new Set<string>();
   for (const file of results) {
     const absFile = isAbsolute(file.filePath) ? file.filePath : resolve(repoRoot, file.filePath);
     const relFile = relative(repoRoot, absFile);
@@ -141,8 +142,18 @@ export async function runEslintSecurity(
         continue;
       }
       // Only route the Warden-managed plugins' rules. Anything else slipping
-      // through would indicate config bleed; emit info and skip.
+      // through would indicate config bleed — emit one info per unexpected
+      // rule id (deduped) so the unexpected rule is visible during dogfood,
+      // then skip the finding.
       if (!isSecurityRule(ruleId)) {
+        if (!unexpectedRules.has(ruleId)) {
+          unexpectedRules.add(ruleId);
+          degraded.push({
+            kind: "info",
+            topic: "eslint-security",
+            message: `eslint-security: unexpected rule '${ruleId}' (config bleed); skipping`,
+          });
+        }
         continue;
       }
       const line = msg.line ?? 1;
@@ -223,8 +234,12 @@ function createSecurityEslint(repoRoot: string): ESLintLike {
     overrideConfigFile: true,
     overrideConfig,
     errorOnUnmatchedPattern: false,
-    // Suppress ESLint's own "no rule found" warnings — every rule we enable
-    // ships in the plugins we just registered.
+    // `ignore: true` (the ESLint default) — enables ignore-pattern processing
+    // so the `ignores: ["**/node_modules/**", ...]` block above is honored.
+    // In ESLint v10 flat-config mode `.eslintignore` is no longer supported,
+    // and `overrideConfigFile: true` blocks the user's `eslint.config.js`, so
+    // only OUR override's `ignores` (plus ESLint's built-in `**/node_modules/**`
+    // default) apply — user ignore configuration cannot bleed in.
     ignore: true,
   });
 }
