@@ -31,6 +31,14 @@ export function toComment(f: ToolFinding): Comment {
         id: f.ruleId ?? f.source,
         title: f.source,
         retrievedAt: new Date().toISOString(),
+        // M12 (ADR-0027): leverage detector ships AST evidence so the M10
+        // global verifier can substring-check the cited line. SourceSchema's
+        // all-or-nothing refinement requires populating the triple together;
+        // detectors without evidence leave it undefined and the verifier
+        // skips them (no snippet to match).
+        ...(f.evidence
+          ? { path: f.evidence.path, line: f.evidence.line, snippet: f.evidence.snippet }
+          : {}),
       },
     ],
     confidence: 1,
@@ -54,6 +62,9 @@ export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } 
   }
   if (f.source === "consistency") {
     return { tier: 2, category: "consistency" };
+  }
+  if (f.source === "leverage") {
+    return { tier: 2, category: "leverage" };
   }
   return f.severity === "error"
     ? { tier: 2, category: "style" }

@@ -36,6 +36,8 @@ import { runConsistency } from "./runners/consistency.js";
 import { runDeadcode } from "./runners/deadcode.js";
 import { runEslint } from "./runners/eslint.js";
 import { runJscpd } from "./runners/jscpd.js";
+import { leverageRunner } from "./runners/leverage.js";
+import { leverageLibrariesRunner } from "./runners/leverage-libraries.js";
 import { scalabilityRunner } from "./runners/scalability.js";
 import { runTsc } from "./runners/tsc.js";
 import type { ToolFinding } from "./runners/types.js";
@@ -324,10 +326,15 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   const orchestrationRunners: Runner[] = [];
   if (changed && changed.length > 0) {
     orchestrationRunners.push(scalabilityRunner);
-    // Committability fires only in `review` mode. `check` is deterministic-only
-    // per ADR-0011 — no LLM calls — and the sub-agent is a cheap-tier LLM.
+    // M12 (ADR-0027): leverage detector — bounded stdlib idiom-miss patterns.
+    // Pure AST; runs in both `check` and `review`.
+    orchestrationRunners.push(leverageRunner);
+    // Committability + leverage-libraries fire only in `review` mode. `check`
+    // is deterministic-only per ADR-0011 — no LLM calls — and these are
+    // cheap-tier LLM sub-agents.
     if (input.config.mode === "review") {
       orchestrationRunners.push(committabilityRunner);
+      orchestrationRunners.push(leverageLibrariesRunner);
     }
   }
   const dispatchPromise: Promise<void> =
@@ -577,6 +584,7 @@ const PRIORITY_ORDER: Category[] = [
   "committability",
   "clarity",
   "style",
+  "leverage",
   "dedup",
   "tests",
 ];

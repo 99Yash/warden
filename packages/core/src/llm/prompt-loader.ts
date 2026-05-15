@@ -16,7 +16,11 @@ import { fileURLToPath } from "node:url";
 const DIR = dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = resolve(DIR, "prompts");
 
-type PromptName = "system" | "user-template" | "committability-system";
+type PromptName =
+  | "system"
+  | "user-template"
+  | "committability-system"
+  | "leverage-system";
 
 const cache = new Map<PromptName, string>();
 
@@ -48,4 +52,8 @@ export function loadUserPrompt(vars: {
 
 export function loadCommittabilitySystemPrompt(): string {
   return load("committability-system");
+}
+
+export function loadLeverageSystemPrompt(): string {
+  return load("leverage-system");
 }

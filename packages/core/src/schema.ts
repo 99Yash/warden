@@ -40,6 +40,10 @@ export const CategoryEnum = z.enum([
   'consistency',
   'deadcode',
   'committability',
+  // ADR-0027: M12 — second producer pair against the ADR-0008 citation thesis.
+  // The leverage detector emits assertions for bounded stdlib patterns; the
+  // leverage sub-agent emits questions for library-substitution suggestions.
+  'leverage',
 ]);
 export type Category = z.infer<typeof CategoryEnum>;
 
