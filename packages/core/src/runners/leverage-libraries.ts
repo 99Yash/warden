@@ -119,7 +119,9 @@ export async function runLeverageLibraries(
   if (depsContext.dependencies.length === 0) {
     // No installed libraries discovered → no plausible substitutions. Short
     // circuit before the LLM call to save tokens. Stays silent (info-level
-    // would be noise on most reviews).
+    // would be noise on most reviews). Skipping `buildFileInput` here is
+    // deliberate: with no library candidates, individual file-read failures
+    // are irrelevant — there's nothing the sub-agent could do with them.
     return { questions, degraded };
   }
 

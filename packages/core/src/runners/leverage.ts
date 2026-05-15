@@ -115,6 +115,10 @@ function isJsonParseOfJsonStringify(call: ts.CallExpression): boolean {
   const arg = call.arguments[0];
   if (!arg || !ts.isCallExpression(arg)) return false;
   if (!isPropertyCall(arg, "JSON", "stringify")) return false;
+  // Single-argument `JSON.stringify` only. `stringify(x, replacer)` and
+  // `stringify(x, null, 2)` are intentional projections — the user wanted a
+  // pretty-print or filter, not a deep clone — and `structuredClone` doesn't
+  // replace either. Same with `JSON.parse(x, reviver)` above.
   if (arg.arguments.length !== 1) return false;
   return true;
 }
