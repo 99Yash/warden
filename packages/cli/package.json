@@ -26,7 +26,11 @@
     "smoke:m11": "pnpm smoke:m11-lookup && pnpm smoke:m11-verifier && pnpm smoke:m11-no-node-modules",
     "smoke:m12-detector": "node --import tsx/esm scripts/smoke-m12-detector.mts",
     "smoke:m12-sub-agent": "node --import tsx/esm scripts/smoke-m12-sub-agent.mts",
-    "smoke:m12": "pnpm smoke:m12-detector && pnpm smoke:m12-sub-agent"
+    "smoke:m12": "pnpm smoke:m12-detector && pnpm smoke:m12-sub-agent",
+    "smoke:m13-eslint-security": "node --import tsx/esm scripts/smoke-m13-eslint-security.mts",
+    "smoke:m13-sub-agent": "node --import tsx/esm scripts/smoke-m13-sub-agent.mts",
+    "smoke:m13-confidence-floor": "node --import tsx/esm scripts/smoke-m13-confidence-floor.mts",
+    "smoke:m13": "pnpm smoke:m13-eslint-security && pnpm smoke:m13-sub-agent && pnpm smoke:m13-confidence-floor"
   },
   "dependencies": {
     "@warden/core": "workspace:*",

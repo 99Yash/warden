@@ -13,7 +13,11 @@
     "@warden/ai": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
+    "@typescript-eslint/parser": "^8.59.3",
     "code-chunk": "0.1.14",
+    "eslint": "^10.3.0",
+    "eslint-plugin-no-secrets": "^2.3.3",
+    "eslint-plugin-security": "^4.0.0",
     "jscpd": "catalog:",
     "nanoid": "catalog:",
     "zod": "catalog:"

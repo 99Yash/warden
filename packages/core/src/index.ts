@@ -5,6 +5,7 @@ import {
   type BannerState,
 } from "./banner/index.js";
 import { stableCommentId } from "./comment-id.js";
+import { applyConfidenceFloor, dropsToDegraded } from "./confidence.js";
 import {
   CheapSignalsSelector,
   candidatesToRetrievedContext,
@@ -35,10 +36,12 @@ import { committabilityRunner } from "./runners/committability.js";
 import { runConsistency } from "./runners/consistency.js";
 import { runDeadcode } from "./runners/deadcode.js";
 import { runEslint } from "./runners/eslint.js";
+import { runEslintSecurity } from "./runners/eslint-security.js";
 import { runJscpd } from "./runners/jscpd.js";
 import { leverageRunner } from "./runners/leverage.js";
 import { leverageLibrariesRunner } from "./runners/leverage-libraries.js";
 import { scalabilityRunner } from "./runners/scalability.js";
+import { securityRunner } from "./runners/security.js";
 import { runTsc } from "./runners/tsc.js";
 import type { ToolFinding } from "./runners/types.js";
 import type {
@@ -62,6 +65,13 @@ export {
   type VerifyCitationsInput,
   type VerifyCitationsOutput,
 } from "./llm/verify-citations.js";
+export {
+  CATEGORY_CONFIDENCE_FLOOR,
+  applyConfidenceFloor,
+  dropsToDegraded,
+  type ApplyConfidenceFloorOptions,
+  type ConfidenceFloorResult,
+} from "./confidence.js";
 export {
   lookupTypeDef,
   type LookupTypeDefResult,
@@ -329,12 +339,17 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     // M12 (ADR-0027): leverage detector — bounded stdlib idiom-miss patterns.
     // Pure AST; runs in both `check` and `review`.
     orchestrationRunners.push(leverageRunner);
-    // Committability + leverage-libraries fire only in `review` mode. `check`
-    // is deterministic-only per ADR-0011 — no LLM calls — and these are
-    // cheap-tier LLM sub-agents.
+    // Committability + leverage-libraries + security fire only in `review`
+    // mode. `check` is deterministic-only per ADR-0011 — no LLM calls — and
+    // these are cheap-tier LLM sub-agents.
     if (input.config.mode === "review") {
       orchestrationRunners.push(committabilityRunner);
       orchestrationRunners.push(leverageLibrariesRunner);
+      // M13 (ADR-0028 §3 + §11): security triage sub-agent — Haiku triage
+      // of the residue ESLint's security plugins cannot catch. Stays in the
+      // existing M8 spine on purpose; M14 introduces the dedicated security
+      // harness alongside.
+      orchestrationRunners.push(securityRunner);
     }
   }
   const dispatchPromise: Promise<void> =
@@ -353,6 +368,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   const [
     tscResult,
     eslintResult,
+    eslintSecurityResult,
     vulnResult,
     selectorResult,
     deadcodeResult,
@@ -362,6 +378,24 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
       ecosystem.hasEslint && changedPaths && changedPaths.length > 0
         ? runEslint(input.repoRoot, changedPaths)
         : Promise.resolve({ findings: [], degraded: [] as DegradedEntry[] }),
+      // M13 (ADR-0028 §2): Warden-managed ESLint security pass. Not gated by
+      // `ecosystem.hasEslint` — runs whenever the diff has JS/TS files, using
+      // `@warden/core`'s own pinned eslint + plugins. Stays inline alongside
+      // the existing user-config ESLint result rather than going through the
+      // M8 contract (ADR-0028 §8); both record into the scratchpad as
+      // separate entries so degraded entries name the correct pass.
+      changedPaths && changedPaths.length > 0
+        ? runEslintSecurity(input.repoRoot, changedPaths).catch((err: unknown) => ({
+            findings: [] as ToolFinding[],
+            degraded: [
+              {
+                kind: "warning",
+                topic: "eslint-security",
+                message: `eslint-security: detector failed (${formatErr(err)})`,
+              },
+            ] as DegradedEntry[],
+          }))
+        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
       ecosystem.lockfile
         ? runVulnerabilityCheck(input.repoRoot, ecosystem.lockfile)
         : Promise.resolve({
@@ -457,6 +491,16 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     name: "eslint",
     findings: eslintResult.findings,
     degraded: eslintResult.degraded,
+    durationMs: 0,
+  });
+  // M13 (ADR-0028 §2): record the Warden-managed security pass as a separate
+  // scratchpad entry so degraded entries can name `eslint-security` (helpful
+  // for dogfood — user-config lint failures vs. Warden-security lint failures
+  // should be distinguishable).
+  scratchpad.record({
+    name: "eslint-security",
+    findings: eslintSecurityResult.findings,
+    degraded: eslintSecurityResult.degraded,
     durationMs: 0,
   });
   scratchpad.record({
@@ -555,12 +599,12 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
   });
 
   // Hard rules in code per grilling Q11 (P3): final priority sort + tier-3
-  // verbose-gate. Soft rules (judgment-driven suppression) live in the LLM
-  // prompt and have already been applied above.
-  const finalComments = applyHardRules(verified.comments, input.config);
+  // verbose-gate + M13 confidence floor. Soft rules (judgment-driven
+  // suppression) live in the LLM prompt and have already been applied above.
+  const ruled = applyHardRules(verified.comments, input.config);
 
   return {
-    comments: finalComments,
+    comments: ruled.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
       degradedWorkers: [
@@ -568,6 +612,7 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
         ...scratchpad.flattenDegraded(),
         ...synthOutput.degraded,
         ...verified.degraded,
+        ...ruled.degraded,
       ],
     },
   };
@@ -589,20 +634,34 @@ const PRIORITY_ORDER: Category[] = [
   "tests",
 ];
 
-function applyHardRules(comments: Comment[], config: ReviewConfig): Comment[] {
+interface HardRulesOutput {
+  comments: Comment[];
+  degraded: DegradedEntry[];
+}
+
+function applyHardRules(comments: Comment[], config: ReviewConfig): HardRulesOutput {
+  // M13 (ADR-0028 §5): confidence-floor filter runs first. Per-category
+  // numeric floor; Tier-1 findings bypass unconditionally (critical-finding
+  // short-circuit per `project_warden_security_depth_tiers.md`). Drops
+  // surface as one info-level degraded entry per non-zero drop count per
+  // category — never per dropped Comment.
+  const { kept, drops } = applyConfidenceFloor(comments);
+  const floorDegraded = dropsToDegraded(drops);
+
   // Tier-3 verbose-gate applies only in `review` mode — the LLM has had its
   // triage pass and the user wanted curation. `check` is deterministic-only
   // per ADR-0011: surface every finding the tools produced. (Caught by M4
   // dogfood: previous version filtered tier-3 in both modes.)
   const shouldGateTier3 = config.mode === "review" && config.verbose !== true;
-  const filtered = shouldGateTier3 ? comments.filter((c) => c.tier !== 3) : comments;
-  return [...filtered].sort((a, b) => {
+  const filtered = shouldGateTier3 ? kept.filter((c) => c.tier !== 3) : kept;
+  const sorted = [...filtered].sort((a, b) => {
     const pa = PRIORITY_ORDER.indexOf(a.category);
     const pb = PRIORITY_ORDER.indexOf(b.category);
     if (pa !== pb) return pa - pb;
     if (a.tier !== b.tier) return a.tier - b.tier;
     return b.confidence - a.confidence;
   });
+  return { comments: sorted, degraded: floorDegraded };
 }
 
 function uniqStrings(items: string[]): string[] {

@@ -12,6 +12,7 @@ const PRIORITY_ORDER: Category[] = [
   "committability",
   "clarity",
   "style",
+  "leverage",
   "dedup",
   "tests",
 ];
