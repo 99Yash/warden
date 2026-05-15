@@ -20,7 +20,8 @@ type PromptName =
   | "system"
   | "user-template"
   | "committability-system"
-  | "leverage-system";
+  | "leverage-system"
+  | "security-system";
 
 const cache = new Map<PromptName, string>();
 
@@ -56,4 +57,8 @@ export function loadCommittabilitySystemPrompt(): string {
 
 export function loadLeverageSystemPrompt(): string {
   return load("leverage-system");
+}
+
+export function loadSecuritySystemPrompt(): string {
+  return load("security-system");
 }

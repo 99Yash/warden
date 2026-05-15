@@ -66,6 +66,18 @@ export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } 
   if (f.source === "leverage") {
     return { tier: 2, category: "leverage" };
   }
+  // ADR-0028 §7 / M13: ESLint findings from the Warden-managed security
+  // pass carry rule IDs prefixed `security/*` or `no-secrets/*`. Route them
+  // to the `security` category at Tier 1 unconditionally — these patterns
+  // exist *because* they're security issues; the Tier-3 verbose gate must
+  // not be able to suppress them, and the M13 confidence floor's Tier-1
+  // bypass guarantees they surface even when sub-agent noise is being
+  // curated.
+  if (f.source === "eslint" && f.ruleId !== undefined) {
+    if (f.ruleId.startsWith("security/") || f.ruleId.startsWith("no-secrets/")) {
+      return { tier: 1, category: "security" };
+    }
+  }
   return f.severity === "error"
     ? { tier: 2, category: "style" }
     : { tier: 3, category: "style" };

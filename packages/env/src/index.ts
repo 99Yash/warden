@@ -19,6 +19,26 @@ const envSchema = z.object({
   WARDEN_LOG_LEVEL: z
     .enum(['silent', 'error', 'warn', 'info', 'debug'])
     .default('info'),
+  // ADR-0028 / M13: per-category confidence floor override for the
+  // `security` category. Parsed as a numeric string so missing/empty values
+  // are unambiguous. v0 default lives in `@warden/core`'s
+  // `CATEGORY_CONFIDENCE_FLOOR`; this env var only overrides it.
+  WARDEN_SECURITY_CONFIDENCE_FLOOR: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, {
+      message: 'WARDEN_SECURITY_CONFIDENCE_FLOOR must be a numeric string',
+    })
+    .refine(
+      (s) => {
+        const n = Number(s);
+        return n >= 0 && n <= 1;
+      },
+      {
+        message:
+          'WARDEN_SECURITY_CONFIDENCE_FLOOR must be a number between 0.0 and 1.0',
+      },
+    )
+    .optional(),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),
