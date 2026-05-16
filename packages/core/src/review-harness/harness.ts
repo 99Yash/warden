@@ -1,3 +1,4 @@
+import { wardenEnv } from "@warden/env";
 import type { ContextSelector } from "../context/index.js";
 import type { FormatterListener } from "../llm/index.js";
 import type {
@@ -5,8 +6,10 @@ import type {
   DegradedEntry,
   RetrievedContext,
 } from "../schema.js";
+import { runBossLoop } from "./boss-loop.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
 import { ReviewScratchpad } from "./scratchpad.js";
+import { makeWorkerRoute } from "./workers/index.js";
 
 /**
  * Local mirror of `ReviewConfig` from `../index.ts`. Defined here to avoid
@@ -35,10 +38,11 @@ export interface ReviewHarnessConfig {
  *     verified source, applies the confidence floor + Tier-3 verbose gate
  *     + priority sort.
  *
- * This commit ships scaffold only. Phase 2 throws when reached; Phase 1's
- * envelope is fully wired and ready to feed the boss-loop once it lands.
- * Nothing in `packages/core/src/index.ts` calls `runReviewHarness()` yet —
- * the existing M8 spine continues to drive `review()`.
+ * Phase 1 + Phase 2 are wired; Phase 3 (citation verify + applyHardRules)
+ * is invoked by the surrounding `review()` function on the boss's emitted
+ * comments. Nothing in `packages/core/src/index.ts` calls `runReviewHarness()`
+ * yet — the existing M8 spine continues to drive `review()` until the
+ * index.ts rewire commit lands.
  */
 export interface ReviewHarnessInput {
   diff: string;
@@ -59,17 +63,18 @@ export interface ReviewHarnessInput {
   emit?: FormatterListener;
 }
 
-class BossLoopNotImplementedError extends Error {
-  constructor() {
-    super(
-      "review-harness: Phase 2 (boss loop) not yet implemented in this scaffold commit. " +
-        "Wire `runBossLoop()` in once boss-loop.ts lands.",
-    );
-    this.name = "BossLoopNotImplementedError";
-  }
+export interface ReviewHarnessResult extends CommentSet {
+  /**
+   * Boss-loop output before Phase 3 (`verifyCitations` + `applyHardRules`).
+   * The surrounding `review()` runs Phase 3 against `comments` and
+   * accumulates Phase 3's degraded entries into `metadata.degradedWorkers`.
+   * Exposed separately so callers that want the boss output without the
+   * verifier post-pass (e.g. smoke fixtures) can read it.
+   */
+  preVerify?: { comments: import("../schema.js").Comment[] };
 }
 
-export async function runReviewHarness(input: ReviewHarnessInput): Promise<CommentSet> {
+export async function runReviewHarness(input: ReviewHarnessInput): Promise<ReviewHarnessResult> {
   const startedAt = Date.now();
 
   // Phase 1 — deterministic priors + selector. Always runs; check-mode
@@ -102,13 +107,54 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Comme
     return makeEmptySet(startedAt, detPriors.degraded);
   }
 
-  // Phase 2 — boss loop. Not implemented in the scaffold commit. The
-  // scratchpad is instantiated here so the type-flow that the boss-loop
-  // expects is in place; once `runBossLoop()` lands, replace the throw
-  // with `await runBossLoop({ scratchpad, detPriors, ... })`.
+  // Phase 2 — boss loop. The scratchpad shares state between the dispatch
+  // tool (which records per-worker output + token usage) and the post-loop
+  // assembly (which drains degraded entries + worker findings if the boss
+  // needs to be backfilled from worker outputs at synth time).
   const scratchpad = new ReviewScratchpad();
   scratchpad.recordDetPriors(detPriors);
-  throw new BossLoopNotImplementedError();
+
+  // Shared api-claim-verifier degraded collector for all worker
+  // `lookupTypeDef` calls (once-per-review "no node_modules/" entry).
+  const apiClaimDegraded: DegradedEntry[] = [];
+  const route = makeWorkerRoute({
+    repoRoot: input.repoRoot,
+    changed: detPriors.changed,
+    apiClaimDegraded,
+  });
+
+  const workerBudgetRaw = wardenEnv().WARDEN_REVIEW_WORKER_BUDGET;
+  const workerBudget = workerBudgetRaw ? Number(workerBudgetRaw) : undefined;
+
+  const bossOutput = await runBossLoop({
+    repoRoot: input.repoRoot,
+    diff: input.diff,
+    detPriors,
+    scratchpad,
+    route,
+    ...(workerBudget !== undefined ? { workerBudget } : {}),
+    ...(input.emit ? { emit: input.emit } : {}),
+  });
+
+  // Aggregate degraded entries from every layer: det-priors, every worker
+  // recorded into the scratchpad, the dispatch tool's budget-cap entries
+  // (also on the scratchpad), the boss-loop's cascade-engaged entries, and
+  // the shared lookupTypeDef collector. Order is intentional — environment
+  // entries first, worker-level entries next, boss-level entries last.
+  const aggregatedDegraded: DegradedEntry[] = [
+    ...scratchpad.flattenDegraded(),
+    ...bossOutput.degraded,
+    ...apiClaimDegraded,
+  ];
+
+  return {
+    comments: bossOutput.comments,
+    metadata: {
+      durationMs: Date.now() - startedAt,
+      degradedWorkers: aggregatedDegraded,
+    },
+    preVerify: { comments: bossOutput.comments },
+  };
 }
 
 function makeEmptySet(startedAt: number, degraded: DegradedEntry[]): CommentSet {
