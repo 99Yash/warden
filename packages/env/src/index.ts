@@ -39,6 +39,39 @@ const envSchema = z.object({
       },
     )
     .optional(),
+  // ADR-0030 / M14: boss-loop step cap for the M14 review harness. Default 5
+  // rounds; clamped to [1, 10] so neither a typo'd 0 nor a runaway 1000 can
+  // wreck a review. Each round is one `streamText` step the boss spends
+  // dispatching workers via `dispatch_worker` or emitting the final
+  // `Output.array(CommentSchema)`.
+  WARDEN_REVIEW_BOSS_ROUNDS: z
+    .string()
+    .regex(/^\d+$/, {
+      message: 'WARDEN_REVIEW_BOSS_ROUNDS must be a positive integer',
+    })
+    .refine(
+      (s) => {
+        const n = Number(s);
+        return n >= 1 && n <= 10;
+      },
+      {
+        message: 'WARDEN_REVIEW_BOSS_ROUNDS must be between 1 and 10',
+      },
+    )
+    .optional(),
+  // ADR-0030 / M14: optional total cap on workers dispatched across the
+  // whole boss loop. Unset = unbounded (boss self-budgets within the round
+  // cap × max-tool-calls-per-round). When set, the dispatch tool returns an
+  // error to the boss + emits a degraded entry past the cap. Must be a
+  // positive integer; 0 is invalid per the design (use the round cap to
+  // disable workers).
+  WARDEN_REVIEW_WORKER_BUDGET: z
+    .string()
+    .regex(/^[1-9]\d*$/, {
+      message:
+        'WARDEN_REVIEW_WORKER_BUDGET must be a positive integer (use the round cap to disable workers)',
+    })
+    .optional(),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),

@@ -8,12 +8,15 @@ import type { LanguageModel } from "ai-retry";
 import { anthropicProvider, googleProvider } from "./provider.js";
 
 /**
- * Strong-tier model used for the boss / synthesizer / grader pass and for
- * specialist workers that need deep reasoning (correctness, security).
- * Per ADR-0006 + vision.md §3 worker tiering.
+ * Boss model. Used by the M14 review harness as the single planning brain
+ * across the 5-round `dispatch_worker` tool-use loop, and previously by the
+ * M4/M8 formatter/synthesizer (both retired for review-mode under ADR-0030).
+ * Opus 4.6 for the 1M context window + cross-file planning the harness
+ * relies on; 4.7's 1.4× premium is deferred to a future deep-tier milestone
+ * (ADR-0029 / m15-plan.md). Per ADR-0006 + vision.md §3 worker tiering.
  */
 export function getBossModel(): LanguageModel {
-  return anthropicProvider()("claude-sonnet-4-6");
+  return anthropicProvider()("claude-opus-4-6");
 }
 
 /**
