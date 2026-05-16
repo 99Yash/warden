@@ -12,7 +12,6 @@
  *   3. `metadata.durationMs` is small (< 5000ms — generous to accommodate
  *      Phase 1's environment setup like the banner walk; the assertion
  *      is "no LLM was called", not "fast").
- *   4. No `preVerify` field set (harness short-circuits before Phase 2).
  *
  * Cannot assert "zero network requests" without instrumentation, so we
  * use absence-of-llm-degraded as the proxy: if the boss-loop had run,
@@ -85,11 +84,6 @@ assert(
 assert(
   wallMs < 5_000,
   `wall-clock < 5000ms (got ${wallMs})`,
-);
-
-assert(
-  result.preVerify === undefined,
-  `preVerify is unset (boss-loop never ran)`,
 );
 
 // ---------------------------------------------------------------------------

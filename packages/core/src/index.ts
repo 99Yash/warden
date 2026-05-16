@@ -1,49 +1,14 @@
-import { CURRENT_DEFAULT, getEmbeddingProvider } from "@warden/ai";
-import {
-  bannerStateToDegraded,
-  computeBannerState,
-  type BannerState,
-} from "./banner/index.js";
 import { stableCommentId } from "./comment-id.js";
 import { applyConfidenceFloor, dropsToDegraded } from "./confidence.js";
-import {
-  CheapSignalsSelector,
-  candidatesToRetrievedContext,
-  type ContextSelector,
-  type SelectorOutput,
-} from "./context/index.js";
-import { parseUnifiedDiff } from "./diff/index.js";
-import { pruneDiff } from "./diff/prune.js";
-import { detectEcosystem, type Lockfile } from "./ecosystem/index.js";
-import { ensureGitignore } from "./init/ensure-gitignore.js";
-import { walkRepo } from "./init/walk.js";
-import {
-  SqliteChunkStore,
-  SqliteEmbeddingStore,
-  readLockedModel,
-} from "./indexing/index.js";
+import type { ContextSelector } from "./context/index.js";
+import type { Lockfile } from "./ecosystem/index.js";
 import type { FormatterListener } from "./llm/index.js";
-import { verifyCitations } from "./llm/verify-citations.js";
 import {
-  Scratchpad,
-  deterministicSynthesize,
-  dispatch,
-  synthesize,
-  type Runner,
-  type RunnerInput,
-} from "./orchestration/index.js";
-import { committabilityRunner } from "./runners/committability.js";
-import { runConsistency } from "./runners/consistency.js";
-import { runDeadcode } from "./runners/deadcode.js";
-import { runEslint } from "./runners/eslint.js";
-import { runEslintSecurity } from "./runners/eslint-security.js";
-import { runJscpd } from "./runners/jscpd.js";
-import { leverageRunner } from "./runners/leverage.js";
-import { leverageLibrariesRunner } from "./runners/leverage-libraries.js";
-import { scalabilityRunner } from "./runners/scalability.js";
-import { securityRunner } from "./runners/security.js";
-import { runTsc } from "./runners/tsc.js";
-import type { ToolFinding } from "./runners/types.js";
+  runReviewHarness,
+  type ReviewHarnessResult,
+} from "./review-harness/harness.js";
+import { runDetPriors } from "./review-harness/det-priors.js";
+import { toComment } from "./runners/to-comment.js";
 import type {
   Category,
   Comment,
@@ -52,7 +17,6 @@ import type {
   RetrievedContext,
   Tier,
 } from "./schema.js";
-import { runVulnerabilityCheck } from "./vuln/index.js";
 
 export * from "./schema.js";
 export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosystem/index.js";
@@ -106,17 +70,15 @@ export {
   type BannerState,
   type SoftNotice,
 } from "./banner/index.js";
+// M14 (ADR-0030): the M8 orchestration spine (`Scratchpad`, `dispatch`,
+// `synthesize`, `deterministicSynthesize`) retired for review-mode in this
+// commit. The `Runner` contract survives — it remains the right shape for
+// future Phase 1 det-priors additions, and the surviving deterministic
+// runners (`scalabilityRunner`, `leverageRunner`) still implement it.
 export {
-  Scratchpad,
-  deterministicSynthesize,
-  dispatch,
-  synthesize,
-  type DeterministicSynthesizeInput,
   type Runner,
   type RunnerInput,
   type RunnerOutput,
-  type SynthesizeInput,
-  type SynthesizeOutput,
 } from "./orchestration/index.js";
 export { ensureGitignore } from "./init/ensure-gitignore.js";
 export {
@@ -155,6 +117,21 @@ export {
   type MerkleStore,
   type Task,
 } from "./indexing/index.js";
+// M14 (ADR-0030): review-harness surface, exported for future bot wrappers
+// (the GitHub PR bot, Slack bot, etc. per ADR-0013) that want direct access
+// to the 3-phase pipeline without going through the `review()` umbrella.
+export {
+  runReviewHarness,
+  runDetPriors,
+  ReviewScratchpad,
+  type ReviewHarnessInput,
+  type ReviewHarnessResult,
+  type ReviewHarnessConfig,
+  type DetPriors,
+  type TokenUsage,
+  type WorkerOutput,
+} from "./review-harness/harness.js";
+export { toComment } from "./runners/to-comment.js";
 
 export interface ReviewConfig {
   mode: "check" | "review";
@@ -181,16 +158,77 @@ export interface ReviewInput {
   emit?: FormatterListener;
 }
 
+/**
+ * Public entry point for `warden review` and `warden check`. M14 (ADR-0030)
+ * collapsed the prior M4-spine review() body (~430 lines: parallel
+ * detector launch + scratchpad + dispatch + synthesize + verify) into two
+ * thin branches. Both paths converge on `applyHardRules()`.
+ *
+ *   - **review mode** routes through `runReviewHarness()` — a 3-phase
+ *     pipeline (Det Priors → boss loop → Citation Verify) at
+ *     `review-harness/`. The harness owns the LLM calls; this function
+ *     only applies the mode/config-dependent hard rules afterward.
+ *
+ *   - **check mode** runs Phase 1 (`runDetPriors()`) and stops. Tool
+ *     findings map to Comments via `toComment()`; vuln Comments are
+ *     collapsed to a summary per ADR-0021 §8 unless the diff touches a
+ *     manifest/lockfile or `--verbose` is set. Zero LLM calls per
+ *     ADR-0011's deterministic-only invariant.
+ *
+ * The pre-M14 single-function entry point is preserved on purpose: every
+ * caller (the CLI, future PR-bot wrappers, smokes) still calls one
+ * function and discriminates by `config.mode`. The internal split is the
+ * implementation choice; the public surface is unchanged.
+ */
 export async function review(input: ReviewInput): Promise<CommentSet> {
-  const startedAt = Date.now();
+  if (input.config.mode === "check") {
+    return runCheck(input);
+  }
+  return runReview(input);
+}
 
-  const ecosystem = detectEcosystem(input.repoRoot);
-  if (!ecosystem.hasPackageJson) {
+async function runReview(input: ReviewInput): Promise<CommentSet> {
+  const harness: ReviewHarnessResult = await runReviewHarness({
+    diff: input.diff,
+    repoRoot: input.repoRoot,
+    config: { mode: "review", ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}) },
+    ...(input.selector !== undefined ? { selector: input.selector } : {}),
+    ...(input.retrievedContext !== undefined ? { retrievedContext: input.retrievedContext } : {}),
+    ...(input.emit !== undefined ? { emit: input.emit } : {}),
+  });
+  const ruled = applyHardRules(harness.comments, input.config);
+  return {
+    comments: ruled.comments,
+    metadata: {
+      durationMs: harness.metadata.durationMs,
+      degradedWorkers: [...harness.metadata.degradedWorkers, ...ruled.degraded],
+    },
+  };
+}
+
+async function runCheck(input: ReviewInput): Promise<CommentSet> {
+  const startedAt = Date.now();
+  const detPriors = await runDetPriors({
+    diff: input.diff,
+    repoRoot: input.repoRoot,
+    mode: "check",
+    // check mode never invokes the selector — the LLM is the only consumer
+    // of retrieved context and check skips the LLM entirely.
+    selector: null,
+  });
+
+  // No package.json at repoRoot → preserve pre-M14 behavior: short-circuit
+  // before any further synthesis with a single `info` degraded entry.
+  // Det-prior detectors degrade gracefully on missing tooling, but we
+  // surface this explicit signal for the no-Node project case so the user
+  // sees one clear "skipping — TS/JS only in v0" line.
+  if (!detPriors.ecosystem.hasPackageJson) {
     return {
       comments: [],
       metadata: {
         durationMs: Date.now() - startedAt,
         degradedWorkers: [
+          ...detPriors.degraded,
           {
             kind: "info",
             topic: "ecosystem",
@@ -201,420 +239,23 @@ export async function review(input: ReviewInput): Promise<CommentSet> {
     };
   }
 
-  // ADR-0019 #12: ensure `.warden/` lives in `.gitignore` before any cache
-  // write — first verb a user runs in a fresh repo gets the entry.
-  const gitignoreDegraded: DegradedEntry[] = [];
-  try {
-    const gitignore = await ensureGitignore(input.repoRoot);
-    if (gitignore.added)
-      gitignoreDegraded.push({
-        kind: "info",
-        topic: "gitignore",
-        message: "gitignore: added .warden/ entry",
-      });
-  } catch (err) {
-    gitignoreDegraded.push({
-      kind: "warning",
-      topic: "gitignore",
-      message: `gitignore: failed to ensure entry (${formatErr(err)})`,
-    });
-  }
-
-  // M9 (ADR-0025): diff-level noise filter. Pre-runner stage between
-  // `parseUnifiedDiff()` and runner dispatch — every downstream runner
-  // (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency,
-  // committability) consumes the *pruned* `ChangedFile[]`. Defends the
-  // catastrophic case (committed `node_modules/` etc.) for every runner
-  // simultaneously, supersedes the M7 directory-concentration heuristic
-  // formerly in committability.ts.
-  //
-  // Inlined so the parser's unpruned output is unreferenced after
-  // `pruneDiff()` returns — a 500K-file diff would otherwise pin the
-  // pre-prune array for the lifetime of `review()`.
-  const pruneResult = input.diff ? pruneDiff(parseUnifiedDiff(input.diff)) : undefined;
-  const changed = pruneResult?.pruned;
-  const noiseFilterDegraded: DegradedEntry[] = pruneResult?.degraded ?? [];
-  const changedPaths = changed?.map((c) => c.path);
-
-  // M6 (ADR-0019 #7): banner state is computed *before* the selector runs,
-  // off the index's current state. `check` skips it — deterministic-only verb.
-  // Walk the repo to feed `currentHashes` so the `stale` banner can fire when
-  // the working tree has drifted from the merkle snapshot. Sharing this walk
-  // with the selector's own incremental hash pass is a M7+ optimization.
-  let bannerState: BannerState = { kind: "no-banner" };
-  if (input.config.mode === "review") {
-    try {
-      const walk = await walkRepo(input.repoRoot);
-      const currentHashes = new Map<string, string>();
-      for (const f of walk.files.values()) currentHashes.set(f.path, f.fileSha);
-      bannerState = await computeBannerState({
-        repoRoot: input.repoRoot,
-        currentDefault: CURRENT_DEFAULT,
-        currentHashes,
-      });
-    } catch (err) {
-      bannerState = { kind: "no-banner" };
-      gitignoreDegraded.push({
-        kind: "warning",
-        topic: "banner",
-        message: `banner: state lookup failed (${formatErr(err)})`,
-      });
-    }
-  }
-
-  // M5 (ADR-0018): selector runs parallel with TSC/ESLint/vuln. `check` mode
-  // skips it — `check` is deterministic-only and never invokes the LLM, so
-  // there's no consumer that would benefit from selector output.
-  const shouldRunSelector =
-    input.config.mode === "review" &&
-    input.selector !== null &&
-    !input.retrievedContext &&
-    changed !== undefined &&
-    changed.length > 0;
-
-  // Wire the M6 semantic signal in when the index is ready. Banner state
-  // already told us if it isn't (no-index / model-deprecated trigger
-  // degradedWorkers and the selector falls back to cheap signals only).
-  let semanticDeps:
-    | {
-        embeddingProvider: ReturnType<typeof getEmbeddingProvider>;
-        embeddingStore: SqliteEmbeddingStore;
-        chunkStore: SqliteChunkStore;
-        lockedModelId: string;
-        lockedModelVersionForDocument: string;
-      }
-    | undefined;
-  if (shouldRunSelector && bannerState.kind !== "no-index") {
-    try {
-      const locked = await readLockedModel();
-      if (locked) {
-        semanticDeps = {
-          embeddingProvider: getEmbeddingProvider(),
-          embeddingStore: new SqliteEmbeddingStore(),
-          chunkStore: new SqliteChunkStore(),
-          lockedModelId: locked.modelId,
-          lockedModelVersionForDocument: locked.modelVersion,
-        };
-      }
-    } catch (err) {
-      gitignoreDegraded.push({
-        kind: "warning",
-        topic: "context",
-        message: `context: semantic signal disabled (${formatErr(err)}) — falling back to cheap signals`,
-      });
-    }
-  }
-
-  const selector =
-    shouldRunSelector && input.selector !== undefined
-      ? input.selector
-      : shouldRunSelector
-      ? new CheapSignalsSelector({
-          tsconfigPath: ecosystem.tsconfigPaths[0],
-          embeddingProvider: semanticDeps?.embeddingProvider ?? null,
-          embeddingStore: semanticDeps?.embeddingStore ?? null,
-          chunkStore: semanticDeps?.chunkStore ?? null,
-          lockedModelId: semanticDeps?.lockedModelId,
-          lockedModelVersionForDocument: semanticDeps?.lockedModelVersionForDocument,
-        })
-      : null;
-
-  const emptySelectorResult: SelectorOutput = { candidates: [], degraded: [] };
-
-  // M8 (ADR-0023): scratchpad is the single sink for runner outputs. Inline
-  // runners (TSC, ESLint, jscpd, deadcode) record into it directly; the two
-  // contract-migrated runners (committability, scalability) flow through
-  // dispatch(). Vuln stays inline outside the scratchpad — its already-mapped
-  // `Comment[]` shape doesn't fit `RunnerOutput.findings: ToolFinding[]`
-  // cleanly; M9+ may revisit when the noise filter touches that surface.
-  const scratchpad = new Scratchpad();
-
-  // Decide orchestration runners up-front so dispatch() can run *concurrently*
-  // with the inline Promise.all instead of serializing after it. Pre-M8
-  // scalability ran in parallel with TSC/ESLint/vuln/deadcode; routing it
-  // through the contract must preserve that parallelism (caught by Copilot
-  // review on PR #5).
-  const orchestrationRunners: Runner[] = [];
-  if (changed && changed.length > 0) {
-    orchestrationRunners.push(scalabilityRunner);
-    // M12 (ADR-0027): leverage detector — bounded stdlib idiom-miss patterns.
-    // Pure AST; runs in both `check` and `review`.
-    orchestrationRunners.push(leverageRunner);
-    // Committability + leverage-libraries + security fire only in `review`
-    // mode. `check` is deterministic-only per ADR-0011 — no LLM calls — and
-    // these are cheap-tier LLM sub-agents.
-    if (input.config.mode === "review") {
-      orchestrationRunners.push(committabilityRunner);
-      orchestrationRunners.push(leverageLibrariesRunner);
-      // M13 (ADR-0028 §3 + §11): security triage sub-agent — Haiku triage
-      // of the residue ESLint's security plugins cannot catch. Stays in the
-      // existing M8 spine on purpose; M14 introduces the dedicated security
-      // harness alongside.
-      orchestrationRunners.push(securityRunner);
-    }
-  }
-  const dispatchPromise: Promise<void> =
-    orchestrationRunners.length > 0
-      ? dispatch(
-          orchestrationRunners,
-          {
-            repoRoot: input.repoRoot,
-            changed: changed ?? [],
-            changedPaths: changedPaths ?? [],
-          } satisfies RunnerInput,
-          scratchpad,
-        )
-      : Promise.resolve();
-
-  const [
-    tscResult,
-    eslintResult,
-    eslintSecurityResult,
-    vulnResult,
-    selectorResult,
-    deadcodeResult,
-    consistencyResult,
-  ] = await Promise.all([
-      runTsc(input.repoRoot, ecosystem.tsconfigPaths),
-      ecosystem.hasEslint && changedPaths && changedPaths.length > 0
-        ? runEslint(input.repoRoot, changedPaths)
-        : Promise.resolve({ findings: [], degraded: [] as DegradedEntry[] }),
-      // M13 (ADR-0028 §2): Warden-managed ESLint security pass. Not gated by
-      // `ecosystem.hasEslint` — runs whenever the diff has JS/TS files, using
-      // `@warden/core`'s own pinned eslint + plugins. Stays inline alongside
-      // the existing user-config ESLint result rather than going through the
-      // M8 contract (ADR-0028 §8); both record into the scratchpad as
-      // separate entries so degraded entries name the correct pass.
-      changedPaths && changedPaths.length > 0
-        ? runEslintSecurity(input.repoRoot, changedPaths).catch((err: unknown) => ({
-            findings: [] as ToolFinding[],
-            degraded: [
-              {
-                kind: "warning",
-                topic: "eslint-security",
-                message: `eslint-security: detector failed (${formatErr(err)})`,
-              },
-            ] as DegradedEntry[],
-          }))
-        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
-      ecosystem.lockfile
-        ? runVulnerabilityCheck(input.repoRoot, ecosystem.lockfile)
-        : Promise.resolve({
-            comments: [] as Comment[],
-            degraded: [
-              {
-                kind: "info",
-                topic: "audit",
-                message:
-                  "audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan",
-              },
-            ] as DegradedEntry[],
-          }),
-      selector
-        ? selector
-            .select({
-              repoRoot: input.repoRoot,
-              changed: changed ?? [],
-              ecosystem,
-              diff: input.diff,
-            })
-            .catch((err: unknown) => ({
-              candidates: [],
-              degraded: [
-                {
-                  kind: "warning",
-                  topic: "context",
-                  message: `context: selector failed (${formatErr(err)})`,
-                },
-              ],
-            }) satisfies SelectorOutput)
-        : Promise.resolve(emptySelectorResult),
-      // ADR-0021 #1: deadcode detector — diff-touched exported fns + 1-hop
-      // reverse `import_graph` for caller arity inspection. Stays inline in
-      // M8; M9 likely migrates it through the contract.
-      changed && changed.length > 0
-        ? runDeadcode({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
-            findings: [] as ToolFinding[],
-            degraded: [
-              {
-                kind: "warning",
-                topic: "deadcode",
-                message: `deadcode: detector failed (${formatErr(err)})`,
-              },
-            ] as DegradedEntry[],
-          }))
-        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
-      // M10 (ADR-0021 §1c): consistency detector — verifies doc claims about
-      // env-vars / CLI surface / `.warden/*` path constants against the
-      // current code. Stays inline like deadcode; not contract-migrated.
-      changed && changed.length > 0
-        ? runConsistency({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
-            findings: [] as ToolFinding[],
-            degraded: [
-              {
-                kind: "warning",
-                topic: "consistency",
-                message: `consistency: detector failed (${formatErr(err)})`,
-              },
-            ] as DegradedEntry[],
-          }))
-        : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
-    ]);
-
-  // jscpd runs sequentially after the selector — it consumes the candidate
-  // path set per ADR-0018. Skipped when there's nothing scoped to look at.
-  const candidatePaths = selectorResult.candidates.map((c) => c.path);
-  const scopedForJscpd = uniqStrings([...(changedPaths ?? []), ...candidatePaths]);
-  const jscpdResult =
-    scopedForJscpd.length > 0
-      ? await runJscpd(
-          input.repoRoot,
-          scopedForJscpd,
-          new Set(changedPaths ?? []),
-        )
-      : { findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] };
-
-  // Wait for the orchestration-tier runners before reading the scratchpad.
-  // dispatch() has been running in parallel with everything above; this
-  // join only blocks if its longest runner outlasted jscpd.
-  await dispatchPromise;
-
-  // Record inline-runner outputs into the scratchpad. Findings stay raw here;
-  // synthesis applies `scopeToDiff` uniformly across the whole scratchpad,
-  // which is a no-op on detectors that already filter against `addedLines`.
-  scratchpad.record({
-    name: "tsc",
-    findings: tscResult.findings,
-    degraded: tscResult.degraded,
-    durationMs: 0,
-  });
-  scratchpad.record({
-    name: "eslint",
-    findings: eslintResult.findings,
-    degraded: eslintResult.degraded,
-    durationMs: 0,
-  });
-  // M13 (ADR-0028 §2): record the Warden-managed security pass as a separate
-  // scratchpad entry so degraded entries can name `eslint-security` (helpful
-  // for dogfood — user-config lint failures vs. Warden-security lint failures
-  // should be distinguishable).
-  scratchpad.record({
-    name: "eslint-security",
-    findings: eslintSecurityResult.findings,
-    degraded: eslintSecurityResult.degraded,
-    durationMs: 0,
-  });
-  scratchpad.record({
-    name: "jscpd",
-    findings: jscpdResult.findings,
-    degraded: jscpdResult.degraded,
-    durationMs: 0,
-  });
-  scratchpad.record({
-    name: "deadcode",
-    findings: deadcodeResult.findings,
-    degraded: deadcodeResult.degraded,
-    durationMs: 0,
-  });
-  scratchpad.record({
-    name: "consistency",
-    findings: consistencyResult.findings,
-    degraded: consistencyResult.degraded,
-    durationMs: 0,
-  });
-
-  // ADR-0021 #8: when the diff doesn't touch a manifest / lockfile, collapse
-  // npm-audit findings into a single summary comment. The full per-advisory
-  // list is still surfaced in `--verbose` mode and whenever the user is
-  // actually editing dependency wiring (manifest-touched). Verifier discipline
-  // (OSV citation, ADR-0008) is unchanged — this only changes aggregation.
-  const manifestTouched = (changedPaths ?? []).some(isManifestPath);
+  // Det-prior findings → Comments via the existing tool→Comment mapping.
+  // Vuln Comments pass through as-is (audit + OSV already shape them).
+  const toolComments = detPriors.findings.map(toComment);
   const verboseMode = input.config.verbose === true;
+  const manifestTouched = detPriors.changedPaths.some(isManifestPath);
   const vulnComments =
     manifestTouched || verboseMode
-      ? vulnResult.comments
-      : collapseVulnComments(vulnResult.comments, ecosystem.lockfile);
+      ? detPriors.vulnComments
+      : collapseVulnComments(detPriors.vulnComments, detPriors.ecosystem.lockfile);
 
-  // Aggregate environmental degraded entries (those not produced by runners
-  // recorded in the scratchpad). Runner-produced degraded entries flow
-  // through `scratchpad.flattenDegraded()`.
-  const environmentalDegraded: DegradedEntry[] = [
-    ...gitignoreDegraded,
-    ...noiseFilterDegraded,
-    ...bannerStateToDegraded(bannerState),
-    ...vulnResult.degraded,
-    ...selectorResult.degraded,
-  ];
-
-  // Synthesis ending diverges per ADR-0023 #7. `check` is deterministic-only;
-  // `review` runs the M4 formatter cascade through the synthesizer.
-  let synthOutput: { comments: Comment[]; degraded: DegradedEntry[] };
-  if (input.config.mode === "check") {
-    synthOutput = deterministicSynthesize({
-      scratchpad,
-      vulnComments,
-      changed,
-    });
-  } else {
-    let ctxFromSelector: RetrievedContext = { chunks: [], sameFolderPaths: [] };
-    if (input.retrievedContext) {
-      ctxFromSelector = input.retrievedContext;
-    } else if (selectorResult.candidates.length > 0) {
-      try {
-        ctxFromSelector = await candidatesToRetrievedContext(
-          selectorResult.candidates,
-          input.repoRoot,
-        );
-      } catch (err) {
-        // Mirrors the selector's own `.catch()` — prompt-assembly failures
-        // (e.g. a candidate file disappearing between selection and read)
-        // shouldn't abort the LLM pass; degrade to diff-only context.
-        environmentalDegraded.push({
-          kind: "warning",
-          topic: "context",
-          message: `context: prompt-assembly failed (${formatErr(err)})`,
-        });
-      }
-    }
-    synthOutput = await synthesize({
-      scratchpad,
-      vulnComments,
-      diff: input.diff,
-      retrievedContext: ctxFromSelector,
-      changed,
-      repoRoot: input.repoRoot,
-      emit: input.emit,
-    });
-  }
-
-  // M10 (ADR-0021 §3): global substring-verifier post-pass. Runs over every
-  // Comment whose sources[] carries a `{path, line, snippet}` triple; drops
-  // sources whose snippet doesn't substring-match the cited file, and drops
-  // Comments left with zero verified snippet sources (if they had ≥1 to
-  // begin with). Catches both deterministic-runner snippet citations and
-  // LLM-authored ones in a single pass — placed before `applyHardRules()`
-  // so the priority-sort + tier-3 gate see the verified set.
-  const verified = await verifyCitations({
-    comments: synthOutput.comments,
-    repoRoot: input.repoRoot,
-  });
-
-  // Hard rules in code per grilling Q11 (P3): final priority sort + tier-3
-  // verbose-gate + M13 confidence floor. Soft rules (judgment-driven
-  // suppression) live in the LLM prompt and have already been applied above.
-  const ruled = applyHardRules(verified.comments, input.config);
-
+  const merged: Comment[] = [...toolComments, ...vulnComments];
+  const ruled = applyHardRules(merged, input.config);
   return {
     comments: ruled.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
-      degradedWorkers: [
-        ...environmentalDegraded,
-        ...scratchpad.flattenDegraded(),
-        ...synthOutput.degraded,
-        ...verified.degraded,
-        ...ruled.degraded,
-      ],
+      degradedWorkers: [...detPriors.degraded, ...ruled.degraded],
     },
   };
 }
@@ -663,17 +304,6 @@ function applyHardRules(comments: Comment[], config: ReviewConfig): HardRulesOut
     return b.confidence - a.confidence;
   });
   return { comments: sorted, degraded: floorDegraded };
-}
-
-function uniqStrings(items: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of items) {
-    if (seen.has(item)) continue;
-    seen.add(item);
-    out.push(item);
-  }
-  return out;
 }
 
 const MANIFEST_BASENAMES: ReadonlySet<string> = new Set([
@@ -738,9 +368,4 @@ function collapseVulnComments(comments: Comment[], lockfile: Lockfile | undefine
     confidence: 1,
   };
   return [summary];
-}
-
-function formatErr(err: unknown): string {
-  if (err instanceof Error) return err.message.slice(0, 160);
-  return String(err).slice(0, 160);
 }
