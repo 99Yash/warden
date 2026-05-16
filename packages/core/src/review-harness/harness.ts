@@ -1,14 +1,18 @@
 import { wardenEnv } from "@warden/env";
 import type { ContextSelector } from "../context/index.js";
 import type { FormatterListener } from "../llm/index.js";
+import { verifyCitations } from "../llm/verify-citations.js";
 import type {
   CommentSet,
+  CostByTier,
   DegradedEntry,
   RetrievedContext,
+  TokenUsageBlock,
+  TokenUsageByTier,
 } from "../schema.js";
 import { runBossLoop } from "./boss-loop.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
-import { ReviewScratchpad } from "./scratchpad.js";
+import { ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import { makeWorkerRoute } from "./workers/index.js";
 
 /**
@@ -26,25 +30,22 @@ export interface ReviewHarnessConfig {
 /**
  * Entry point for the M14 review harness (ADR-0030).
  *
- * Pipeline:
+ * Three phases, end-to-end:
  *   - Phase 1 — `runDetPriors()`: deterministic detectors + selector run
  *     in parallel; produces `ToolFinding[]` + retrieved context + degraded.
- *   - Phase 2 — `runBossLoop()` (NOT YET IMPLEMENTED): Opus 4.6 boss runs a
- *     `streamText` tool-use loop with `stopWhen: stepCountIs(env.WARDEN_REVIEW_BOSS_ROUNDS ?? 5)`;
+ *   - Phase 2 — `runBossLoop()`: Opus 4.6 boss runs a `streamText` tool-use
+ *     loop with `stopWhen: stepCountIs(env.WARDEN_REVIEW_BOSS_ROUNDS ?? 5)`;
  *     dispatches Sonnet/Haiku workers per concern via the `dispatch_worker`
- *     tool; final round emits `Output.object({ comments: Comment[] })` (the
- *     wrapper object is what AI SDK v6's structured-output channel parses
- *     reliably — see `BossOutputSchema` in `boss-loop.ts`).
- *   - Phase 3 — `verifyCitations()` + `applyHardRules()` (existing M10/M13
- *     paths): substring-verifies snippet sources, drops Comments with no
- *     verified source, applies the confidence floor + Tier-3 verbose gate
- *     + priority sort.
+ *     tool; final round emits `Output.object({ comments: Comment[] })`.
+ *   - Phase 3 — `verifyCitations()`: substring-verifies every `{path, line,
+ *     snippet}` citation against the cited file; drops Comments left
+ *     without a verified source.
  *
- * Phase 1 + Phase 2 are wired; Phase 3 (citation verify + applyHardRules)
- * is invoked by the surrounding `review()` function on the boss's emitted
- * comments. Nothing in `packages/core/src/index.ts` calls `runReviewHarness()`
- * yet — the existing M8 spine continues to drive `review()` until the
- * index.ts rewire commit lands.
+ * `applyHardRules()` (priority sort + Tier-3 verbose gate + confidence
+ * floor) is intentionally NOT run here — it depends on `ReviewConfig.mode`
+ * + `verbose` and is shared with the check-mode codepath. The caller in
+ * `packages/core/src/index.ts` applies it uniformly after this harness OR
+ * after `runDetPriors() + toComment()` (check mode).
  */
 export interface ReviewHarnessInput {
   diff: string;
@@ -65,16 +66,7 @@ export interface ReviewHarnessInput {
   emit?: FormatterListener;
 }
 
-export interface ReviewHarnessResult extends CommentSet {
-  /**
-   * Boss-loop output before Phase 3 (`verifyCitations` + `applyHardRules`).
-   * The surrounding `review()` runs Phase 3 against `comments` and
-   * accumulates Phase 3's degraded entries into `metadata.degradedWorkers`.
-   * Exposed separately so callers that want the boss output without the
-   * verifier post-pass (e.g. smoke fixtures) can read it.
-   */
-  preVerify?: { comments: import("../schema.js").Comment[] };
-}
+export type ReviewHarnessResult = CommentSet;
 
 export async function runReviewHarness(input: ReviewHarnessInput): Promise<ReviewHarnessResult> {
   const startedAt = Date.now();
@@ -138,25 +130,167 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     ...(input.emit ? { emit: input.emit } : {}),
   });
 
+  // Phase 3 — citation verify. Substring-checks every `{path, line, snippet}`
+  // citation against the cited file at `line ± DRIFT` and drops Comments
+  // left without a verified source. Failure modes surface as info-level
+  // degraded entries under `topic: "llm"`. Tier-3 verbose-gate + priority
+  // sort + confidence floor live in `applyHardRules()` at the caller —
+  // they're mode/config-dependent and shared with the check-mode codepath.
+  const verified = await verifyCitations({
+    comments: bossOutput.comments,
+    repoRoot: input.repoRoot,
+  });
+
   // Aggregate degraded entries from every layer: det-priors, every worker
   // recorded into the scratchpad, the dispatch tool's budget-cap entries
-  // (also on the scratchpad), the boss-loop's cascade-engaged entries, and
-  // the shared lookupTypeDef collector. Order is intentional — environment
-  // entries first, worker-level entries next, boss-level entries last.
+  // (also on the scratchpad), the boss-loop's cascade-engaged entries,
+  // the shared lookupTypeDef collector, and the Phase 3 verifier. Order
+  // is intentional — environment entries first, worker-level entries
+  // next, boss-level entries third, verifier entries last.
   const aggregatedDegraded: DegradedEntry[] = [
     ...scratchpad.flattenDegraded(),
     ...bossOutput.degraded,
     ...apiClaimDegraded,
+    ...verified.degraded,
   ];
 
+  // Per-tier token-usage bucket: opus (boss) + sonnet/haiku (workers).
+  // Workers record their actual tier in the scratchpad even when the boss
+  // overrode the per-concern default, so this aggregation is honest.
+  const tokenUsage = buildTokenUsageByTier(
+    scratchpad.bossTokens(),
+    scratchpad.workerOutputs(),
+  );
+  const costs = computeCosts(tokenUsage);
+
   return {
-    comments: bossOutput.comments,
+    comments: verified.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
       degradedWorkers: aggregatedDegraded,
+      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+      ...(costs !== undefined
+        ? { costUsd: costs.costUsd, costByTier: costs.costByTier }
+        : {}),
     },
-    preVerify: { comments: bossOutput.comments },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Per-tier usage aggregation + static pricing table.
+//
+// Pricing is per ADR-0030 §Caveats + the M14 plan's render-UX section:
+//   Opus 4.6   = $5  / $25  per 1M tokens (input/output)
+//   Sonnet 4.6 = $3  / $15  per 1M tokens
+//   Haiku 4.5  = $1  / $5   per 1M tokens
+//
+// Cached input tokens (Anthropic reports them when prompt caching kicks
+// in) are charged at 10% of the standard input price — the
+// `cachedInputTokens` figure is *non-cumulative* with `inputTokens`; the
+// usage object reports them as a separate count for the cache-hit portion.
+// We bill `inputTokens` at the full rate and `cachedInputTokens` at 10%.
+// ---------------------------------------------------------------------------
+
+const PRICE_PER_M_TOKENS: Record<
+  "opus" | "sonnet" | "haiku",
+  { input: number; output: number }
+> = {
+  opus: { input: 5, output: 25 },
+  sonnet: { input: 3, output: 15 },
+  haiku: { input: 1, output: 5 },
+};
+const CACHE_HIT_PRICE_MULTIPLIER = 0.1;
+
+function toUsageBlock(usage: TokenUsage): TokenUsageBlock {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cachedInputTokens !== undefined
+      ? { cachedInputTokens: usage.cachedInputTokens }
+      : {}),
+  };
+}
+
+function addUsage(acc: TokenUsageBlock, next: TokenUsage): TokenUsageBlock {
+  return {
+    inputTokens: acc.inputTokens + next.inputTokens,
+    outputTokens: acc.outputTokens + next.outputTokens,
+    ...(acc.cachedInputTokens !== undefined || next.cachedInputTokens !== undefined
+      ? {
+          cachedInputTokens:
+            (acc.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0),
+        }
+      : {}),
+  };
+}
+
+function buildTokenUsageByTier(
+  bossTokens: TokenUsage | undefined,
+  workerOutputs: readonly { tokenUsage?: TokenUsage; tier?: "sonnet" | "haiku" }[],
+): TokenUsageByTier | undefined {
+  let opus: TokenUsageBlock | undefined;
+  let sonnet: TokenUsageBlock | undefined;
+  let haiku: TokenUsageBlock | undefined;
+  if (bossTokens) opus = toUsageBlock(bossTokens);
+  for (const w of workerOutputs) {
+    if (!w.tokenUsage || !w.tier) continue;
+    if (w.tier === "sonnet") {
+      sonnet = sonnet ? addUsage(sonnet, w.tokenUsage) : toUsageBlock(w.tokenUsage);
+    } else {
+      haiku = haiku ? addUsage(haiku, w.tokenUsage) : toUsageBlock(w.tokenUsage);
+    }
+  }
+  if (opus === undefined && sonnet === undefined && haiku === undefined) {
+    return undefined;
+  }
+  return {
+    ...(opus !== undefined ? { opus } : {}),
+    ...(sonnet !== undefined ? { sonnet } : {}),
+    ...(haiku !== undefined ? { haiku } : {}),
+  };
+}
+
+function tierCost(block: TokenUsageBlock | undefined, tier: "opus" | "sonnet" | "haiku"): number {
+  if (!block) return 0;
+  const price = PRICE_PER_M_TOKENS[tier];
+  // `inputTokens` per AI SDK v6 already excludes the cache-hit portion when
+  // `cachedInputTokens` is reported — bill them separately at 10× discount.
+  const inputCost = (block.inputTokens / 1_000_000) * price.input;
+  const cachedCost =
+    block.cachedInputTokens !== undefined
+      ? (block.cachedInputTokens / 1_000_000) * price.input * CACHE_HIT_PRICE_MULTIPLIER
+      : 0;
+  const outputCost = (block.outputTokens / 1_000_000) * price.output;
+  return inputCost + cachedCost + outputCost;
+}
+
+function computeCosts(
+  usage: TokenUsageByTier | undefined,
+): { costUsd: number; costByTier: CostByTier } | undefined {
+  if (!usage) return undefined;
+  const opus = usage.opus !== undefined ? round4(tierCost(usage.opus, "opus")) : undefined;
+  const sonnet = usage.sonnet !== undefined ? round4(tierCost(usage.sonnet, "sonnet")) : undefined;
+  const haiku = usage.haiku !== undefined ? round4(tierCost(usage.haiku, "haiku")) : undefined;
+  // Sum the raw (unrounded) tier costs then round once to preserve the
+  // pre-refactor `costUsd` value to the cent. Individual tier figures are
+  // rounded for display.
+  const total = round4(
+    tierCost(usage.opus, "opus") +
+      tierCost(usage.sonnet, "sonnet") +
+      tierCost(usage.haiku, "haiku"),
+  );
+  return {
+    costUsd: total,
+    costByTier: {
+      ...(opus !== undefined ? { opus } : {}),
+      ...(sonnet !== undefined ? { sonnet } : {}),
+      ...(haiku !== undefined ? { haiku } : {}),
+    },
+  };
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10_000) / 10_000;
 }
 
 function makeEmptySet(startedAt: number, degraded: DegradedEntry[]): CommentSet {

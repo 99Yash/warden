@@ -43,7 +43,7 @@ const program = new Command();
 program
   .name("warden")
   .description(
-    "AI code review CLI — runs deterministic tooling, verifies external claims through citable sources, and uses an LLM as a triage layer.",
+    "AI code review CLI — runs deterministic tooling in parallel, dispatches LLM workers per concern, and ships only citation-verified findings.",
   )
   .version("0.0.1");
 
@@ -72,18 +72,24 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
   // --json — JSON consumers read it from the structured metadata directly.)
   const renderer = !opts.json && mode === "review" ? createPhaseRenderer() : undefined;
 
+  // M14 (ADR-0030): the boss-loop emits the same FormatterEvent shape the
+  // M4 formatter did, so the existing phase-log renderer works unchanged
+  // — phase-start opens a spinner (now labeled "review harness boss
+  // loop"), reasoning-delta streams Opus's thinking, phase-complete
+  // closes with a comment count. The summary line (cost + duration) is
+  // rendered by `formatCommentSet()` after the boss-loop returns.
   const emit = renderer
     ? (event: FormatterEvent) => {
         switch (event.type) {
           case "phase-start":
-            renderer.startLlmPhase(`drafting review (${event.provider}/${event.modelId})`);
+            renderer.startLlmPhase(`review harness boss loop (${event.provider}/${event.modelId})`);
             break;
           case "reasoning-delta":
             renderer.appendReasoning(event.text);
             break;
           case "phase-complete":
             renderer.completeLlmPhase(
-              `${event.revisedCount} revisions, ${event.questionCount} question${event.questionCount === 1 ? "" : "s"} (${event.durationMs}ms)`,
+              `${event.questionCount} question${event.questionCount === 1 ? "" : "s"} drafted (${event.durationMs}ms)`,
             );
             break;
           case "phase-degraded":
@@ -174,7 +180,7 @@ sharedOpts(
   program
     .command("review")
     .description(
-      "Full pipeline: deterministic checks + LLM formatter that triages findings, writes citations, and orders comments by review priority.",
+      "Full 3-phase review: deterministic priors → Opus boss dispatches per-concern Sonnet/Haiku workers → citation verify. Orders comments by review priority.",
     ),
 ).action(async (opts: CommonOpts) => {
   await runReview("review", opts);

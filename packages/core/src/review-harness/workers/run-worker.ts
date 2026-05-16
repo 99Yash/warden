@@ -121,6 +121,8 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     }
   }
 
+  const tier: WorkerTier = input.tier ?? TIER_BY_CONCERN[input.concern];
+
   // No usable snippets → empty result, save the LLM call. Worker had nothing
   // to look at (sensitive paths only, binary files only, or every snippet
   // build threw).
@@ -130,10 +132,9 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       toolCalls: 0,
       degraded,
       durationMs: Date.now() - startedAt,
+      tier,
     };
   }
-
-  const tier: WorkerTier = input.tier ?? TIER_BY_CONCERN[input.concern];
 
   const tools: ToolSet = {
     lookupTypeDef: makeLookupTypeDefTool({
@@ -173,6 +174,7 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       toolCalls: 0,
       degraded,
       durationMs: Date.now() - startedAt,
+      tier,
     };
   }
 
@@ -209,7 +211,8 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     toolCalls: call.toolCalls,
     degraded,
     durationMs: Date.now() - startedAt,
-    tokenUsage: call.tokenUsage,
+    ...(call.tokenUsage !== undefined ? { tokenUsage: call.tokenUsage } : {}),
+    tier,
   };
 }
 

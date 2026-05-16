@@ -134,10 +134,64 @@ export const DegradedEntrySchema = z.object({
 });
 export type DegradedEntry = z.infer<typeof DegradedEntrySchema>;
 
+/**
+ * M14 (ADR-0030): per-model-tier token usage surfaced on `CommentSet`.
+ * `opus` is the boss; `sonnet` and `haiku` are the worker tiers
+ * (sonnet for correctness/scalability/consistency/security; haiku for
+ * committability/leverage by default). Cached input tokens are tracked
+ * when the provider reports them (Anthropic ≥ 2026-01).
+ */
+export const TokenUsageBlockSchema = z.object({
+  inputTokens: z.number().nonnegative(),
+  outputTokens: z.number().nonnegative(),
+  cachedInputTokens: z.number().nonnegative().optional(),
+});
+export type TokenUsageBlock = z.infer<typeof TokenUsageBlockSchema>;
+
+export const TokenUsageByTierSchema = z.object({
+  opus: TokenUsageBlockSchema.optional(),
+  sonnet: TokenUsageBlockSchema.optional(),
+  haiku: TokenUsageBlockSchema.optional(),
+});
+export type TokenUsageByTier = z.infer<typeof TokenUsageByTierSchema>;
+
+/**
+ * Per-tier USD cost breakdown. Mirrors `TokenUsageByTier`'s shape but
+ * stores already-computed dollars so render layers don't need their own
+ * pricing tables (one source of truth lives in the harness).
+ */
+export const CostByTierSchema = z.object({
+  opus: z.number().nonnegative().optional(),
+  sonnet: z.number().nonnegative().optional(),
+  haiku: z.number().nonnegative().optional(),
+});
+export type CostByTier = z.infer<typeof CostByTierSchema>;
+
 export const CommentSetMetadataSchema = z.object({
   durationMs: z.number().nonnegative(),
   /** Workers that timed out or otherwise failed; surfaced per `vision.md` §11. */
   degradedWorkers: z.array(DegradedEntrySchema).default([]),
+  /**
+   * Per-model-tier token usage (M14+). Absent on the check-mode path
+   * (no LLM call) and on review runs where every LLM call's `usage`
+   * field came back undefined. Render layer reads this to compute the
+   * cost summary line.
+   */
+  tokenUsage: TokenUsageByTierSchema.optional(),
+  /**
+   * Total estimated USD cost of the LLM calls. Computed from
+   * `tokenUsage` via a static pricing table inline in the harness
+   * (Opus 4.6 = $5/$25 per 1M; Sonnet 4.6 = $3/$15; Haiku 4.5 = $1/$5
+   * as of 2026-05). Absent when token usage is absent.
+   */
+  costUsd: z.number().nonnegative().optional(),
+  /**
+   * Per-tier breakdown of `costUsd`. Same pricing table as `costUsd`;
+   * surfaced separately so the CLI render layer can print the
+   * "opus-4-6 $0.31 · sonnet-4-6 $0.08" suffix without duplicating
+   * the pricing table. Absent when `costUsd` is absent.
+   */
+  costByTier: CostByTierSchema.optional(),
 });
 export type CommentSetMetadata = z.infer<typeof CommentSetMetadataSchema>;
 

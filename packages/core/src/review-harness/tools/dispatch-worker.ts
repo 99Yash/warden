@@ -118,6 +118,14 @@ export interface WorkerInvocationResult {
   degraded: DegradedEntry[];
   durationMs: number;
   tokenUsage?: TokenUsage;
+  /**
+   * Actual model tier the worker ran on. Computed by the route function
+   * via the per-concern default + any boss-supplied override. Surfaced
+   * here (rather than re-derived in `recordWorker`) so the harness can
+   * bucket per-tier token usage when the boss promotes a Haiku-default
+   * concern to Sonnet (or vice versa).
+   */
+  tier?: "sonnet" | "haiku";
 }
 
 export type WorkerRoute = (
@@ -248,7 +256,8 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
         degraded: laneDegraded,
         phase: args.phase,
         durationMs: result.durationMs,
-        tokenUsage: result.tokenUsage,
+        ...(result.tokenUsage !== undefined ? { tokenUsage: result.tokenUsage } : {}),
+        ...(result.tier !== undefined ? { tier: result.tier } : {}),
       });
 
       return {
