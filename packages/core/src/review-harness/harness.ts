@@ -4,6 +4,7 @@ import type { FormatterListener } from "../llm/index.js";
 import { verifyCitations } from "../llm/verify-citations.js";
 import type {
   CommentSet,
+  CostByTier,
   DegradedEntry,
   RetrievedContext,
   TokenUsageBlock,
@@ -160,7 +161,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     scratchpad.bossTokens(),
     scratchpad.workerOutputs(),
   );
-  const costUsd = computeCostUsd(tokenUsage);
+  const costs = computeCosts(tokenUsage);
 
   return {
     comments: verified.comments,
@@ -168,7 +169,9 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
       durationMs: Date.now() - startedAt,
       degradedWorkers: aggregatedDegraded,
       ...(tokenUsage !== undefined ? { tokenUsage } : {}),
-      ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(costs !== undefined
+        ? { costUsd: costs.costUsd, costByTier: costs.costByTier }
+        : {}),
     },
   };
 }
@@ -261,13 +264,33 @@ function tierCost(block: TokenUsageBlock | undefined, tier: "opus" | "sonnet" | 
   return inputCost + cachedCost + outputCost;
 }
 
-function computeCostUsd(usage: TokenUsageByTier | undefined): number | undefined {
+function computeCosts(
+  usage: TokenUsageByTier | undefined,
+): { costUsd: number; costByTier: CostByTier } | undefined {
   if (!usage) return undefined;
-  const total =
+  const opus = usage.opus !== undefined ? round4(tierCost(usage.opus, "opus")) : undefined;
+  const sonnet = usage.sonnet !== undefined ? round4(tierCost(usage.sonnet, "sonnet")) : undefined;
+  const haiku = usage.haiku !== undefined ? round4(tierCost(usage.haiku, "haiku")) : undefined;
+  // Sum the raw (unrounded) tier costs then round once to preserve the
+  // pre-refactor `costUsd` value to the cent. Individual tier figures are
+  // rounded for display.
+  const total = round4(
     tierCost(usage.opus, "opus") +
-    tierCost(usage.sonnet, "sonnet") +
-    tierCost(usage.haiku, "haiku");
-  return Math.round(total * 10_000) / 10_000;
+      tierCost(usage.sonnet, "sonnet") +
+      tierCost(usage.haiku, "haiku"),
+  );
+  return {
+    costUsd: total,
+    costByTier: {
+      ...(opus !== undefined ? { opus } : {}),
+      ...(sonnet !== undefined ? { sonnet } : {}),
+      ...(haiku !== undefined ? { haiku } : {}),
+    },
+  };
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10_000) / 10_000;
 }
 
 function makeEmptySet(startedAt: number, degraded: DegradedEntry[]): CommentSet {

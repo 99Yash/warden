@@ -155,6 +155,18 @@ export const TokenUsageByTierSchema = z.object({
 });
 export type TokenUsageByTier = z.infer<typeof TokenUsageByTierSchema>;
 
+/**
+ * Per-tier USD cost breakdown. Mirrors `TokenUsageByTier`'s shape but
+ * stores already-computed dollars so render layers don't need their own
+ * pricing tables (one source of truth lives in the harness).
+ */
+export const CostByTierSchema = z.object({
+  opus: z.number().nonnegative().optional(),
+  sonnet: z.number().nonnegative().optional(),
+  haiku: z.number().nonnegative().optional(),
+});
+export type CostByTier = z.infer<typeof CostByTierSchema>;
+
 export const CommentSetMetadataSchema = z.object({
   durationMs: z.number().nonnegative(),
   /** Workers that timed out or otherwise failed; surfaced per `vision.md` §11. */
@@ -173,6 +185,13 @@ export const CommentSetMetadataSchema = z.object({
    * as of 2026-05). Absent when token usage is absent.
    */
   costUsd: z.number().nonnegative().optional(),
+  /**
+   * Per-tier breakdown of `costUsd`. Same pricing table as `costUsd`;
+   * surfaced separately so the CLI render layer can print the
+   * "opus-4-6 $0.31 · sonnet-4-6 $0.08" suffix without duplicating
+   * the pricing table. Absent when `costUsd` is absent.
+   */
+  costByTier: CostByTierSchema.optional(),
 });
 export type CommentSetMetadata = z.infer<typeof CommentSetMetadataSchema>;
 

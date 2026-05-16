@@ -1,10 +1,10 @@
 import type {
   Category,
   CommentSet,
+  CostByTier,
   DegradedEntry,
   ReviewInput,
   Tier,
-  TokenUsageByTier,
 } from "@warden/core";
 import pc from "picocolors";
 
@@ -81,9 +81,13 @@ function tierSwatch(tier: Tier): string {
 /**
  * "Done in 47.3s · $0.42 (opus-4-6 $0.31 · sonnet-4-6 $0.08 · haiku-4-5 $0.03)"
  *
- * Falls back to "duration: 4660ms" (the pre-M14 shape) when token usage
- * is absent — that's the `warden check` path (no LLM calls) and the
+ * Falls back to "duration: 4660ms" (the pre-M14 shape) when cost is
+ * absent — that's the `warden check` path (no LLM calls) and the
  * empty-diff / no-package-json review path (harness short-circuited).
+ *
+ * Pricing lives in `packages/core/src/review-harness/harness.ts` —
+ * `metadata.costByTier` carries the pre-computed per-tier dollars so we
+ * don't duplicate the price table here.
  */
 function renderSummaryLine(result: CommentSet): string {
   const wall = formatDuration(result.metadata.durationMs);
@@ -91,47 +95,20 @@ function renderSummaryLine(result: CommentSet): string {
   if (cost === undefined || cost === 0) {
     return `duration: ${result.metadata.durationMs}ms`;
   }
-  const breakdown = renderCostBreakdown(result.metadata.tokenUsage);
+  const breakdown = renderCostBreakdown(result.metadata.costByTier);
   const costStr = formatUsd(cost);
   return breakdown
     ? `Done in ${wall} · ${costStr} (${breakdown})`
     : `Done in ${wall} · ${costStr}`;
 }
 
-function renderCostBreakdown(tokenUsage: TokenUsageByTier | undefined): string {
-  if (!tokenUsage) return "";
+function renderCostBreakdown(costByTier: CostByTier | undefined): string {
+  if (!costByTier) return "";
   const parts: string[] = [];
-  if (tokenUsage.opus) parts.push(`opus-4-6 ${formatUsd(tierCost(tokenUsage.opus, "opus"))}`);
-  if (tokenUsage.sonnet) parts.push(`sonnet-4-6 ${formatUsd(tierCost(tokenUsage.sonnet, "sonnet"))}`);
-  if (tokenUsage.haiku) parts.push(`haiku-4-5 ${formatUsd(tierCost(tokenUsage.haiku, "haiku"))}`);
+  if (costByTier.opus !== undefined) parts.push(`opus-4-6 ${formatUsd(costByTier.opus)}`);
+  if (costByTier.sonnet !== undefined) parts.push(`sonnet-4-6 ${formatUsd(costByTier.sonnet)}`);
+  if (costByTier.haiku !== undefined) parts.push(`haiku-4-5 ${formatUsd(costByTier.haiku)}`);
   return parts.join(" · ");
-}
-
-/**
- * Per-tier USD pricing. Mirrors the table in
- * `packages/core/src/review-harness/harness.ts` — if the model lineup
- * changes, update both places. Kept locally so the renderer doesn't have
- * to introspect core internals to print a cost breakdown.
- */
-const PRICE_PER_M_TOKENS: Record<"opus" | "sonnet" | "haiku", { input: number; output: number }> = {
-  opus: { input: 5, output: 25 },
-  sonnet: { input: 3, output: 15 },
-  haiku: { input: 1, output: 5 },
-};
-const CACHE_HIT_PRICE_MULTIPLIER = 0.1;
-
-function tierCost(
-  block: { inputTokens: number; outputTokens: number; cachedInputTokens?: number },
-  tier: "opus" | "sonnet" | "haiku",
-): number {
-  const price = PRICE_PER_M_TOKENS[tier];
-  const inputCost = (block.inputTokens / 1_000_000) * price.input;
-  const cachedCost =
-    block.cachedInputTokens !== undefined
-      ? (block.cachedInputTokens / 1_000_000) * price.input * CACHE_HIT_PRICE_MULTIPLIER
-      : 0;
-  const outputCost = (block.outputTokens / 1_000_000) * price.output;
-  return inputCost + cachedCost + outputCost;
 }
 
 function formatUsd(n: number): string {
