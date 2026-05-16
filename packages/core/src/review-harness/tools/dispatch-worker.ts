@@ -151,11 +151,127 @@ export interface MakeDispatchWorkerToolOptions {
   route: WorkerRoute;
 }
 
+/**
+ * Args accepted by both the AI SDK tool's `execute()` and the directly-
+ * callable `dispatch()`. Mirrors `WorkerInvocation` minus `repoRoot` (which
+ * is bound by `makeDispatchWorkerTool`'s closure).
+ */
+export type DispatchWorkerArgs = z.infer<typeof InputSchema>;
+
+/**
+ * Return value of `makeDispatchWorkerTool()`. `tool` is the AI SDK tool the
+ * boss invokes via `streamText`; `dispatch` is a directly-callable function
+ * sharing the same budget/lane-discipline/scratchpad-recording state, used
+ * by the M15 (ADR-0031) programmatic-dispatch Round 0 fan-out path. Both
+ * paths produce identical scratchpad effects + return shape. Return type
+ * intentionally inferred from the function body so AI SDK's generic
+ * `Tool<...>` shape flows through without a hand-written interface.
+ */
 export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
   let dispatchedCount = 0;
   let budgetEntryEmitted = false;
 
-  return tool({
+  const runOneDispatch = async (
+    args: DispatchWorkerArgs,
+  ): Promise<DispatchWorkerResult> => {
+    // Budget gate: emit a single degraded entry the first time we hit
+    // it, then short-circuit subsequent dispatches without invoking
+    // the route. This mirrors M11 lookupTypeDef's once-per-review
+    // "no node_modules" degraded entry pattern.
+    if (opts.workerBudget !== undefined && dispatchedCount >= opts.workerBudget) {
+      if (!budgetEntryEmitted) {
+        const entry: DegradedEntry = {
+          kind: "actionable",
+          topic: "review-harness",
+          message:
+            `worker budget exhausted at ${opts.workerBudget} dispatches — raise ` +
+            "WARDEN_REVIEW_WORKER_BUDGET to allow deeper adjudication.",
+        };
+        opts.scratchpad.recordDegraded(entry);
+        budgetEntryEmitted = true;
+        return { findings: [], toolCalls: 0, degraded: [entry] };
+      }
+      return { findings: [], toolCalls: 0, degraded: [] };
+    }
+    dispatchedCount += 1;
+
+    const invocation: WorkerInvocation = {
+      repoRoot: opts.repoRoot,
+      files: args.files,
+      concern: args.concern,
+      tier: args.tier,
+      focus: args.focus,
+      phase: args.phase,
+    };
+
+    let result: WorkerInvocationResult;
+    try {
+      result = await opts.route(invocation);
+    } catch (err) {
+      const detail = formatErr(err);
+      const entry: DegradedEntry = {
+        kind: "warning",
+        topic: "review-harness",
+        message: `dispatch_worker(${args.concern}): worker threw (${detail})`,
+      };
+      opts.scratchpad.recordWorker({
+        concern: args.concern,
+        files: args.files,
+        findings: [],
+        toolCalls: 0,
+        degraded: [entry],
+        phase: args.phase,
+        durationMs: 0,
+      });
+      return { findings: [], toolCalls: 0, degraded: [entry] };
+    }
+
+    // Lane discipline: drop findings whose `path` is outside the
+    // dispatched `files` set. Findings carry paths through their
+    // `sources[].path` (the canonical citation site) — drop the whole
+    // Comment if none of its sources cite a file inside the lane. This
+    // mirrors the M13 security sub-agent's lane policy.
+    const lane = new Set(args.files.map((p) => p.replace(/\\/g, "/")));
+    const inLane: Comment[] = [];
+    const droppedCount = { value: 0 };
+    for (const finding of result.findings) {
+      if (commentInLane(finding, lane)) {
+        inLane.push(finding);
+      } else {
+        droppedCount.value += 1;
+      }
+    }
+    const laneDegraded: DegradedEntry[] = [...result.degraded];
+    if (droppedCount.value > 0) {
+      laneDegraded.push({
+        kind: "info",
+        topic: "review-harness",
+        message:
+          `dispatch_worker(${args.concern}): dropped ${droppedCount.value} ` +
+          "finding(s) whose path was outside the dispatched file set.",
+      });
+    }
+
+    opts.scratchpad.recordWorker({
+      concern: args.concern,
+      files: args.files,
+      findings: inLane,
+      toolCalls: result.toolCalls,
+      degraded: laneDegraded,
+      phase: args.phase,
+      durationMs: result.durationMs,
+      ...(result.tokenUsage !== undefined ? { tokenUsage: result.tokenUsage } : {}),
+      ...(result.tier !== undefined ? { tier: result.tier } : {}),
+    });
+
+    return {
+      findings: inLane,
+      toolCalls: result.toolCalls,
+      degraded: laneDegraded,
+    };
+  };
+
+  const aiTool = tool({
     description: [
       "Dispatch a per-concern worker against a file set. Returns the",
       "worker's findings (already filtered to your `files` scope),",
@@ -167,106 +283,10 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       "array via the structured output, NOT through this tool.",
     ].join(" "),
     inputSchema: InputSchema,
-    execute: async (
-      args: z.infer<typeof InputSchema>,
-    ): Promise<DispatchWorkerResult> => {
-      // Budget gate: emit a single degraded entry the first time we hit
-      // it, then short-circuit subsequent dispatches without invoking
-      // the route. This mirrors M11 lookupTypeDef's once-per-review
-      // "no node_modules" degraded entry pattern.
-      if (opts.workerBudget !== undefined && dispatchedCount >= opts.workerBudget) {
-        if (!budgetEntryEmitted) {
-          const entry: DegradedEntry = {
-            kind: "actionable",
-            topic: "review-harness",
-            message:
-              `worker budget exhausted at ${opts.workerBudget} dispatches — raise ` +
-              "WARDEN_REVIEW_WORKER_BUDGET to allow deeper adjudication.",
-          };
-          opts.scratchpad.recordDegraded(entry);
-          budgetEntryEmitted = true;
-          return { findings: [], toolCalls: 0, degraded: [entry] };
-        }
-        return { findings: [], toolCalls: 0, degraded: [] };
-      }
-      dispatchedCount += 1;
-
-      const invocation: WorkerInvocation = {
-        repoRoot: opts.repoRoot,
-        files: args.files,
-        concern: args.concern,
-        tier: args.tier,
-        focus: args.focus,
-        phase: args.phase,
-      };
-
-      let result: WorkerInvocationResult;
-      try {
-        result = await opts.route(invocation);
-      } catch (err) {
-        const detail = formatErr(err);
-        const entry: DegradedEntry = {
-          kind: "warning",
-          topic: "review-harness",
-          message: `dispatch_worker(${args.concern}): worker threw (${detail})`,
-        };
-        opts.scratchpad.recordWorker({
-          concern: args.concern,
-          files: args.files,
-          findings: [],
-          toolCalls: 0,
-          degraded: [entry],
-          phase: args.phase,
-          durationMs: 0,
-        });
-        return { findings: [], toolCalls: 0, degraded: [entry] };
-      }
-
-      // Lane discipline: drop findings whose `path` is outside the
-      // dispatched `files` set. Findings carry paths through their
-      // `sources[].path` (the canonical citation site) — drop the whole
-      // Comment if none of its sources cite a file inside the lane. This
-      // mirrors the M13 security sub-agent's lane policy.
-      const lane = new Set(args.files.map((p) => p.replace(/\\/g, "/")));
-      const inLane: Comment[] = [];
-      const droppedCount = { value: 0 };
-      for (const finding of result.findings) {
-        if (commentInLane(finding, lane)) {
-          inLane.push(finding);
-        } else {
-          droppedCount.value += 1;
-        }
-      }
-      const laneDegraded: DegradedEntry[] = [...result.degraded];
-      if (droppedCount.value > 0) {
-        laneDegraded.push({
-          kind: "info",
-          topic: "review-harness",
-          message:
-            `dispatch_worker(${args.concern}): dropped ${droppedCount.value} ` +
-            "finding(s) whose path was outside the dispatched file set.",
-        });
-      }
-
-      opts.scratchpad.recordWorker({
-        concern: args.concern,
-        files: args.files,
-        findings: inLane,
-        toolCalls: result.toolCalls,
-        degraded: laneDegraded,
-        phase: args.phase,
-        durationMs: result.durationMs,
-        ...(result.tokenUsage !== undefined ? { tokenUsage: result.tokenUsage } : {}),
-        ...(result.tier !== undefined ? { tier: result.tier } : {}),
-      });
-
-      return {
-        findings: inLane,
-        toolCalls: result.toolCalls,
-        degraded: laneDegraded,
-      };
-    },
+    execute: runOneDispatch,
   });
+
+  return { tool: aiTool, dispatch: runOneDispatch };
 }
 
 /**

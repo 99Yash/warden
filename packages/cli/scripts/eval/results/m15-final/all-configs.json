@@ -1,0 +1,1670 @@
+{
+  "samples": 3,
+  "aggregates": [
+    {
+      "config": "baseline",
+      "syntheticCaught": 5,
+      "syntheticPlants": 6,
+      "realCaught": 0,
+      "realPlants": 3,
+      "cleanFixtureUnlabeled": 0,
+      "totalCost": 0.4912,
+      "medianDispatchesOnSubstantive": 0,
+      "rows": [
+        {
+          "fixture": "clean-formatting-only",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.029,
+          "medianDispatches": 0,
+          "medianDurationMs": 8382,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-formatting-only",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 8382,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 3544,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0307,
+              "durationMs": 10967,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "clean-rename",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0295,
+          "medianDispatches": 0,
+          "medianDurationMs": 3785,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-rename",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0295,
+              "durationMs": 3604,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0297,
+              "durationMs": 4238,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0295,
+              "durationMs": 3785,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "committability-debugger-leftover",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 1,
+          "medianCost": 0.036,
+          "medianDispatches": 0,
+          "medianDurationMs": 9427,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 2,
+              "costUsd": 0.0905,
+              "durationMs": 44114,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "debugger-leftover"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0289,
+              "durationMs": 4795,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.036,
+              "durationMs": 9427,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "consistency-docstring-drift",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 2,
+          "medianCost": 0.1119,
+          "medianDispatches": 2,
+          "medianDurationMs": 41043,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 3,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 2,
+              "costUsd": 0.1277,
+              "durationMs": 41043,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 2,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.0395,
+              "durationMs": 11004,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 2,
+              "costUsd": 0.1119,
+              "durationMs": 44486,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "correctness-off-by-one",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0352,
+          "medianDispatches": 0,
+          "medianDurationMs": 7507,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "off-by-one"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0289,
+              "durationMs": 5131,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0352,
+              "durationMs": 7507,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.036,
+              "durationMs": 8805,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "leverage-stringify-clone",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0353,
+          "medianDispatches": 0,
+          "medianDurationMs": 9575,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.0686,
+              "durationMs": 28343,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 1,
+              "caughtLabels": [
+                "stringify-clone"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0353,
+              "durationMs": 9575,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [
+                "stringify-clone"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0347,
+              "durationMs": 8499,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "scalability-sequential-await",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 1,
+          "medianCost": 0.0415,
+          "medianDispatches": 0,
+          "medianDurationMs": 12569,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 2,
+              "caughtLabels": [
+                "sequential-await"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.0415,
+              "durationMs": 12569,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 5448,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "sequential-await"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 0,
+              "costUsd": 0.0487,
+              "durationMs": 17175,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "security-eval-injection",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0936,
+          "medianDispatches": 2,
+          "medianDurationMs": 39312,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "security-eval-injection",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.0936,
+              "durationMs": 39312,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.1077,
+              "durationMs": 46147,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "eval-rce"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 0,
+              "costUsd": 0.0487,
+              "durationMs": 21563,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "m14-closeout-89bf988",
+          "config": "baseline",
+          "category": "real-prs",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 3,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0792,
+          "medianDispatches": 0,
+          "medianDurationMs": 2740,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0794,
+              "durationMs": 5615,
+              "error": null
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0,
+              "durationMs": 0,
+              "error": "review-harness boss: anthropic failed (No object generated: could not parse the response.); google fallback also failed (No object generated: could not parse the response.)"
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0792,
+              "durationMs": 2740,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "config": "programmatic-dispatch",
+      "syntheticCaught": 4,
+      "syntheticPlants": 6,
+      "realCaught": 0,
+      "realPlants": 3,
+      "cleanFixtureUnlabeled": 0,
+      "totalCost": 0.6586,
+      "medianDispatchesOnSubstantive": 1,
+      "rows": [
+        {
+          "fixture": "clean-formatting-only",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.029,
+          "medianDispatches": 0,
+          "medianDurationMs": 2773,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-formatting-only",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 2728,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 2773,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 3505,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "clean-rename",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0329,
+          "medianDispatches": 0,
+          "medianDurationMs": 9357,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-rename",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0329,
+              "durationMs": 9357,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0297,
+              "durationMs": 4342,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.0378,
+              "durationMs": 13148,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "committability-debugger-leftover",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 1,
+          "medianCost": 0.0568,
+          "medianDispatches": 1,
+          "medianDurationMs": 16116,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 1,
+              "costUsd": 0.0568,
+              "durationMs": 16116,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "debugger-leftover"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0501,
+              "durationMs": 12467,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 1,
+              "costUsd": 0.0569,
+              "durationMs": 16815,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "consistency-docstring-drift",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 1,
+          "medianCost": 0.0556,
+          "medianDispatches": 1,
+          "medianDurationMs": 18526,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 2,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 1,
+              "costUsd": 0.0642,
+              "durationMs": 29315,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "docstring-drift"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0541,
+              "durationMs": 18526,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 2,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 1,
+              "costUsd": 0.0556,
+              "durationMs": 17246,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "correctness-off-by-one",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0547,
+          "medianDispatches": 1,
+          "medianDurationMs": 21178,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0547,
+              "durationMs": 21178,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0546,
+              "durationMs": 21346,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0555,
+              "durationMs": 16867,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "leverage-stringify-clone",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0338,
+          "medianDispatches": 1,
+          "medianDurationMs": 6490,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0337,
+              "durationMs": 5291,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0338,
+              "durationMs": 6490,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [
+                "stringify-clone"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0399,
+              "durationMs": 10631,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "scalability-sequential-await",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.1049,
+          "medianDispatches": 1,
+          "medianDurationMs": 41262,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.1043,
+              "durationMs": 41148,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.1049,
+              "durationMs": 41262,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "sequential-await"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 2,
+              "costUsd": 0.1387,
+              "durationMs": 53832,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "security-eval-injection",
+          "config": "programmatic-dispatch",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 2,
+          "medianCost": 0.0673,
+          "medianDispatches": 1,
+          "medianDurationMs": 28522,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "security-eval-injection",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 3,
+              "caughtLabels": [
+                "eval-rce"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 1,
+              "costUsd": 0.0684,
+              "durationMs": 28853,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 3,
+              "caughtLabels": [
+                "eval-rce"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 1,
+              "costUsd": 0.0673,
+              "durationMs": 28522,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.053,
+              "durationMs": 15661,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "m14-closeout-89bf988",
+          "config": "programmatic-dispatch",
+          "category": "real-prs",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 3,
+          "medianUnlabeled": 0,
+          "medianCost": 0.2236,
+          "medianDispatches": 1,
+          "medianDurationMs": 13242,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "programmatic-dispatch",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.2238,
+              "durationMs": 14818,
+              "error": null
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "programmatic-dispatch",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.2236,
+              "durationMs": 13242,
+              "error": null
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "programmatic-dispatch",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.2236,
+              "durationMs": 7719,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "config": "programmatic-dispatch-examples-first",
+      "syntheticCaught": 1,
+      "syntheticPlants": 6,
+      "realCaught": 0,
+      "realPlants": 3,
+      "cleanFixtureUnlabeled": 0,
+      "totalCost": 0.6247,
+      "medianDispatchesOnSubstantive": 1,
+      "rows": [
+        {
+          "fixture": "clean-formatting-only",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0341,
+          "medianDispatches": 0,
+          "medianDurationMs": 4677,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-formatting-only",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0358,
+              "durationMs": 13446,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0341,
+              "durationMs": 4677,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.034,
+              "durationMs": 2920,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "clean-rename",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0344,
+          "medianDispatches": 0,
+          "medianDurationMs": 2663,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-rename",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0344,
+              "durationMs": 2614,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0344,
+              "durationMs": 2663,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0346,
+              "durationMs": 3937,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "committability-debugger-leftover",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.055,
+          "medianDispatches": 1,
+          "medianDurationMs": 12343,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "debugger-leftover"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.055,
+              "durationMs": 12343,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 1,
+              "costUsd": 0.0612,
+              "durationMs": 14682,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "debugger-leftover"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0548,
+              "durationMs": 11701,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "consistency-docstring-drift",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0616,
+          "medianDispatches": 1,
+          "medianDurationMs": 19272,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "docstring-drift"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0912,
+              "durationMs": 38626,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "docstring-drift"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0608,
+              "durationMs": 19272,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "docstring-drift"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0616,
+              "durationMs": 18754,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "correctness-off-by-one",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0593,
+          "medianDispatches": 1,
+          "medianDurationMs": 16640,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0593,
+              "durationMs": 14986,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0594,
+              "durationMs": 16640,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "off-by-one"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0544,
+              "durationMs": 18026,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "leverage-stringify-clone",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0389,
+          "medianDispatches": 1,
+          "medianDurationMs": 9921,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0387,
+              "durationMs": 6727,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.0685,
+              "durationMs": 40986,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0389,
+              "durationMs": 9921,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "scalability-sequential-await",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0587,
+          "medianDispatches": 1,
+          "medianDurationMs": 18835,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0594,
+              "durationMs": 19545,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0587,
+              "durationMs": 18835,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0586,
+              "durationMs": 18112,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "security-eval-injection",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0541,
+          "medianDispatches": 1,
+          "medianDurationMs": 12182,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "security-eval-injection",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0543,
+              "durationMs": 12968,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0541,
+              "durationMs": 12030,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.0534,
+              "durationMs": 12182,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "m14-closeout-89bf988",
+          "config": "programmatic-dispatch-examples-first",
+          "category": "real-prs",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 3,
+          "medianUnlabeled": 0,
+          "medianCost": 0.2286,
+          "medianDispatches": 1,
+          "medianDurationMs": 11535,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.2286,
+              "durationMs": 10438,
+              "error": null
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.2367,
+              "durationMs": 22535,
+              "error": null
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "programmatic-dispatch-examples-first",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 1,
+              "costUsd": 0.2286,
+              "durationMs": 11535,
+              "error": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+diff --git a/src/format-helpers.ts b/src/format-helpers.ts
+index aaaaaaa..bbbbbbb 100644
+--- a/src/format-helpers.ts
++++ b/src/format-helpers.ts
+@@ -1,11 +1,15 @@
++// Header comment added.
++
+ export function indent(text: string, spaces: number): string {
+-  const pad = ' '.repeat(spaces);
++  const pad = " ".repeat(spaces);
+   return text
+     .split('\n')
+-    .map(line => pad + line)
++    .map((line) => pad + line)
+     .join('\n');
+ }
+
+ export function trimEnd(s: string): string {
+-  return s.replace(/\s+$/, '');
++  // Trim trailing whitespace.
++  return s.replace(/\s+$/, "");
+ }

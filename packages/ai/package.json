@@ -14,7 +14,8 @@
     "@ai-sdk/google": "catalog:",
     "@warden/env": "workspace:*",
     "ai": "catalog:",
-    "ai-retry": "catalog:"
+    "ai-retry": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@warden/config": "workspace:*",

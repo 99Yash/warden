@@ -19,16 +19,34 @@ import type { Concern } from "../tools/dispatch-worker.js";
  */
 
 const DIR = dirname(fileURLToPath(import.meta.url));
-const BOSS_PROMPT_PATH = resolve(DIR, "boss-system.md");
 const WORKERS_DIR = resolve(DIR, "workers");
 
-let bossCache: string | undefined;
+/**
+ * M15 (ADR-0031): the boss prompt has two shapes. `'rules'` is the M14
+ * rules-based prompt (`boss-system.md`); `'examples'` is the M15 examples-
+ * first rewrite (`boss-system-examples.md`) driven by worked examples
+ * sourced from the synthetic fixture set + M14 close-out labels. The
+ * default stays `'rules'` to preserve M14 behavior; the eval suite flips
+ * the variant on a per-config basis to compare them.
+ */
+export type BossPromptVariant = "rules" | "examples";
+
+const BOSS_PROMPT_PATHS: Record<BossPromptVariant, string> = {
+  rules: resolve(DIR, "boss-system.md"),
+  examples: resolve(DIR, "boss-system-examples.md"),
+};
+
+const bossCache = new Map<BossPromptVariant, string>();
 const workerCache = new Map<Concern, string>();
 
-export function loadBossSystemPrompt(): string {
-  if (bossCache !== undefined) return bossCache;
-  bossCache = readFileSync(BOSS_PROMPT_PATH, "utf8");
-  return bossCache;
+export function loadBossSystemPrompt(
+  variant: BossPromptVariant = "rules",
+): string {
+  const cached = bossCache.get(variant);
+  if (cached !== undefined) return cached;
+  const raw = readFileSync(BOSS_PROMPT_PATHS[variant], "utf8");
+  bossCache.set(variant, raw);
+  return raw;
 }
 
 export function loadWorkerSystemPrompt(concern: Concern): string {

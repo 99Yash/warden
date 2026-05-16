@@ -8,6 +8,7 @@ import {
   stepCountIs,
   streamText,
   timeout as timeoutCondition,
+  transformSchemaForGemini,
   type LanguageModel,
   type Retries,
   type RetryContext,
@@ -18,11 +19,19 @@ import { stableCommentId } from "../comment-id.js";
 import type { FormatterListener } from "../llm/index.js";
 import { CommentSchema, type Comment, type DegradedEntry } from "../schema.js";
 import { z } from "zod";
+import type { ChangedFile } from "../diff/index.js";
+import type { ToolFinding } from "../runners/types.js";
 import type { DetPriors } from "./det-priors.js";
-import { loadBossSystemPrompt } from "./prompts/loader.js";
+import {
+  loadBossSystemPrompt,
+  type BossPromptVariant,
+} from "./prompts/loader.js";
 import type { ReviewScratchpad, TokenUsage } from "./scratchpad.js";
 import {
   makeDispatchWorkerTool,
+  type Concern,
+  type DispatchWorkerArgs,
+  type DispatchWorkerResult,
   type WorkerRoute,
 } from "./tools/dispatch-worker.js";
 
@@ -49,6 +58,70 @@ const PROVIDER_TIMEOUT_MS = 240_000;
 const RETRY_BACKOFF_MS = 1000;
 const PRIMARY_RETRY_ATTEMPTS = 2;
 
+/**
+ * M15 (ADR-0031) boss-loop calibration knobs.
+ *
+ * **Defaults (post-ADR-0031 close-out, 2026-05-16):** `programmaticDispatch:
+ * true`, `roundZeroExtraConcerns: ['correctness']`, `bossPromptVariant:
+ * 'rules'`. The PD-multi shape (Round 0 fan-out + universal correctness
+ * extra) is the M15 winning config — strictly dominates M14 baseline on
+ * dispatch behavior (≥1 worker on every substantive file) and ties on
+ * plant catch in the eval suite (5/6). Pass `programmaticDispatch: false`
+ * to opt out and recover pre-M15 boss-agency-only behavior.
+ *
+ * - `programmaticDispatch`: when true (default), the harness computes
+ *   substantive files via det-priors + a `≥10 substantive lines`
+ *   heuristic, runs a deterministic Round 0 fan-out BEFORE invoking the
+ *   boss's `streamText` loop, and seeds the boss's initial user message
+ *   with the Round 0 outputs under a `<round_0_outputs>` block. Round 1+
+ *   dispatch dynamism is unchanged.
+ *
+ * - `roundZeroExtraConcerns`: extra concerns to dispatch on every
+ *   substantive file BEYOND the det-prior-routed one. Defaults to
+ *   `['correctness']` (the PD-multi shape). Set to `[]` to recover plain
+ *   PD (single-concern-per-file routing) — strictly worse on the eval
+ *   suite, kept as an opt-in for cost-sensitive callers. Deduped against
+ *   the routed concern (a leverage-routed file with extras `['leverage']`
+ *   dispatches leverage once). Ignored when `programmaticDispatch` is
+ *   false.
+ *
+ * - `bossPromptVariant`: 'rules' (default) loads `boss-system.md` — the
+ *   rules-based prompt that shipped with M14. 'examples' loads
+ *   `boss-system-examples.md`, an examples-first rewrite driven by worked
+ *   examples from the synthetic fixture set + M14 close-out labels.
+ *   ADR-0031 eval surfaced examples-first as a strict regression (1/6
+ *   plants vs PD-multi's 5/6) — kept as opt-in only.
+ */
+export interface BossLoopConfig {
+  programmaticDispatch?: boolean;
+  bossPromptVariant?: BossPromptVariant;
+  roundZeroExtraConcerns?: Concern[];
+}
+
+/**
+ * Post-ADR-0031 defaults. `applyBossLoopDefaults()` resolves the user-
+ * supplied (or absent) config to a fully-populated `BossLoopConfig` with
+ * the PD-multi shape applied unless the caller explicitly opts out. The
+ * exported `BOSS_LOOP_DEFAULTS` constant doubles as both the default
+ * source for the resolver and the documented contract for callers that
+ * want to inspect "what does an unconfigured harness do?" without
+ * reading `boss-loop.ts`.
+ */
+export const BOSS_LOOP_DEFAULTS: Required<BossLoopConfig> = {
+  programmaticDispatch: true,
+  bossPromptVariant: "rules",
+  roundZeroExtraConcerns: ["correctness"],
+};
+
+function applyBossLoopDefaults(config: BossLoopConfig | undefined): Required<BossLoopConfig> {
+  return {
+    programmaticDispatch: config?.programmaticDispatch ?? BOSS_LOOP_DEFAULTS.programmaticDispatch,
+    bossPromptVariant: config?.bossPromptVariant ?? BOSS_LOOP_DEFAULTS.bossPromptVariant,
+    roundZeroExtraConcerns:
+      config?.roundZeroExtraConcerns ?? BOSS_LOOP_DEFAULTS.roundZeroExtraConcerns,
+  };
+}
+
 export interface BossLoopInput {
   repoRoot: string;
   diff: string;
@@ -62,6 +135,8 @@ export interface BossLoopInput {
    * Sourced from `wardenEnv().WARDEN_REVIEW_WORKER_BUDGET` by the caller.
    */
   workerBudget?: number;
+  /** M15 (ADR-0031) calibration knobs; defaults preserve M14 behavior. */
+  config?: BossLoopConfig;
   emit?: FormatterListener;
 }
 
@@ -71,6 +146,203 @@ export interface BossLoopOutput {
   degraded: DegradedEntry[];
   /** Wall-clock ms across all boss rounds (including provider retries). */
   durationMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Programmatic dispatch (M15 / ADR-0031) — deterministic Round 0 fan-out.
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum non-test/non-doc added lines a file needs before Round 0
+ * dispatches a worker against it. Below the threshold the file is treated
+ * as cosmetic and skipped — the boss can still dispatch in Round 1+ if it
+ * decides the file matters. Tuned to skip whitespace-only diffs / tiny
+ * tweaks while catching anything that materially touches code.
+ */
+const SUBSTANTIVE_LINE_THRESHOLD = 10;
+
+const ROUND_0_PHASE: DispatchWorkerArgs["phase"] = "plan";
+
+/**
+ * Files in this set never trigger Round 0 dispatch. The runtime is the
+ * `BASELINE_NOISE` exclusion list shape (test files, doc files, OS junk)
+ * mirrored from `diff/prune.ts`; rather than re-import the prune internals
+ * we apply the same heuristic via path-extension + filename pattern. The
+ * full noise filter has already run upstream of `runDetPriors()`; this
+ * exists only to gate Round 0 fan-out, not to re-prune.
+ */
+function isNonSubstantivePath(p: string): boolean {
+  const lower = p.toLowerCase();
+  if (lower.endsWith(".md") || lower.endsWith(".mdx")) return true;
+  if (
+    lower.endsWith(".test.ts") ||
+    lower.endsWith(".test.tsx") ||
+    lower.endsWith(".test.js") ||
+    lower.endsWith(".spec.ts") ||
+    lower.endsWith(".spec.tsx") ||
+    lower.endsWith(".spec.js")
+  ) {
+    return true;
+  }
+  if (lower.endsWith(".json") || lower.endsWith(".yml") || lower.endsWith(".yaml")) {
+    return true;
+  }
+  if (lower.endsWith(".snap") || lower.endsWith(".lock")) return true;
+  return false;
+}
+
+/**
+ * Route a file's first det-prior finding to a worker concern. Mapping is
+ * source-name → concern: scalability/consistency/leverage map to their
+ * own concerns; tsc/eslint/jscpd/deadcode fall back to `correctness`.
+ * Files with no det-prior finding default to `correctness` (the catch-all
+ * the boss-system prompt already routes the bulk of the diff through).
+ *
+ * Special case: the M13 ESLint security detector (`eslint-security.ts`)
+ * shares the `"eslint"` source value with the user-config ESLint runner,
+ * but always carries a `ruleId` prefixed `security/` or `no-secrets/`.
+ * Route those to the `security` concern so PD-multi's Round 0 actually
+ * dispatches a security worker on planted vulnerabilities like
+ * `eval(req.body.code)`.
+ */
+function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
+  if (!finding) return "correctness";
+  switch (finding.source) {
+    case "scalability":
+      return "scalability";
+    case "consistency":
+      return "consistency";
+    case "leverage":
+      return "leverage";
+    case "eslint":
+      if (
+        finding.ruleId?.startsWith("security/") ||
+        finding.ruleId?.startsWith("no-secrets/")
+      ) {
+        return "security";
+      }
+      return "correctness";
+    case "tsc":
+    case "jscpd":
+    case "deadcode":
+      return "correctness";
+  }
+}
+
+interface RunRound0DispatchInput {
+  detPriors: DetPriors;
+  dispatch: (args: DispatchWorkerArgs) => Promise<DispatchWorkerResult>;
+  workerBudget?: number;
+  /** Extra concerns to dispatch alongside the det-routed one. Deduped. */
+  extraConcerns?: Concern[];
+}
+
+interface Round0DispatchOutput {
+  /** Pre-rendered block to splice into the boss user prompt, or undefined when no dispatches ran. */
+  block: string | undefined;
+  /** Per-(file, concern) dispatch results, in dispatch order. */
+  results: { file: string; concern: Concern; result: DispatchWorkerResult }[];
+}
+
+/**
+ * Compute substantive files + dispatch one worker per (file, routed
+ * concern) before the boss streamText loop. Workers run in parallel; the
+ * boss is later seeded with their outputs via a `<round_0_outputs>` block
+ * in its initial user message. Shares budget counting with the AI SDK
+ * tool path via `dispatch()` (see `makeDispatchWorkerTool()`'s shared
+ * closure), so Round 0 dispatches deplete the same `workerBudget` the
+ * boss would see in Round 1+.
+ */
+async function runRound0Dispatch(
+  input: RunRound0DispatchInput,
+): Promise<Round0DispatchOutput> {
+  const { detPriors, dispatch, workerBudget, extraConcerns = [] } = input;
+
+  const findingsByPath = new Map<string, ToolFinding>();
+  for (const f of detPriors.findings) {
+    const key = f.file.replace(/\\/g, "/");
+    if (!findingsByPath.has(key)) findingsByPath.set(key, f);
+  }
+
+  const substantiveFiles: ChangedFile[] = [];
+  for (const cf of detPriors.changed) {
+    if (isNonSubstantivePath(cf.path)) continue;
+    if (cf.addedLines.length < SUBSTANTIVE_LINE_THRESHOLD) continue;
+    substantiveFiles.push(cf);
+  }
+
+  if (substantiveFiles.length === 0) {
+    return { block: undefined, results: [] };
+  }
+
+  // Build the full (file, concern) plan first, then apply the worker
+  // budget once across the lot. With extraConcerns set, each file becomes
+  // N dispatches; budget-slicing by file would unfairly over-dispatch on
+  // earlier files.
+  const plan: { file: ChangedFile; concern: Concern }[] = [];
+  for (const cf of substantiveFiles) {
+    const normalized = cf.path.replace(/\\/g, "/");
+    const routed = routeFindingToConcern(findingsByPath.get(normalized));
+    const concerns = new Set<Concern>([routed, ...extraConcerns]);
+    for (const concern of concerns) {
+      plan.push({ file: cf, concern });
+    }
+  }
+
+  // Budget cap across the planned dispatches. The tool path surfaces the
+  // budget-exhausted degraded entry on its own if Round 0 exhausts the
+  // budget before the boss runs.
+  const capped = workerBudget !== undefined ? plan.slice(0, workerBudget) : plan;
+  if (capped.length === 0) {
+    return { block: undefined, results: [] };
+  }
+
+  const dispatches = capped.map(({ file, concern }) => {
+    const args: DispatchWorkerArgs = {
+      files: [file.path],
+      concern,
+      phase: ROUND_0_PHASE,
+    };
+    return dispatch(args).then((result) => ({ file: file.path, concern, result }));
+  });
+
+  const results = await Promise.all(dispatches);
+  const block = renderRound0Block(results);
+  return { block, results };
+}
+
+const ROUND_0_FINDING_CAP_PER_WORKER = 8;
+const ROUND_0_CLAIM_CHAR_CAP = 240;
+
+function renderRound0Block(
+  results: { file: string; concern: Concern; result: DispatchWorkerResult }[],
+): string {
+  const blocks = results.map(({ file, concern, result }) => {
+    if (result.findings.length === 0) {
+      return [`- worker(${concern}) on ${file}: no findings.`].join("\n");
+    }
+    const lines = [`- worker(${concern}) on ${file}:`];
+    for (const finding of result.findings.slice(0, ROUND_0_FINDING_CAP_PER_WORKER)) {
+      const claim = truncate(finding.claim, ROUND_0_CLAIM_CHAR_CAP);
+      lines.push(
+        `    · [${finding.kind}/T${finding.tier}] ${finding.file}:${finding.lineStart} — ${claim}`,
+      );
+    }
+    if (result.findings.length > ROUND_0_FINDING_CAP_PER_WORKER) {
+      lines.push(
+        `    · …and ${result.findings.length - ROUND_0_FINDING_CAP_PER_WORKER} more`,
+      );
+    }
+    return lines.join("\n");
+  });
+
+  return [
+    `<round_0_outputs>`,
+    `Workers were dispatched deterministically per substantive file before this round (programmatic dispatch — see system prompt). Their outputs are already in the scratchpad; you may adjudicate them, dispatch further workers in Round 1+ to fill gaps, or synth directly when satisfied.`,
+    ``,
+    ...blocks,
+    `</round_0_outputs>`,
+  ].join("\n");
 }
 
 /**
@@ -91,15 +363,35 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   const startedAt = Date.now();
   const degraded: DegradedEntry[] = [];
 
-  const dispatchTool = makeDispatchWorkerTool({
+  const dispatchHandle = makeDispatchWorkerTool({
     repoRoot: input.repoRoot,
     scratchpad: input.scratchpad,
     ...(input.workerBudget !== undefined ? { workerBudget: input.workerBudget } : {}),
     route: input.route,
   });
 
-  const systemPrompt = loadBossSystemPrompt();
-  const userPrompt = renderBossUserPrompt(input);
+  const resolved = applyBossLoopDefaults(input.config);
+  const systemPrompt = loadBossSystemPrompt(resolved.bossPromptVariant);
+
+  // M15 (ADR-0031) close-out: programmatic dispatch is ON by default with
+  // a `['correctness']` extra-concerns fan-out (PD-multi). Shares dispatch
+  // state with the AI SDK tool via the returned `dispatch()` helper, so
+  // the workerBudget counter sees Round 0 dispatches and the scratchpad
+  // records them identically to tool-driven ones. Pass
+  // `{ programmaticDispatch: false }` to opt out and recover pre-M15
+  // boss-agency-only behavior.
+  let round0Block: string | undefined;
+  if (resolved.programmaticDispatch) {
+    const round0 = await runRound0Dispatch({
+      detPriors: input.detPriors,
+      dispatch: dispatchHandle.dispatch,
+      ...(input.workerBudget !== undefined ? { workerBudget: input.workerBudget } : {}),
+      extraConcerns: resolved.roundZeroExtraConcerns,
+    });
+    round0Block = round0.block;
+  }
+
+  const userPrompt = renderBossUserPrompt(input, round0Block);
   const stepCap = resolveBossRounds();
 
   const primary = getBossModel();
@@ -175,14 +467,23 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     },
   });
 
+  // M15 (ADR-0031): wrap BossOutputSchema with the Gemini adapter so the
+  // Google fallback path doesn't 400 on numeric-literal-union TierEnum. The
+  // transform is universal (Anthropic accepts string-form enums identically
+  // — boss never sees the schema literally), and `responseTransform` coerces
+  // strings back to numbers before downstream Comment[] typing applies. When
+  // the adapter detects no numeric-literal-union in the schema (no-op case),
+  // `requestSchema === BossOutputSchema` and `responseTransform` is identity.
+  const geminiPair = transformSchemaForGemini(BossOutputSchema);
+
   try {
     const result = streamText({
       model: retryable,
       system: systemPrompt,
       prompt: userPrompt,
-      tools: { dispatch_worker: dispatchTool },
+      tools: { dispatch_worker: dispatchHandle.tool },
       stopWhen: [stepCountIs(stepCap)],
-      output: Output.object({ schema: BossOutputSchema }),
+      output: Output.object({ schema: geminiPair.requestSchema }),
     });
 
     // Drain the reasoning + tool-call stream so the renderer sees boss
@@ -200,7 +501,12 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       }
     })();
 
-    const output = await result.output;
+    const rawOutput = await result.output;
+    // Coerce string-form numeric literals back to numbers. No-op when the
+    // schema contained no numeric-literal-union (geminiPair is identity).
+    const output = geminiPair.responseTransform(rawOutput) as z.infer<
+      typeof BossOutputSchema
+    >;
     let bossTokens: TokenUsage | undefined;
     try {
       const usage = await result.usage;
@@ -276,7 +582,10 @@ const DEGRADED_CAP = 20;
 const FILE_LIST_CAP = 80;
 const DIFF_CHAR_CAP = 32_000;
 
-function renderBossUserPrompt(input: BossLoopInput): string {
+function renderBossUserPrompt(
+  input: BossLoopInput,
+  round0Block: string | undefined,
+): string {
   const dp = input.detPriors;
   const fileList = dp.changedPaths.slice(0, FILE_LIST_CAP);
   const fileListTrailer =
@@ -323,7 +632,7 @@ function renderBossUserPrompt(input: BossLoopInput): string {
       ? `${input.diff.slice(0, DIFF_CHAR_CAP)}\n…[diff truncated at ${DIFF_CHAR_CAP} chars; ${input.diff.length - DIFF_CHAR_CAP} chars hidden]`
       : input.diff;
 
-  return [
+  const sections = [
     `<files>`,
     `${dp.changedPaths.length} changed file${dp.changedPaths.length === 1 ? "" : "s"} after noise filter:`,
     fileList.map((p) => `- ${p}`).join("\n") + fileListTrailer,
@@ -343,9 +652,18 @@ function renderBossUserPrompt(input: BossLoopInput): string {
     `<diff>`,
     truncatedDiff,
     `</diff>`,
+  ];
+
+  if (round0Block !== undefined) {
+    sections.push(``, round0Block);
+  }
+
+  sections.push(
     ``,
     `Plan workers per the system prompt's "How to spend your rounds" guide. Dispatch via dispatch_worker; emit the final result in your last turn as a structured object \`{ "comments": Comment[] }\` via the Output.object channel.`,
-  ].join("\n");
+  );
+
+  return sections.join("\n");
 }
 
 function truncate(s: string, max: number): string {

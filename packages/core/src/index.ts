@@ -131,12 +131,26 @@ export {
   type TokenUsage,
   type WorkerOutput,
 } from "./review-harness/harness.js";
+export {
+  type BossLoopConfig,
+  type BossLoopInput,
+  type BossLoopOutput,
+  runBossLoop,
+} from "./review-harness/boss-loop.js";
+export { type BossPromptVariant } from "./review-harness/prompts/loader.js";
 export { toComment } from "./runners/to-comment.js";
 
 export interface ReviewConfig {
   mode: "check" | "review";
   /** When `true`, tier-3 (style/dedup) findings are surfaced. Default suppresses them per vision.md §15. */
   verbose?: boolean;
+  /**
+   * M15 (ADR-0031) boss-loop calibration knobs. Threaded straight through to
+   * `ReviewHarnessConfig.bossLoop`. Default `undefined` preserves M14
+   * baseline behavior (no programmatic dispatch, rules-based prompt).
+   * Used by the eval suite + future bot wrappers to A/B configurations.
+   */
+  bossLoop?: import("./review-harness/boss-loop.js").BossLoopConfig;
 }
 
 export interface ReviewInput {
@@ -191,7 +205,11 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
   const harness: ReviewHarnessResult = await runReviewHarness({
     diff: input.diff,
     repoRoot: input.repoRoot,
-    config: { mode: "review", ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}) },
+    config: {
+      mode: "review",
+      ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}),
+      ...(input.config.bossLoop !== undefined ? { bossLoop: input.config.bossLoop } : {}),
+    },
     ...(input.selector !== undefined ? { selector: input.selector } : {}),
     ...(input.retrievedContext !== undefined ? { retrievedContext: input.retrievedContext } : {}),
     ...(input.emit !== undefined ? { emit: input.emit } : {}),
