@@ -1,0 +1,28 @@
+diff --git a/src/cache.ts b/src/cache.ts
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/src/cache.ts
+@@ -0,0 +1,21 @@
++const MAX_ENTRIES = 1000;
++
++/**
++ * Bounded LRU cache. Holds at most 500 entries; oldest entries are
++ * evicted when full. Thread-safe under Node's single-threaded model
++ * (no concurrent writers).
++ */
++export class BoundedCache<K, V> {
++  private readonly entries = new Map<K, V>();
++
++  set(key: K, value: V): void {
++    if (this.entries.size >= MAX_ENTRIES && !this.entries.has(key)) {
++      const firstKey = this.entries.keys().next().value;
++      if (firstKey !== undefined) this.entries.delete(firstKey);
++    }
++    this.entries.set(key, value);
++  }
++
++  get(key: K): V | undefined {
++    return this.entries.get(key);
++  }
++}

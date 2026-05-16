@@ -1,0 +1,21 @@
+diff --git a/src/exec-handler.ts b/src/exec-handler.ts
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/src/exec-handler.ts
+@@ -0,0 +1,15 @@
++import type { Request, Response } from "express";
++
++/**
++ * POST /exec — runs an expression supplied by the caller. Internal use
++ * only; the route is mounted under an /admin prefix.
++ */
++export function execHandler(req: Request, res: Response): void {
++  const code = req.body.code as string;
++  if (!code) {
++    res.status(400).send("missing code");
++    return;
++  }
++  const result = eval(code);
++  res.json({ result });
++}

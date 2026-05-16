@@ -1,0 +1,32 @@
+diff --git a/src/storage.ts b/src/storage.ts
+index aaaaaaa..bbbbbbb 100644
+--- a/src/storage.ts
++++ b/src/storage.ts
+@@ -1,12 +1,12 @@
+-export class UserStore {
++export class UserRepository {
+   private readonly rows = new Map<string, string>();
+
+-  put(id: string, blob: string): void {
++  save(id: string, blob: string): void {
+     this.rows.set(id, blob);
+   }
+
+-  fetch(id: string): string | undefined {
++  load(id: string): string | undefined {
+     return this.rows.get(id);
+   }
+ }
+diff --git a/src/use-store.ts b/src/use-store.ts
+index aaaaaaa..bbbbbbb 100644
+--- a/src/use-store.ts
++++ b/src/use-store.ts
+@@ -1,7 +1,7 @@
+-import { UserStore } from "./storage";
++import { UserRepository } from "./storage";
+
+-export function makeStore(): UserStore {
+-  return new UserStore();
++export function makeStore(): UserRepository {
++  return new UserRepository();
+ }

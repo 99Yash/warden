@@ -1,0 +1,8 @@
+# M15 eval scorecards. Ad-hoc runs are gitignored; the only committed
+# scorecards are the baseline reference + the final M15 snapshot per
+# m15-plan.md §"Repo additions" results/baseline-m14.json + m15-final/.
+*.json
+!baseline-m14.json
+!m15-final/
+!m15-final/*.json
+m15-final/*.tmp

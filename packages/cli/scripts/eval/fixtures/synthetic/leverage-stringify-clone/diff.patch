@@ -1,0 +1,18 @@
+diff --git a/src/clone.ts b/src/clone.ts
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/src/clone.ts
+@@ -0,0 +1,12 @@
++export interface NodeShape {
++  id: string;
++  children: NodeShape[];
++}
++
++/**
++ * Return a deep copy of the given node tree. Used by the editor undo stack.
++ */
++export function deepCloneNode(node: NodeShape): NodeShape {
++  const copy = JSON.parse(JSON.stringify(node)) as NodeShape;
++  return copy;
++}

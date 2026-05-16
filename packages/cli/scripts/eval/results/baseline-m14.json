@@ -1,0 +1,560 @@
+{
+  "samples": 3,
+  "aggregates": [
+    {
+      "config": "baseline",
+      "syntheticCaught": 5,
+      "syntheticPlants": 6,
+      "realCaught": 0,
+      "realPlants": 3,
+      "cleanFixtureUnlabeled": 0,
+      "totalCost": 0.4912,
+      "medianDispatchesOnSubstantive": 0,
+      "rows": [
+        {
+          "fixture": "clean-formatting-only",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.029,
+          "medianDispatches": 0,
+          "medianDurationMs": 8382,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-formatting-only",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 8382,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 3544,
+              "error": null
+            },
+            {
+              "fixture": "clean-formatting-only",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0307,
+              "durationMs": 10967,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "clean-rename",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": true,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 0,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0295,
+          "medianDispatches": 0,
+          "medianDurationMs": 3785,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "clean-rename",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0295,
+              "durationMs": 3604,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0297,
+              "durationMs": 4238,
+              "error": null
+            },
+            {
+              "fixture": "clean-rename",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0295,
+              "durationMs": 3785,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "committability-debugger-leftover",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 1,
+          "medianCost": 0.036,
+          "medianDispatches": 0,
+          "medianDurationMs": 9427,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 2,
+              "costUsd": 0.0905,
+              "durationMs": 44114,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "debugger-leftover"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0289,
+              "durationMs": 4795,
+              "error": null
+            },
+            {
+              "fixture": "committability-debugger-leftover",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 2,
+              "caughtLabels": [
+                "debugger-leftover"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.036,
+              "durationMs": 9427,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "consistency-docstring-drift",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 2,
+          "medianCost": 0.1119,
+          "medianDispatches": 2,
+          "medianDurationMs": 41043,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 3,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 2,
+              "costUsd": 0.1277,
+              "durationMs": 41043,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 2,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.0395,
+              "durationMs": 11004,
+              "error": null
+            },
+            {
+              "fixture": "consistency-docstring-drift",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "docstring-drift"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 2,
+              "costUsd": 0.1119,
+              "durationMs": 44486,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "correctness-off-by-one",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0352,
+          "medianDispatches": 0,
+          "medianDurationMs": 7507,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "off-by-one"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0289,
+              "durationMs": 5131,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0352,
+              "durationMs": 7507,
+              "error": null
+            },
+            {
+              "fixture": "correctness-off-by-one",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [
+                "off-by-one"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.036,
+              "durationMs": 8805,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "leverage-stringify-clone",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0353,
+          "medianDispatches": 0,
+          "medianDurationMs": 9575,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "stringify-clone"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.0686,
+              "durationMs": 28343,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 1,
+              "caughtLabels": [
+                "stringify-clone"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0353,
+              "durationMs": 9575,
+              "error": null
+            },
+            {
+              "fixture": "leverage-stringify-clone",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 1,
+              "caughtLabels": [
+                "stringify-clone"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0347,
+              "durationMs": 8499,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "scalability-sequential-await",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 1,
+          "totalLabels": 1,
+          "medianUnlabeled": 1,
+          "medianCost": 0.0415,
+          "medianDispatches": 0,
+          "medianDurationMs": 12569,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 2,
+              "caughtLabels": [
+                "sequential-await"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 1,
+              "dispatchCount": 0,
+              "costUsd": 0.0415,
+              "durationMs": 12569,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "sequential-await"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.029,
+              "durationMs": 5448,
+              "error": null
+            },
+            {
+              "fixture": "scalability-sequential-await",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "sequential-await"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 0,
+              "costUsd": 0.0487,
+              "durationMs": 17175,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "security-eval-injection",
+          "config": "baseline",
+          "category": "synthetic",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 1,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0936,
+          "medianDispatches": 2,
+          "medianDurationMs": 39312,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "security-eval-injection",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.0936,
+              "durationMs": 39312,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "eval-rce"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 2,
+              "costUsd": 0.1077,
+              "durationMs": 46147,
+              "error": null
+            },
+            {
+              "fixture": "security-eval-injection",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 3,
+              "caughtLabels": [
+                "eval-rce"
+              ],
+              "missedLabels": [],
+              "unlabeledComments": 2,
+              "dispatchCount": 0,
+              "costUsd": 0.0487,
+              "durationMs": 21563,
+              "error": null
+            }
+          ]
+        },
+        {
+          "fixture": "m14-closeout-89bf988",
+          "config": "baseline",
+          "category": "real-prs",
+          "expectsEmpty": false,
+          "samples": 3,
+          "caughtCount": 0,
+          "totalLabels": 3,
+          "medianUnlabeled": 0,
+          "medianCost": 0.0792,
+          "medianDispatches": 0,
+          "medianDurationMs": 2740,
+          "hadError": false,
+          "rawSamples": [
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "baseline",
+              "sample": 1,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0794,
+              "durationMs": 5615,
+              "error": null
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "baseline",
+              "sample": 2,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0,
+              "durationMs": 0,
+              "error": "review-harness boss: anthropic failed (No object generated: could not parse the response.); google fallback also failed (No object generated: could not parse the response.)"
+            },
+            {
+              "fixture": "m14-closeout-89bf988",
+              "config": "baseline",
+              "sample": 3,
+              "commentCount": 0,
+              "caughtLabels": [],
+              "missedLabels": [
+                "cached-input-token-multiplier-uncited",
+                "optional-spread-pattern-in-runReview",
+                "price-table-duplication"
+              ],
+              "unlabeledComments": 0,
+              "dispatchCount": 0,
+              "costUsd": 0.0792,
+              "durationMs": 2740,
+              "error": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

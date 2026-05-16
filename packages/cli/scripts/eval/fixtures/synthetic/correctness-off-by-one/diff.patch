@@ -1,0 +1,18 @@
+diff --git a/src/array-sum.ts b/src/array-sum.ts
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/src/array-sum.ts
+@@ -0,0 +1,12 @@
++/**
++ * Sum the first `n` elements of `values`. Returns 0 when `n` is 0 or values
++ * is empty. Returns the sum of all elements when `n` exceeds `values.length`.
++ */
++export function sumFirstN(values: number[], n: number): number {
++  let total = 0;
++  const limit = Math.min(n, values.length);
++  for (let i = 0; i <= limit; i++) {
++    total += values[i] ?? 0;
++  }
++  return total;
++}
