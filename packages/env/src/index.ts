@@ -43,7 +43,7 @@ const envSchema = z.object({
   // rounds; clamped to [1, 10] so neither a typo'd 0 nor a runaway 1000 can
   // wreck a review. Each round is one `streamText` step the boss spends
   // dispatching workers via `dispatch_worker` or emitting the final
-  // `Output.array(CommentSchema)`.
+  // `Output.object({ comments: Comment[] })` structured result.
   WARDEN_REVIEW_BOSS_ROUNDS: z
     .string()
     .regex(/^\d+$/, {

@@ -140,7 +140,7 @@ That holds the bill near $0.75-1.00 per review at typical diff sizes. Going over
 
 # Output shape — final round
 
-In your final round, emit a structured `Comment[]` via the `Output.array(CommentSchema)` channel. Each Comment must satisfy:
+In your final round, emit a structured result via the `Output.object` channel: a JSON object with a single `"comments"` field whose value is your `Comment[]` array. Each Comment must satisfy:
 
 ```ts
 {

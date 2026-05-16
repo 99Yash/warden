@@ -31,7 +31,9 @@ import {
  * tool-use loop, capped at `WARDEN_REVIEW_BOSS_ROUNDS` steps (default 5,
  * clamped [1,10]). The boss dispatches workers via `dispatch_worker`,
  * reads their results round-by-round, and emits the final Comment[] via
- * `Output.array(CommentSchema)` in its last turn.
+ * `Output.object({ comments: Comment[] })` in its last turn (wrapped in an
+ * object so AI SDK v6's structured-output channel parses reliably — see
+ * `BossOutputSchema` below).
  *
  * Boss model is `getBossModel()` (Opus 4.6 per ADR-0030 §2). Provider
  * cascade mirrors the M4 formatter (`cascade.ts`): Anthropic → retry on
@@ -342,7 +344,7 @@ function renderBossUserPrompt(input: BossLoopInput): string {
     truncatedDiff,
     `</diff>`,
     ``,
-    `Plan workers per the system prompt's "How to spend your rounds" guide. Dispatch via dispatch_worker; emit the final Comment[] in your last turn via Output.array(CommentSchema).`,
+    `Plan workers per the system prompt's "How to spend your rounds" guide. Dispatch via dispatch_worker; emit the final result in your last turn as a structured object \`{ "comments": Comment[] }\` via the Output.object channel.`,
   ].join("\n");
 }
 

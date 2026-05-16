@@ -32,7 +32,9 @@ export interface ReviewHarnessConfig {
  *   - Phase 2 — `runBossLoop()` (NOT YET IMPLEMENTED): Opus 4.6 boss runs a
  *     `streamText` tool-use loop with `stopWhen: stepCountIs(env.WARDEN_REVIEW_BOSS_ROUNDS ?? 5)`;
  *     dispatches Sonnet/Haiku workers per concern via the `dispatch_worker`
- *     tool; final round emits `Output.array(CommentSchema)`.
+ *     tool; final round emits `Output.object({ comments: Comment[] })` (the
+ *     wrapper object is what AI SDK v6's structured-output channel parses
+ *     reliably — see `BossOutputSchema` in `boss-loop.ts`).
  *   - Phase 3 — `verifyCitations()` + `applyHardRules()` (existing M10/M13
  *     paths): substring-verifies snippet sources, drops Comments with no
  *     verified source, applies the confidence floor + Tier-3 verbose gate
