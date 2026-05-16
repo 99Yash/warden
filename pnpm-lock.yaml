@@ -117,6 +117,9 @@ importers:
       ai-retry:
         specifier: 'catalog:'
         version: 1.7.3(@ai-sdk/provider-utils@4.0.26(zod@4.3.6))(@ai-sdk/provider@3.0.10)(ai@6.0.77(zod@4.3.6))(zod@4.3.6)
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
     devDependencies:
       '@warden/config':
         specifier: workspace:*
@@ -130,6 +133,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@warden/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@warden/core':
         specifier: workspace:*
         version: link:../core
@@ -164,6 +170,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
 
   packages/config: {}
 

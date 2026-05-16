@@ -10,7 +10,7 @@ import type {
   TokenUsageBlock,
   TokenUsageByTier,
 } from "../schema.js";
-import { runBossLoop } from "./boss-loop.js";
+import { runBossLoop, type BossLoopConfig } from "./boss-loop.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
 import { ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import { makeWorkerRoute } from "./workers/index.js";
@@ -25,6 +25,13 @@ export interface ReviewHarnessConfig {
   mode: "check" | "review";
   /** When `true`, tier-3 (style/dedup) findings are surfaced. Default suppresses them. */
   verbose?: boolean;
+  /**
+   * M15 (ADR-0031) boss-loop calibration knobs. Defaults preserve M14
+   * behavior. Surfaced on `ReviewHarnessConfig` (and re-threaded from
+   * `ReviewConfig` at the public-API boundary) so the eval suite + future
+   * callers can flip programmatic dispatch / prompt variant per run.
+   */
+  bossLoop?: BossLoopConfig;
 }
 
 /**
@@ -127,6 +134,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     scratchpad,
     route,
     ...(workerBudget !== undefined ? { workerBudget } : {}),
+    ...(input.config.bossLoop !== undefined ? { config: input.config.bossLoop } : {}),
     ...(input.emit ? { emit: input.emit } : {}),
   });
 

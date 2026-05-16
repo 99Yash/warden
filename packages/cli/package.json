@@ -41,9 +41,16 @@
     "smoke:m14-committability-worker": "node --import tsx/esm scripts/smoke-m14-committability-worker.mts",
     "smoke:m14-leverage-worker": "node --import tsx/esm scripts/smoke-m14-leverage-worker.mts",
     "smoke:m14-boss-loop": "node --import tsx/esm scripts/smoke-m14-boss-loop.mts",
-    "smoke:m14": "pnpm smoke:m14-verify-drop && pnpm smoke:m14-empty-diff && pnpm smoke:m14-correctness-worker && pnpm smoke:m14-scalability-worker && pnpm smoke:m14-consistency-worker && pnpm smoke:m14-security-worker && pnpm smoke:m14-committability-worker && pnpm smoke:m14-leverage-worker && pnpm smoke:m14-boss-loop"
+    "smoke:m14": "pnpm smoke:m14-verify-drop && pnpm smoke:m14-empty-diff && pnpm smoke:m14-correctness-worker && pnpm smoke:m14-scalability-worker && pnpm smoke:m14-consistency-worker && pnpm smoke:m14-security-worker && pnpm smoke:m14-committability-worker && pnpm smoke:m14-leverage-worker && pnpm smoke:m14-boss-loop",
+    "smoke:m15-eval-suite": "node --import tsx/esm scripts/smoke-m15-eval-suite.mts",
+    "smoke:m15-programmatic-dispatch": "node --import tsx/esm scripts/smoke-m15-programmatic-dispatch.mts",
+    "smoke:m15-examples-first": "node --import tsx/esm scripts/smoke-m15-examples-first.mts",
+    "smoke:m15-gemini-adapter": "node --import tsx/esm scripts/smoke-m15-gemini-adapter.mts",
+    "smoke:m15": "pnpm smoke:m15-gemini-adapter && pnpm smoke:m15-examples-first && pnpm smoke:m15-eval-suite && pnpm smoke:m15-programmatic-dispatch",
+    "eval": "node --import tsx/esm scripts/eval/run.mts"
   },
   "dependencies": {
+    "@warden/ai": "workspace:*",
     "@warden/core": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
@@ -56,7 +63,8 @@
     "@warden/config": "workspace:*",
     "tsdown": "catalog:",
     "tsx": "^4.19.2",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "typescript": "^5"
