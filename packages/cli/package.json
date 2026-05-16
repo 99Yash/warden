@@ -30,7 +30,11 @@
     "smoke:m13-eslint-security": "node --import tsx/esm scripts/smoke-m13-eslint-security.mts",
     "smoke:m13-sub-agent": "node --import tsx/esm scripts/smoke-m13-sub-agent.mts",
     "smoke:m13-confidence-floor": "node --import tsx/esm scripts/smoke-m13-confidence-floor.mts",
-    "smoke:m13": "pnpm smoke:m13-eslint-security && pnpm smoke:m13-sub-agent && pnpm smoke:m13-confidence-floor"
+    "smoke:m13": "pnpm smoke:m13-eslint-security && pnpm smoke:m13-sub-agent && pnpm smoke:m13-confidence-floor",
+    "smoke:bugfloor-verify-citations": "node --import tsx/esm scripts/smoke-bugfloor-verify-citations.mts",
+    "smoke:bugfloor-db-automigrate": "node --import tsx/esm scripts/smoke-bugfloor-db-automigrate.mts",
+    "smoke:bugfloor-leverage-snippet": "node --import tsx/esm scripts/smoke-bugfloor-leverage-snippet.mts",
+    "smoke:bugfloor": "pnpm smoke:bugfloor-verify-citations && pnpm smoke:bugfloor-db-automigrate && pnpm smoke:bugfloor-leverage-snippet"
   },
   "dependencies": {
     "@warden/core": "workspace:*",

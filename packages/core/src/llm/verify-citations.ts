@@ -9,11 +9,11 @@ import type { Comment, DegradedEntry, Source } from "../schema.js";
  * Runs over every `Comment` after `synthesize()` / `deterministicSynthesize()`
  * and before `applyHardRules()`. For each `Source` whose `{path, line, snippet}`
  * triple is fully populated, stream `path` line-by-line up to `line + DRIFT`
- * (bounded by `MAX_LINES_READ` for safety), normalize whitespace, and
- * substring-match the snippet against any line in `line ± DRIFT`. Sources
- * whose triple fails to verify get dropped; Comments left with zero
- * snippet-bearing sources (when they had at least one originally) get dropped
- * entirely.
+ * (bounded by `MAX_LINES_READ` for safety), concatenate the `line ± DRIFT`
+ * window with single-space separators, normalize whitespace, and substring-
+ * match the snippet against the resulting window text. Sources whose triple
+ * fails to verify get dropped; Comments left with zero snippet-bearing
+ * sources (when they had at least one originally) get dropped entirely.
  *
  * Sources whose `{path, line, snippet}` trio is fully undefined pass through
  * untouched — they are not asserting a snippet citation. Partial triples
@@ -30,12 +30,13 @@ import type { Comment, DegradedEntry, Source } from "../schema.js";
 const LINE_DRIFT = 5;
 /**
  * M11 (ADR-0026 §14): wider drift for `api_def` sources. Real-world `.d.ts`
- * signatures span lines routinely — generics + JSDoc + overload sets — so
- * per-line match (M10's algorithm) would never find a line containing the
- * whole collapsed signature. The `api_def` branch concatenates a
- * `± API_DEF_DRIFT` line window, normalizes whitespace, and substring-
- * matches the (already single-line-normalized) signature once. 30 covers
- * signatures up to 61 lines wide; real signatures almost always fit.
+ * signatures span lines routinely — generics + JSDoc + overload sets — so a
+ * per-line match would never find a line containing the whole collapsed
+ * signature. 30 covers signatures up to 61 lines wide; real signatures
+ * almost always fit. M14 generalized concat-then-match to all source types
+ * (single-line snippets are the 1-line degenerate case of multi-line); the
+ * wider window stays `api_def`-only because non-`api_def` snippets are
+ * line-grained and don't need it.
  */
 const API_DEF_DRIFT = 30;
 // Hard sanity cap on lines streamed per file. Real source files are well
@@ -160,52 +161,39 @@ async function verifyOne(
   const norm = normalizeWhitespace(stripped);
   if (norm.length === 0) return false;
 
-  // M11 (ADR-0026 §14): `api_def` sources need a wider drift + concat-
-  // then-match because `.d.ts` signatures span multiple lines. M10's
-  // per-line match is unchanged for every other source type — widening it
-  // for non-`api_def` would loosen verification for no benefit.
-  if (source.type === "api_def") {
-    return verifyApiDef(abs, source.line, norm, cache);
-  }
-
-  const upToLine = source.line + LINE_DRIFT;
-  const entry = await ensureLinesUpTo(abs, upToLine, cache);
-  if (entry === null) return false;
-
-  const start = Math.max(1, source.line - LINE_DRIFT);
-  const end = Math.min(entry.lines.length, source.line + LINE_DRIFT);
-  for (let i = start; i <= end; i++) {
-    const candidate = normalizeWhitespace(entry.lines[i - 1] ?? "");
-    if (candidate.length > 0 && candidate.includes(norm)) return true;
-  }
-  return false;
+  // M14 bug floor: concat-then-substring-match for all source types. M10's
+  // per-line match couldn't find snippets whose `normalizeWhitespace` pass
+  // collapses across line breaks (any multi-line node text from a producer
+  // like the formatter or leverage detector). Single-line snippets are the
+  // 1-line degenerate case of multi-line, so one algorithm covers both.
+  // Drift constants stay split: api_def needs a wider window for multi-line
+  // `.d.ts` signatures (M11 / ADR-0026 §14).
+  const drift = source.type === "api_def" ? API_DEF_DRIFT : LINE_DRIFT;
+  return verifyWindow(abs, source.line, drift, norm, cache);
 }
 
 /**
- * `api_def`-branch verification: concatenate the `± API_DEF_DRIFT` window,
- * normalize whitespace, then substring-match. The resolver stores
- * `signature` already collapsed to a single line via the same
- * `normalizeWhitespace` rule, so file-window normalization is reciprocal.
- *
- * False-positive risk is bounded by the tight 61-line window and pinned by
- * the symbol name being part of the signature — random matches across
- * unrelated declarations require a token sequence real `.d.ts` files
- * don't produce.
+ * Concatenate the `± drift` window with single-space joins, normalize
+ * whitespace, and substring-match the (already normalized) snippet against
+ * the resulting window text. False-positive risk is bounded by the window
+ * width and the snippet's own token sequence — random matches across
+ * unrelated lines require a token order real source code rarely produces.
  */
-async function verifyApiDef(
+async function verifyWindow(
   abs: string,
   line: number,
-  normalizedSignature: string,
+  drift: number,
+  normalizedSnippet: string,
   cache: Map<string, FileLines | null>,
 ): Promise<boolean> {
-  const upToLine = line + API_DEF_DRIFT;
+  const upToLine = line + drift;
   const entry = await ensureLinesUpTo(abs, upToLine, cache);
   if (entry === null) return false;
-  const start = Math.max(1, line - API_DEF_DRIFT);
-  const end = Math.min(entry.lines.length, line + API_DEF_DRIFT);
+  const start = Math.max(1, line - drift);
+  const end = Math.min(entry.lines.length, line + drift);
   if (end < start) return false;
   const windowText = entry.lines.slice(start - 1, end).join(" ");
-  return normalizeWhitespace(windowText).includes(normalizedSignature);
+  return normalizeWhitespace(windowText).includes(normalizedSnippet);
 }
 
 /**

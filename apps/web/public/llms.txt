@@ -1,6 +1,6 @@
 # Warden
 
-> Warden is a local code review CLI that runs deterministic tools (tsc, eslint, npm audit), verifies every external claim through citable sources (OSV, .d.ts), and uses an LLM only as a triage and formatting layer. The CLI returns a stable comment contract; the model never invents assertions.
+> Warden is a local code review CLI that runs deterministic tools and scoped sub-agents, verifies every external claim through citable sources (repo snippets, OSV, .d.ts), and uses an LLM only as a triage and formatting layer. The CLI returns a stable comment contract; the model never invents assertions.
 
 ## Pages
 
@@ -9,6 +9,7 @@
 - [Docs · Install](https://wrdn.beauty/docs/install/): How to install and run the CLI locally.
 - [Docs · Configuration](https://wrdn.beauty/docs/configuration/): Environment variables and review modes.
 - [Docs · Reading comments](https://wrdn.beauty/docs/reading-comments/): How to read the tier/category/source shape of a comment.
+- [Docs · Review pipeline](https://wrdn.beauty/docs/review/): What `warden review` runs today, including leverage and security triage, and where the deferred deep-security harness fits.
 - [Docs · CI usage](https://wrdn.beauty/docs/ci/): Wiring Warden into a CI step.
 - [Examples](https://wrdn.beauty/examples/): A rendered fixture from Warden reviewing its own codebase.
 - [Design](https://wrdn.beauty/design/): Links into decisions.md, vision.md, and CONTEXT.md.

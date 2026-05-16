@@ -50,6 +50,7 @@ import type {
   CommentSet,
   DegradedEntry,
   RetrievedContext,
+  Tier,
 } from "./schema.js";
 import { runVulnerabilityCheck } from "./vuln/index.js";
 
@@ -702,12 +703,22 @@ function collapseVulnComments(comments: Comment[], lockfile: Lockfile | undefine
   // practice — keep the neutral fallback for type safety anyway.
   const auditorTitle =
     lockfile === "pnpm" ? "pnpm audit" : lockfile === "npm" ? "npm audit" : "npm/pnpm audit";
+  // The summary inherits the highest severity in the input set (lowest tier
+  // number). A repo with a critical CVE collapses to a tier-1 summary that
+  // stays visible by default; a low-only repo collapses to tier-3 and
+  // suppresses unless --verbose. Pre-fix this was a fixed tier-3 — silently
+  // swallowing tier-1 advisories on non-manifest-touching diffs, which
+  // contradicted ADR-0021 #8's "replaced by a single summary line" intent.
+  const summaryTier = comments.reduce<Tier>(
+    (worst, c) => (c.tier < worst ? c.tier : worst),
+    3,
+  );
   const summary: Comment = {
     id: stableCommentId(`vuln-summary:${file}:${total}`),
     file,
     lineStart: 1,
     lineEnd: 1,
-    tier: 3,
+    tier: summaryTier,
     category: "vulnerability",
     kind: "assertion",
     claim: `Repo has ${total} known ${total === 1 ? "vulnerability" : "vulnerabilities"}; none introduced by this diff.`,

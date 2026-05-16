@@ -831,7 +831,8 @@ main {
     linear-gradient(180deg, var(--warden-paper) 0%, var(--warden-paper-deep) 100%);
 }
 
-.workflow {
+.workflow,
+.review-spine {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
@@ -841,7 +842,12 @@ main {
   counter-reset: step;
 }
 
-.workflow li {
+.review-spine {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.workflow li,
+.review-spine li {
   position: relative;
   padding: 1.4rem 1.3rem 1.3rem;
   border: 1px solid var(--warden-line);
@@ -850,7 +856,8 @@ main {
   box-shadow: var(--warden-surface-shadow);
 }
 
-.workflow li::before {
+.workflow li::before,
+.review-spine li::before {
   counter-increment: step;
   content: "0" counter(step);
   display: block;
@@ -862,14 +869,52 @@ main {
   letter-spacing: 0.08em;
 }
 
-.workflow span {
+.workflow span,
+.review-spine span {
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: -0.012em;
 }
 
-.workflow p {
+.workflow p,
+.review-spine p {
   margin: 0.45rem 0 0;
+}
+
+.review-boundary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--warden-gold) 45%, var(--warden-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warden-gold) 10%, var(--warden-panel));
+  box-shadow: var(--warden-surface-shadow);
+}
+
+.review-boundary::before {
+  content: "";
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-top: 0.22rem;
+  border-radius: 999px;
+  background: var(--warden-gold);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warden-gold) 20%, transparent);
+}
+
+.review-boundary strong {
+  color: var(--warden-ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.review-boundary p {
+  grid-column: 2;
+  margin: 0.15rem 0 0;
+  color: var(--warden-muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
 }
 
 /* ─── Anatomy band: receipt anatomy ───────────────────────────────────── */
@@ -2319,15 +2364,20 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
 
   .feature-grid article,
   .workflow li,
+  .review-spine li,
   .anatomy-band li {
     animation: rise-soft 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   }
 
   .feature-grid article:nth-child(2),
-  .workflow li:nth-child(2) { animation-delay: 90ms; }
+  .workflow li:nth-child(2),
+  .review-spine li:nth-child(2) { animation-delay: 90ms; }
   .feature-grid article:nth-child(3),
-  .workflow li:nth-child(3) { animation-delay: 180ms; }
-  .workflow li:nth-child(4) { animation-delay: 270ms; }
+  .workflow li:nth-child(3),
+  .review-spine li:nth-child(3) { animation-delay: 180ms; }
+  .workflow li:nth-child(4),
+  .review-spine li:nth-child(4) { animation-delay: 270ms; }
+  .review-spine li:nth-child(5) { animation-delay: 340ms; }
 }
 
 @keyframes reveal-in {
@@ -2444,6 +2494,7 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
   .hero-section,
   .feature-grid,
   .workflow,
+  .review-spine,
   .link-grid,
   .doc-feature-list,
   .doc-card-grid,
@@ -2452,7 +2503,8 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
   }
 
   .doc-feature-list .doc-card:nth-child(3),
-  .doc-card-grid .doc-code-card:nth-child(3) {
+  .doc-card-grid .doc-code-card:nth-child(3),
+  .review-boundary {
     grid-column: auto;
   }
 
@@ -2560,6 +2612,14 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
     align-items: flex-start;
     flex-direction: column;
     padding: 0.65rem 0.85rem;
+  }
+
+  .review-boundary {
+    grid-template-columns: 1fr;
+  }
+
+  .review-boundary p {
+    grid-column: auto;
   }
 
   .docs-title-row {

@@ -8,13 +8,13 @@ description: What Warden does and how to use it.
 <div class="doc-feature-list" aria-label="Warden review contract">
   <a class="doc-card" href="#review-flow">
     <span class="doc-card-icon">01</span>
-    <strong>Tool facts first</strong>
-    <p>TSC, ESLint, npm audit, OSV, jscpd, and deterministic detectors produce the initial record.</p>
+    <strong>Detectors first</strong>
+    <p>TSC, ESLint, npm audit, OSV, jscpd, leverage, security, and other detectors produce the initial record.</p>
   </a>
   <a class="doc-card" href="#output-contract">
     <span class="doc-card-icon">02</span>
-    <strong>Verified sources</strong>
-    <p>External claims need citations that substring-match the cited artifact before a comment ships.</p>
+    <strong>Scoped sub-agents</strong>
+    <p>Review mode adds committability, library leverage, and security triage questions with citation discipline.</p>
   </a>
   <a class="doc-card" href="#commands">
     <span class="doc-card-icon">03</span>
@@ -32,7 +32,8 @@ description: What Warden does and how to use it.
 
 <ol class="doc-steps">
   <li><span>Detect</span><p>Find the repo root, package manager, diff source, and changed files. The diff-level noise filter prunes generated or irrelevant subtrees before runners start.</p></li>
-  <li><span>Run</span><p>Execute deterministic checks: TypeScript, ESLint, dependency audit, duplication, context selection, and category-specific detectors.</p></li>
+  <li><span>Run</span><p>Execute deterministic checks: TypeScript, ESLint, Warden-managed security lint, dependency audit, duplication, context selection, leverage, and category-specific detectors.</p></li>
+  <li><span>Triage</span><p>In <code>review</code> mode, cheap-tier sub-agents ask scoped questions for committability, library leverage, and security residue.</p></li>
   <li><span>Verify</span><p>Check external claims against OSV records, package type definitions, or cited repository snippets. Unsupported sources are removed.</p></li>
   <li><span>Format</span><p>Ask the model to order, clarify, and write the review from the verified findings. It can also ask a question when intent is unclear.</p></li>
   <li><span>Return</span><p>Emit a stable <code>CommentSet</code> with comment ids, tiers, categories, confidence, source records, and degraded-worker metadata.</p></li>
@@ -54,11 +55,11 @@ description: What Warden does and how to use it.
   <div class="doc-code-card doc-code-card-compact">
     <div class="doc-code-header"><span>Full review</span><code>LLM triage</code></div>
     <pre><code>warden review</code></pre>
-    <p>Adds semantic context selection, committability triage, and the cited review formatter.</p>
+    <p>Adds semantic context selection, scoped sub-agents, verified API-claim lookup, and the cited review synthesizer.</p>
   </div>
 </div>
 
-Both review verbs accept <code>--json</code>. <code>review</code> also supports <code>--base</code>, <code>--stdin</code>, and <code>--verbose</code> when you need explicit diff control or machine-readable output.
+Both <code>check</code> and <code>review</code> accept <code>--json</code>. <code>review</code> also supports <code>--base</code>, <code>--stdin</code>, and <code>--verbose</code> when you need explicit diff control or machine-readable output. See <a href="/docs/review/">Review pipeline</a> for the current review spine and the deferred deep-security boundary.
 
 ## Output contract
 

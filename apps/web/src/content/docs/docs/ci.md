@@ -7,7 +7,7 @@ description: Use Warden's deterministic check path in automation.
 
 <div class="doc-feature-list">
   <a class="doc-card" href="#deterministic-gate"><span class="doc-card-icon">check</span><strong>Deterministic gate</strong><p>No LLM call. Good for fast CI, pre-commit, and failure summaries.</p></a>
-  <a class="doc-card" href="#full-review-output"><span class="doc-card-icon">review</span><strong>Full formatter</strong><p>Uses model credentials, semantic context, and citations. Better for PR bots or reports.</p></a>
+  <a class="doc-card" href="#full-review-output"><span class="doc-card-icon">review</span><strong>Full review</strong><p>Uses model credentials, semantic context, scoped sub-agents, and citations. Better for PR bots or reports.</p></a>
   <a class="doc-card" href="#minimal-workflow-sketch"><span class="doc-card-icon">json</span><strong>Wrapper contract</strong><p>Stable output for GitHub, Slack, ClickUp, or custom scripts without terminal scraping.</p></a>
 </div>
 

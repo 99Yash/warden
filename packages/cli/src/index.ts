@@ -155,7 +155,10 @@ const sharedOpts = (cmd: Command): Command =>
       "Override the base ref for the diff (default: uncommitted in check, vs default-branch in review).",
     )
     .option("--stdin", "Read the unified diff from stdin instead of running git.")
-    .option("--verbose", "Surface tier-3 (style/dedup) findings; suppressed by default.");
+    .option(
+      "--verbose",
+      "Surface tier-3 (style/dedup) findings and expand the npm-audit summary to per-advisory comments; both suppressed by default.",
+    );
 
 sharedOpts(
   program

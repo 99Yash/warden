@@ -11,7 +11,7 @@ description: Install Warden and run the CLI locally.
   <li><span>Install dependencies</span><p>Use the pinned pnpm workspace so every package resolves against the same lockfile.</p></li>
   <li><span>Build packages</span><p>Compile the package outputs used by local CLI runs and static site fixtures.</p></li>
   <li><span>Initialize the index</span><p>Create the local embedding-backed context index. Re-running is safe and cache-aware.</p></li>
-  <li><span>Run a review</span><p>Start with <code>check</code> for deterministic-only output, or <code>review</code> for the full cited formatter.</p></li>
+  <li><span>Run a review</span><p>Start with <code>check</code> for deterministic-only output, or <code>review</code> for the full cited review spine.</p></li>
 </ol>
 
 <div class="doc-code-card">

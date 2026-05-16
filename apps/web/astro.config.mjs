@@ -44,6 +44,11 @@ export default defineConfig({
               link: "/docs/reading-comments/",
               attrs: { "data-astro-prefetch": true },
             },
+            {
+              label: "Review pipeline",
+              link: "/docs/review/",
+              attrs: { "data-astro-prefetch": true },
+            },
             { label: "CI usage", link: "/docs/ci/", attrs: { "data-astro-prefetch": true } },
           ],
         },
