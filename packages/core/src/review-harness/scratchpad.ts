@@ -31,6 +31,14 @@ export interface WorkerOutput {
   durationMs: number;
   /** Token usage for the worker's streamText call (summed across inner steps). */
   tokenUsage?: TokenUsage;
+  /**
+   * Actual model tier the worker ran on. Captured at dispatch time so
+   * `runReviewHarness()` can compute the per-tier cost summary without
+   * re-deriving from the (concern, override?) pair. Carried alongside
+   * `tokenUsage` because the boss can promote/demote a worker via the
+   * dispatch tool's `tier?` field.
+   */
+  tier?: "sonnet" | "haiku";
 }
 
 /**

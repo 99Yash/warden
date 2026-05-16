@@ -202,6 +202,12 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     metadata: {
       durationMs: harness.metadata.durationMs,
       degradedWorkers: [...harness.metadata.degradedWorkers, ...ruled.degraded],
+      ...(harness.metadata.tokenUsage !== undefined
+        ? { tokenUsage: harness.metadata.tokenUsage }
+        : {}),
+      ...(harness.metadata.costUsd !== undefined
+        ? { costUsd: harness.metadata.costUsd }
+        : {}),
     },
   };
 }
