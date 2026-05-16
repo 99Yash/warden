@@ -50,7 +50,6 @@
     "eval": "node --import tsx/esm scripts/eval/run.mts"
   },
   "dependencies": {
-    "@warden/ai": "workspace:*",
     "@warden/core": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
@@ -60,6 +59,7 @@
     "picocolors": "catalog:"
   },
   "devDependencies": {
+    "@warden/ai": "workspace:*",
     "@warden/config": "workspace:*",
     "tsdown": "catalog:",
     "tsx": "^4.19.2",

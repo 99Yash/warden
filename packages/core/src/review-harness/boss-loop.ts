@@ -197,6 +197,13 @@ function isNonSubstantivePath(p: string): boolean {
  * own concerns; tsc/eslint/jscpd/deadcode fall back to `correctness`.
  * Files with no det-prior finding default to `correctness` (the catch-all
  * the boss-system prompt already routes the bulk of the diff through).
+ *
+ * Special case: the M13 ESLint security detector (`eslint-security.ts`)
+ * shares the `"eslint"` source value with the user-config ESLint runner,
+ * but always carries a `ruleId` prefixed `security/` or `no-secrets/`.
+ * Route those to the `security` concern so PD-multi's Round 0 actually
+ * dispatches a security worker on planted vulnerabilities like
+ * `eval(req.body.code)`.
  */
 function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
   if (!finding) return "correctness";
@@ -207,8 +214,15 @@ function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
       return "consistency";
     case "leverage":
       return "leverage";
-    case "tsc":
     case "eslint":
+      if (
+        finding.ruleId?.startsWith("security/") ||
+        finding.ruleId?.startsWith("no-secrets/")
+      ) {
+        return "security";
+      }
+      return "correctness";
+    case "tsc":
     case "jscpd":
     case "deadcode":
       return "correctness";
