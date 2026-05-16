@@ -26,6 +26,10 @@ description: Environment variables used by Warden.
     <code>WARDEN_LOG_LEVEL</code>
     <span><b>Optional.</b> Controls log verbosity: <code>silent</code>, <code>error</code>, <code>warn</code>, <code>info</code>, or <code>debug</code>.</span>
   </div>
+  <div>
+    <code>WARDEN_SECURITY_CONFIDENCE_FLOOR</code>
+    <span><b>Optional.</b> Overrides the default <code>security</code> confidence floor. Numeric string from <code>0.0</code> to <code>1.0</code>; Tier 1 security findings bypass the floor.</span>
+  </div>
 </div>
 
 <div class="doc-callout doc-callout-warning">

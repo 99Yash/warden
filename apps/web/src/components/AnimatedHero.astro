@@ -20,9 +20,10 @@ const heroComments = commentSet.comments.slice(0, 3);
         <span class="prompt-flag">--base main</span>
       </p>
       <p class="phase ok"><span class="phase-tag">ok</span><span>ecosystem detected: TypeScript workspace</span></p>
-      <p class="phase ok"><span class="phase-tag">ok</span><span>evidence collected: tsc, eslint, npm audit, OSV</span></p>
-      <p class="phase ok"><span class="phase-tag">ok</span><span>citations verified: snippet + line match</span></p>
-      <p class="phase active"><span class="phase-tag">..</span><span>drafting cited review</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>detectors ran: tsc, eslint, audit, security, leverage</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>sub-agents checked: committability, libraries, security residue</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>sources verified: repo snippets, OSV, package .d.ts</span></p>
+      <p class="phase active"><span class="phase-tag">..</span><span>synthesizing cited CommentSet</span></p>
       <div class="finding-list">
         {
           heroComments.map((comment) => (

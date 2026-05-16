@@ -24,12 +24,12 @@ import MarketingShell from "../components/MarketingShell.astro";
             Install Warden
             <span class="button-arrow" aria-hidden="true">→</span>
           </a>
-          <a class="button secondary" href="/examples/" data-astro-prefetch>See a real review</a>
+          <a class="button secondary" href="/docs/review/" data-astro-prefetch>Understand review</a>
         </div>
         <p class="hero-meta">
-          <span>Runs in your repo</span>
-          <span>Static fixtures, not screenshots</span>
-          <span>v0 · personal craft bar</span>
+          <span>Default review spine</span>
+          <span>Leverage checks</span>
+          <span>Security triage</span>
         </p>
       </div>
       <div class="reveal-in delay-2">
@@ -39,9 +39,9 @@ import MarketingShell from "../components/MarketingShell.astro";
 
     <section class="proof-strip" aria-label="Review contract">
       <p><strong>Runs in your repo</strong><span>no hosted review backend, no upload</span></p>
-      <p><strong>Tools before prose</strong><span>tsc, eslint, npm audit, OSV cited first</span></p>
-      <p><strong>Asks when unsure</strong><span>questions beat invented certainty</span></p>
-      <p><strong>Returns a contract</strong><span>stable JSON for future wrappers</span></p>
+      <p><strong>Detectors before prose</strong><span>type, lint, audit, dedup, leverage, security</span></p>
+      <p><strong>Sub-agents ask</strong><span>committability, library leverage, security residue</span></p>
+      <p><strong>Verifier has veto</strong><span>unsupported snippets and API claims get cut</span></p>
     </section>
 
     <section class="home-band">
@@ -59,27 +59,27 @@ import MarketingShell from "../components/MarketingShell.astro";
           <span class="feature-kicker">01 · EVIDENCE</span>
           <h3>The facts come <em>first.</em></h3>
           <p>
-            TypeScript, ESLint, duplication checks, dependency audits, and repository snippets form
-            the evidence layer. Warden is allowed to be useful only after that layer exists — never
-            before.
+            TypeScript, ESLint, duplication checks, dependency audits, context selection, leverage
+            patterns, and Warden-managed security lint form the evidence layer. The review starts
+            with things that can point at a file, rule, lockfile, or advisory.
           </p>
         </article>
         <article>
-          <span class="feature-kicker">02 · VERIFICATION</span>
-          <h3>External claims carry <em>receipts.</em></h3>
+          <span class="feature-kicker">02 · TRIAGE</span>
+          <h3>Sub-agents stay <em>scoped.</em></h3>
           <p>
-            Vulnerability claims are cross-checked against OSV before they reach the final review.
-            Library API claims are checked against the package's own <code>.d.ts</code>. If a source
-            cannot be verified, the claim does not survive.
+            Cheap-tier LLM sub-agents handle the open-ended tails: committability questions, library
+            substitution opportunities, and security residue that deterministic security lint cannot
+            model cleanly.
           </p>
         </article>
         <article>
-          <span class="feature-kicker">03 · CONTRACT</span>
-          <h3>Output built to <em>travel.</em></h3>
+          <span class="feature-kicker">03 · VERIFICATION</span>
+          <h3>Claims earn <em>sources.</em></h3>
           <p>
-            The CLI is the first surface, not the last. Every run returns stable comments with ids,
-            tiers, categories, sources, and degradation notes — the same shape a future PR bot or
-            Slack wrapper would render.
+            Repository snippets are substring-matched. Vulnerability claims are checked against OSV.
+            Library API claims use installed <code>.d.ts</code> files. If the source does not verify,
+            the comment does not ship.
           </p>
         </article>
       </div>
@@ -87,31 +87,42 @@ import MarketingShell from "../components/MarketingShell.astro";
 
     <section class="workflow-band">
       <div class="section-heading">
-        <p class="eyebrow">Pipeline</p>
-        <h2>Quiet machinery, <span class="accent">readable</span> review.</h2>
+        <p class="eyebrow">Default review</p>
+        <h2>The review spine is <span class="accent">explicit.</span></h2>
         <p class="section-sub">
-          Four phases, in order. Each one is allowed to refuse the next: if the evidence layer is
-          thin, verification stays quiet; if verification finds drift, prose gets cut.
+          <code>warden review</code> is not the deep security harness. It is the everyday review path:
+          deterministic producers, bounded sub-agents, one synthesizer, then the citation verifier.
         </p>
       </div>
-      <ol class="workflow">
+      <ol class="review-spine">
         <li>
-          <span>Detect</span>
-          <p>Find the workspace shape and the diff that actually needs review. Prune what's noise.</p>
+          <span>Diff gate</span>
+          <p>Detect the ecosystem, choose the diff source, and prune generated or irrelevant subtrees before any runner spends time.</p>
         </li>
         <li>
-          <span>Run</span>
-          <p>Execute the tools that can speak with mechanical confidence — type, lint, audit, dedup.</p>
+          <span>Detectors</span>
+          <p>Run TSC, ESLint, npm audit plus OSV, jscpd, context selection, consistency, deadcode, scalability, leverage, and security lint.</p>
         </li>
         <li>
-          <span>Verify</span>
-          <p>Attach sources to claims that reach outside the codebase. OSV for vulns, <code>.d.ts</code> for APIs.</p>
+          <span>Sub-agents</span>
+          <p>Ask cheap-tier scoped questions for committability, library leverage, and security residue. Each source still has to verify.</p>
         </li>
         <li>
-          <span>Write</span>
-          <p>Let the model rank, clarify, and phrase what survived. Anything without a cite is dropped.</p>
+          <span>Synthesizer</span>
+          <p>Let the boss model rank and phrase the surviving findings into a stable <code>CommentSet</code>.</p>
+        </li>
+        <li>
+          <span>Verifier</span>
+          <p>Drop citations that do not substring-match the repo, OSV record, or package type definition. Comments with no verified source are dropped.</p>
         </li>
       </ol>
+      <div class="review-boundary" role="note">
+        <strong>Deep security is not the default surface.</strong>
+        <p>
+          The deep security harness is design-locked for <code>warden security</code> and <code>warden review --deep</code>, but it is intentionally deferred until
+          the everyday review and init loops earn more dogfood signal.
+        </p>
+      </div>
     </section>
 
     <section class="anatomy-band">
@@ -135,7 +146,7 @@ import MarketingShell from "../components/MarketingShell.astro";
               <span class="anatomy-key">Category</span>
               <div>
                 <strong>correctness, security, scalability, …</strong>
-                <p>Reading order, not severity. Correctness questions before style ones.</p>
+                <p>Reading order, not severity. Leverage now sits before dedup because a library or stdlib swap can dissolve repeated code.</p>
               </div>
             </li>
             <li>
@@ -165,7 +176,7 @@ import MarketingShell from "../components/MarketingShell.astro";
           </div>
           <div class="receipt-row">
             <span class="receipt-key">category</span>
-            <span class="receipt-val">vulnerability</span>
+            <span class="receipt-val">security</span>
           </div>
           <div class="receipt-row">
             <span class="receipt-key">confidence</span>
@@ -173,20 +184,20 @@ import MarketingShell from "../components/MarketingShell.astro";
           </div>
           <div class="receipt-row">
             <span class="receipt-key">file</span>
-            <span class="receipt-val">package-lock.json:2418</span>
+            <span class="receipt-val">src/routes/session.ts:88</span>
           </div>
           <div class="receipt-row">
             <span class="receipt-key">claim</span>
             <span class="receipt-val">
-              <span class="receipt-emph">semver</span> &lt; 7.5.2 — ReDoS via crafted version range.
+              <span class="receipt-emph">exec</span> receives request-controlled input before validation.
             </span>
           </div>
           <div class="receipt-row">
             <span class="receipt-key">source</span>
-            <span class="receipt-val">OSV-2023-2419 · osv.dev</span>
+            <span class="receipt-val">security/detect-child-process · tool</span>
           </div>
           <div class="receipt-quote">
-            "Vulnerable versions of semver are susceptible to Regular Expression Denial of Service..."
+            child_process.exec(req.query.command)
           </div>
         </aside>
       </div>
@@ -198,12 +209,12 @@ import MarketingShell from "../components/MarketingShell.astro";
         <h2>Personal tool, <span class="accent">public</span> craft bar.</h2>
         <p>
           Warden is being built for one person first, but not as a throwaway. The decisions are
-          written down. The vocabulary is named. The site stays static so it never pretends to be a
-          hosted product before the review engine earns that shape.
+          written down. The vocabulary is named. The review page follows the shipped spine before it
+          talks about deferred harnesses or future bot surfaces.
         </p>
       </div>
       <div class="closing-actions">
-        <a class="button primary" href="/design/" data-astro-prefetch>Read design notes</a>
+        <a class="button primary" href="/docs/review/" data-astro-prefetch>Read review docs</a>
         <a class="button secondary" href="/notes/" data-astro-prefetch>Field notes</a>
       </div>
     </section>

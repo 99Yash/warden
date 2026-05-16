@@ -6,11 +6,13 @@ const sectionLabel = pathname.includes("/configuration/")
   ? "Configuration"
   : pathname.includes("/reading-comments/")
     ? "Comment contract"
-    : pathname.includes("/ci/")
-      ? "Automation"
-      : pathname.includes("/install/")
-        ? "Setup"
-        : "Getting started";
+    : pathname.includes("/review/")
+      ? "Review spine"
+      : pathname.includes("/ci/")
+        ? "Automation"
+        : pathname.includes("/install/")
+          ? "Setup"
+          : "Getting started";
 ---
 
 <div class="docs-title-row">

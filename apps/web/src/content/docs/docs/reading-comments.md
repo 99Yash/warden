@@ -26,11 +26,12 @@ description: Understand Warden tiers, categories, citations, and degraded-worker
   <span>committability</span>
   <span>clarity</span>
   <span>style</span>
+  <span>leverage</span>
   <span>deduplication</span>
   <span>tests</span>
 </div>
 
-Categories define reading order, not severity. A Tier 2 correctness finding can appear before a Tier 1 style concern because the review is optimized for what developers should understand first.
+Categories define reading order, not severity. A Tier 2 correctness finding can appear before a Tier 1 style concern because the review is optimized for what developers should understand first. <code>leverage</code> sits before deduplication because a library or stdlib replacement can remove repeated code entirely.
 
 ## Sources
 
