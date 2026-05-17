@@ -477,6 +477,41 @@ Google as the second provider:
 
 **Reversal cost.** Low. Revert is one file (`packages/core/src/llm/cascade.ts`) plus removing the `ai-retry` re-export from `@warden/ai/src/index.ts` and the catalog entry. The hand-rolled cascade in `git log` is the rollback target if the library ever stops tracking AI SDK v6 closely.
 
+**Amendment (2026-05-17) — tools + structured-output exception: primary-only cascade for tool-using call sites.** Refines the cascade for the specific shape `streamText({ ..., tools, output: Output.object({ schema }) })`. Gemini's structured-output endpoint rejects requests that combine `tools[]` with `responseMimeType: 'application/json'` (the `Output.object` setting) — `400 INVALID_ARGUMENT — Function calling with a response mime type 'application/json' is unsupported`. Pre-amendment, Anthropic transient failure at a tool-using call site engaged the Gemini fallback and produced the 400 in stderr; in the worker path the cascade caught it and emitted a `warning` degraded entry, but the fallback contributed zero useful output. In the boss-loop path the 400 was latent (sustained Anthropic outage was unobserved in dogfood) but would have hard-failed the entire review on the same code path.
+
+**Decision.** When a `streamText` call site uses both `tools[]` and structured `Output.object({...})`, do NOT register a Gemini fallback. The cascade for those call sites is **Anthropic primary + 1× retry, hard-fail otherwise** — the second half of ADR-0017's original 4-step cascade is skipped. Pure-text call sites (no tools, or no structured output) retain the full Anthropic → retry → Gemini → hard-fail cascade.
+
+**Scope.** Both M14 review-harness LLM call sites are tool-using and adopt the exception:
+
+- `packages/core/src/review-harness/workers/run-worker.ts:callWorker()` — workers always carry `lookupTypeDef` + `readFile` + `grepRepo`.
+- `packages/core/src/review-harness/boss-loop.ts` — boss always carries `dispatch_worker`.
+
+The exception is encoded at each call site via the **absence of fallback wiring** (compile-time deletion), not a runtime `if (hasTools)` predicate. Future tool-less call sites — e.g., the M17 boss-plan in current planning notes (`generateText` without tools per `m17-plan.md`) — register their own cascade with the full Gemini fallback per the ADR-0030 "each harness owns its own cascade" stance.
+
+**Failure-mode trade-off chosen.** The exception trades full-Anthropic-outage resilience for fidelity preservation:
+
+- **Transient 429 / 5xx (common, intra-review):** the 1× retry in `ai-retry` handles the common case. If retry fails, the affected worker emits a `warning` degraded entry and the review continues with the other 5 workers; the boss adjudicates around the gap. No behavior regression vs. pre-amendment — the pre-amendment Gemini call would have produced zero useful output anyway.
+- **Sustained Anthropic outage (rare):** boss-loop hard-fails cleanly with a legible message instead of dying inside Gemini's 400. Workers also hard-fail cleanly. The review exits non-zero with `degraded` entries naming the cause. The user retries when Anthropic recovers.
+
+The alternative — option (b) "tool-stripped Gemini retry" — was rejected: workers without `lookupTypeDef` lose the `api_def` citation path entirely (ADR-0026 / ADR-0027 thesis), and workers without `readFile` / `grepRepo` lose the diff-adjacent evidence the M14 worker prompts depend on. A tool-less Gemini retry isn't "the worker, on a different provider"; it's "the worker, blinded." The citation discipline Warden is built on (ADR-0008) is worth more than uptime for a CLI the user runs voluntarily.
+
+The alternative — option (c) "restructure Gemini calls to function-declarations without `responseMimeType`" — was rejected for v0: invasive, touches `@warden/ai`'s provider plumbing for a feature exercised maybe N times per dogfood, and earns its rent only when bot wrappers ship (ADR-0013 deferral). Revisitable when `apps/github-bot/` lands with real production telemetry on outage frequency.
+
+**Degraded-entry shape.** On primary failure at a tool-using call site:
+
+- Worker: `{kind: "warning", topic: "worker-<concern>", message: "<concern>: anthropic failed (<reason>); Gemini fallback skipped (tools required)"}`
+- Boss: `{kind: "warning", topic: "boss", message: "boss: anthropic failed (<reason>); Gemini fallback skipped (tools required)"}`
+
+`kind: "warning"` keeps the entry visible in default CLI output. `topic` matches the existing per-concern / boss conventions.
+
+**Smoke.** `packages/cli/scripts/smoke-bugfloor-gemini-skip-with-tools.mts` (rolled into `pnpm smoke:bugfloor`). Force-fails the Anthropic primary at the worker entry via a stub model, asserts: (a) zero outbound calls to a Gemini model, (b) the `degraded[]` array contains a warning matching `Gemini fallback skipped (tools required)`, (c) the worker returns `{findings: []}` gracefully. Boss-loop smoke is intentionally skipped — the policy is identical at both sites, the worker smoke proves it, and the boss path remains unobserved in dogfood.
+
+**What this commits to.** The rule: tool-using `streamText({tools, output})` call sites in M14 do not fall back to Gemini. The rationale: fidelity > uptime for citation-discipline output. The scope: explicitly per call site, encoded as the absence of fallback wiring rather than a runtime predicate.
+
+**What this does not commit to.** Option (c) is *not* foreclosed — if `apps/github-bot/` ships with production telemetry showing sustained Anthropic outages are user-visible, restructuring the Gemini call to non-JSON-mode tool-use earns its own ADR. The exception also does not affect tool-less call sites — those keep the original 4-step cascade. The decision does not constitute a per-tier or per-concern fallback policy: workers' tier (sonnet/haiku) and concern (correctness / scalability / consistency / security / committability / leverage) are not inputs to the rule; only the presence of tools is. The "broader worker-fallback strategy" question seeded in `m16-dogfood-handoff.md` collapsed to this single rule during the grill — no separate ADR-0033 was warranted.
+
+**Reversal cost (amendment-specific).** Low. Reverting the exception is one block restored in each of `run-worker.ts:callWorker()` and `boss-loop.ts` (~25 LoC total to restore from `git log`), plus removing this amendment block from the ADR. The Gemini fallback model getters (`getWorkerStrongFallbackModel()`, `getWorkerCheapFallbackModel()`, `getBossFallbackModel()`) remain exported from `@warden/ai` unchanged so reversal does not require any provider-layer churn.
+
 ---
 
 ## ADR-0018 — M5: cheap-signals context selector + jscpd dedup runner
