@@ -1,34 +1,34 @@
 import { createHash } from "node:crypto";
 import { CURRENT_DEFAULT, getEmbeddingProvider, type EmbeddingProvider } from "@warden/ai";
-import { CodeChunkAdapter, type ChunkRecord, type Chunker } from "../context/chunker.js";
+import { CodeChunkAdapter, type Chunker } from "../context/chunker.js";
 import {
   CURRENT_FORMAT_VERSION,
   SqliteChunkStore,
   SqliteEmbeddingStore,
+  SqliteFileChunksStore,
   SqliteMerkleStore,
-  SyncJobRunner,
   readLockedModel,
-  taskIdFor,
   writeFormatVersion,
   writeLockedModel,
   writeRepoMerkleRoot,
   type ChunkStore,
   type EmbeddingStore,
-  type JobRunner,
+  type FileChunksStore,
   type MerkleNode,
   type MerkleStore,
-  type Task,
 } from "../indexing/index.js";
 import { ensureGitignore } from "./ensure-gitignore.js";
-import { estimateInit, ESTIMATE_CONSTANTS, type EstimateResult } from "./estimate.js";
+import { estimateInit, type EstimateResult } from "./estimate.js";
+import { reconcileFiles, type ReconcileEvent } from "./reconcile.js";
 import { walkRepo, type WalkedFile } from "./walk.js";
 
 /**
- * `warden init` orchestration (ADR-0019 #5). Three phases (walk → chunk →
- * embed); the CLI render layer surfaces them as a phase log. Core stays
- * I/O-pure-ish — file reads happen in `walk.ts` and the gitignore writer
- * is bounded to a known path. Stdout-shaped progress flows through the
- * `emit` callback per ADR-0013.
+ * `warden init` orchestration (ADR-0019 #5; ADR-0032). Phase 1 walks the
+ * repo and locks the embedding model; Phase 2 + 3 are delegated to the
+ * shared `reconcileFiles()` primitive so init and review go through the
+ * same chunk-and-embed path. The CLI renderer consumes the same `InitEvent`
+ * shape it always has — the wrapper translates reconcile's per-file event
+ * stream into the existing phase log.
  */
 
 export type InitEvent =
@@ -91,7 +91,7 @@ export interface InitInput {
   chunkStore?: ChunkStore;
   embeddingStore?: EmbeddingStore;
   merkleStore?: MerkleStore;
-  jobRunner?: JobRunner;
+  fileChunksStore?: FileChunksStore;
   embeddingProvider?: EmbeddingProvider;
 }
 
@@ -103,7 +103,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
   const chunkStore = input.chunkStore ?? new SqliteChunkStore();
   const embeddingStore = input.embeddingStore ?? new SqliteEmbeddingStore();
   const merkleStore = input.merkleStore ?? new SqliteMerkleStore();
-  const jobRunner = input.jobRunner ?? new SyncJobRunner({ concurrency: ESTIMATE_CONSTANTS.CONCURRENCY });
+  const fileChunksStore = input.fileChunksStore ?? new SqliteFileChunksStore();
 
   // Gitignore first — runs before any other write so a fresh repo gets the
   // entry on its very first interaction with Warden.
@@ -178,9 +178,8 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
     usedFallback: walked.usedFallback,
   });
 
-  // Phase 2: chunk. Cache hit-rate is unknown until we compute hashes, so
-  // estimate uses 0 cached for accuracy on first run; subsequent runs will
-  // re-estimate after the chunk pass below by re-running `estimateInit`.
+  // Pre-flight estimate. First run treats every chunk as uncached so the
+  // panel renders honest worst-case before reconcile starts.
   const cachedChunkCountBefore = await chunkStore.count();
   const initialEstimate = estimateInit({
     totalLoc,
@@ -190,7 +189,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
   });
 
   // Cost gate: bail before any chunking work if the estimate already
-  // exceeds the budget.
+  // exceeds the budget. Matches pre-M16 behavior.
   if (
     typeof opts.maxCostUsd === "number" &&
     initialEstimate.estimatedUsd > opts.maxCostUsd &&
@@ -213,53 +212,26 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
   }
   emit({ type: "estimate", estimate: initialEstimate, abortedForCost: false });
 
-  emit({ type: "phase-start", phase: "chunk" });
-  const allChunks: ChunkRecord[] = [];
-  const merkleNodes: MerkleNode[] = [];
-  let processedFiles = 0;
-  for (const file of walked.files.values()) {
-    try {
-      const chunks = await chunker.chunk(file.path, file.content, file.fileSha);
-      if (chunks.length > 0) {
-        allChunks.push(...chunks);
-      }
-    } catch (err) {
-      emit({
-        type: "phase-degraded",
-        reason: `chunk: ${file.path} failed (${err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120)})`,
-      });
-    }
-    merkleNodes.push({ nodePath: file.path, hash: file.fileSha, kind: "file" });
-    processedFiles++;
-    if (processedFiles % 50 === 0 || processedFiles === walked.files.size) {
-      emit({
-        type: "chunk-progress",
-        processedFiles,
-        totalFiles: walked.files.size,
-        chunkCount: allChunks.length,
-      });
-    }
-  }
-
-  await chunkStore.upsertMany(allChunks);
-  await merkleStore.upsertNodes(merkleNodes);
-
-  emit({ type: "chunk-complete", chunkCount: allChunks.length, cachedHits: 0 });
-
-  // Persist the repo Merkle root so `review` can detect drift via
-  // `MerkleStore.diff()`. Root is the sha256 of the sorted concatenation
-  // of `path:hash` lines — deterministic and cheap.
-  const repoRoot = computeRepoMerkleRoot(merkleNodes);
-  await writeRepoMerkleRoot(repoRoot);
-  await writeFormatVersion(CURRENT_FORMAT_VERSION);
-
-  // Dry-run: skip Phase 3.
+  // Dry-run keeps the M6 walk-only behavior — no chunker, no Voyage. We
+  // still emit chunk/embed phase markers so the renderer's three-phase
+  // log finishes cleanly.
   if (opts.dryRun) {
+    emit({ type: "phase-start", phase: "chunk" });
+    emit({ type: "chunk-complete", chunkCount: 0, cachedHits: 0 });
+    emit({ type: "phase-start", phase: "embed" });
+    emit({
+      type: "embed-complete",
+      newlyEmbedded: 0,
+      cachedHits: 0,
+      failed: 0,
+      promptTokens: 0,
+      durationMs: 0,
+    });
     const summary = finishSummary({
       startedAt,
       walked,
       cachedChunks: cachedChunkCountBefore,
-      chunks: allChunks.length,
+      chunks: 0,
       newlyEmbedded: 0,
       failedEmbeds: 0,
       promptTokens: 0,
@@ -278,102 +250,90 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
     );
   }
 
-  // Phase 3: embed only chunks that lack a row under the locked model.
-  emit({ type: "phase-start", phase: "embed" });
-  const allHashes = uniqueChunkHashes(allChunks);
-  const present = await embeddingStore.whichExist(allHashes, lockedModelId, lockedModelVersion);
-  const missingHashes = allHashes.filter((h) => !present.has(h));
-
-  // Re-estimate with cache hits factored in for an honest cost number.
-  const refinedEstimate = estimateInit({
-    totalLoc,
-    fileCount: walked.files.size,
-    alreadyCachedChunks: allHashes.length - missingHashes.length,
-    modelId: lockedModelId,
-  });
-  if (
-    typeof opts.maxCostUsd === "number" &&
-    refinedEstimate.estimatedUsd > opts.maxCostUsd
-  ) {
-    emit({ type: "estimate", estimate: refinedEstimate, abortedForCost: true });
-    return finishSummary({
-      startedAt,
-      walked,
-      cachedChunks: cachedChunkCountBefore,
-      chunks: allChunks.length,
-      newlyEmbedded: 0,
-      failedEmbeds: 0,
-      promptTokens: 0,
-      estimatedUsd: refinedEstimate.estimatedUsd,
-      dryRun: false,
-      abortedForCost: true,
-      rebuilt,
-    });
+  // Compute the removed[] set from the merkle store before reconcile —
+  // any path stored under merkle that's no longer walked is a delete.
+  const storedHashes = await merkleStore.getAllFileHashes();
+  const currentPaths = new Set(walked.files.keys());
+  const removed: string[] = [];
+  for (const path of storedHashes.keys()) {
+    if (!currentPaths.has(path)) removed.push(path);
   }
 
-  let newlyEmbedded = 0;
-  let failedEmbeds = 0;
-  let promptTokens = 0;
+  // Phase 2 + 3 collapse into reconcileFiles(). The wrapper translates
+  // per-file reconcile events into the existing chunk/embed phase log.
+  emit({ type: "phase-start", phase: "chunk" });
+  let embedPhaseStarted = false;
+  let embedStartedAt = 0;
+  let filesObserved = 0;
+  let promptTokensSoFar = 0;
+  const totalFilesToReconcile = walked.files.size;
 
-  if (missingHashes.length > 0) {
-    const hashToContent = new Map<string, string>();
-    for (const c of allChunks) {
-      if (!hashToContent.has(c.chunkHash)) hashToContent.set(c.chunkHash, c.content);
+  const translateReconcileEvent = (ev: ReconcileEvent): void => {
+    if (
+      ev.type !== "file-refreshed" &&
+      ev.type !== "file-skipped-budget" &&
+      ev.type !== "file-removed"
+    ) {
+      return;
     }
-    const batches = chunkArray(missingHashes, provider.maxBatchSize());
-    const tasks: Task<{ batchIdx: number; chunkHashes: string[] }, EmbedTaskOutput>[] = batches.map(
-      (batch, idx) => {
-        const taskInput = { batchIdx: idx, chunkHashes: batch };
-        return {
-          taskId: taskIdFor("embed_chunk", {
-            modelId: lockedModelId,
-            modelVersion: lockedModelVersion,
-            chunkHashes: [...batch].sort(),
-          }),
-          taskKind: "embed_chunk",
-          input: taskInput,
-          run: async () => {
-            const inputs = batch.map((h) => hashToContent.get(h) ?? "");
-            const response = await provider.embed({ inputs, inputType: "document" });
-            const records = batch.map((chunkHash, i) => ({
-              chunkHash,
-              modelId: response.modelId,
-              modelVersion: response.modelVersion,
-              vector: response.vectors[i] ?? new Float32Array(0),
-            }));
-            await embeddingStore.upsertMany(records);
-            return { embedded: records.length, promptTokens: response.promptTokens };
-          },
-        };
-      },
-    );
-
-    const result = await jobRunner.run<{ batchIdx: number; chunkHashes: string[] }, EmbedTaskOutput>(
-      tasks,
-      {
-        tokensFor: (out) => out.promptTokens,
-        onProgress: (p) =>
-          emit({
-            type: "embed-progress",
-            completed: p.completed,
-            total: p.total,
-            promptTokensSoFar: p.promptTokensSoFar,
-            elapsedMs: p.elapsedMs,
-          }),
-      },
-    );
-
-    for (const out of result.outputs) {
-      newlyEmbedded += out.embedded;
-      promptTokens += out.promptTokens;
+    if (!embedPhaseStarted) {
+      // Chunking really is fast — flip to embed phase on the first per-file
+      // signal so the spinner reflects the slow work.
+      emit({ type: "chunk-complete", chunkCount: 0, cachedHits: 0 });
+      emit({ type: "phase-start", phase: "embed" });
+      embedPhaseStarted = true;
+      embedStartedAt = Date.now();
     }
-    failedEmbeds = result.failed.length;
-    for (const fail of result.failed) {
+    filesObserved++;
+    if (ev.type === "file-refreshed") {
+      promptTokensSoFar += ev.promptTokens;
+    }
+    if (filesObserved % 5 === 0 || filesObserved === totalFilesToReconcile) {
       emit({
-        type: "phase-degraded",
-        reason: `embed: task ${fail.taskId.slice(0, 8)} failed (${fail.error.slice(0, 120)})`,
+        type: "embed-progress",
+        completed: filesObserved,
+        total: totalFilesToReconcile,
+        promptTokensSoFar,
+        elapsedMs: Date.now() - embedStartedAt,
       });
     }
+  };
+
+  const reconcile = await reconcileFiles({
+    files: Array.from(walked.files.values()),
+    removed,
+    repoRoot: input.repoRoot,
+    chunker,
+    chunkStore,
+    embeddingStore,
+    merkleStore,
+    fileChunksStore,
+    provider,
+    lockedModelId,
+    lockedModelVersion,
+    maxUsdBudget: opts.maxCostUsd,
+    emit: translateReconcileEvent,
+  });
+
+  if (!embedPhaseStarted) {
+    // Nothing to refresh — emit terminal events so the renderer closes
+    // both phases cleanly.
+    emit({ type: "chunk-complete", chunkCount: reconcile.chunksSeen, cachedHits: 0 });
+    emit({ type: "phase-start", phase: "embed" });
+  }
+  emit({
+    type: "embed-complete",
+    newlyEmbedded: reconcile.newlyEmbedded,
+    cachedHits: reconcile.cachedEmbeddings,
+    failed: reconcile.failedEmbeds,
+    promptTokens: reconcile.promptTokens,
+    durationMs: reconcile.durationMs,
+  });
+
+  // Forward reconcile's degraded entries (skip-over-budget, backfill,
+  // failed-embed batches) through the existing phase-degraded channel.
+  for (const entry of reconcile.degraded) {
+    emit({ type: "phase-degraded", reason: entry.message });
   }
 
   // Persist the locked model on first init (or on --rebuild). A re-run with
@@ -383,48 +343,33 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
     await writeLockedModel(lockedModelId, lockedModelVersion);
   }
 
-  emit({
-    type: "embed-complete",
-    newlyEmbedded,
-    cachedHits: allHashes.length - missingHashes.length,
-    failed: failedEmbeds,
-    promptTokens,
-    durationMs: Date.now() - startedAt,
-  });
+  // Persist the repo Merkle root + format version. The per-file merkle
+  // leaves were already committed inside reconcileFiles()'s atomic write.
+  const allNodes: MerkleNode[] = [];
+  for (const file of walked.files.values()) {
+    allNodes.push({ nodePath: file.path, hash: file.fileSha, kind: "file" });
+  }
+  await writeRepoMerkleRoot(computeRepoMerkleRoot(allNodes));
+  await writeFormatVersion(CURRENT_FORMAT_VERSION);
+
+  const abortedForCost =
+    reconcile.skippedOverBudget.length > 0 && opts.maxCostUsd !== undefined;
 
   const summary = finishSummary({
     startedAt,
     walked,
     cachedChunks: cachedChunkCountBefore,
-    chunks: allChunks.length,
-    newlyEmbedded,
-    failedEmbeds,
-    promptTokens,
-    estimatedUsd: refinedEstimate.estimatedUsd,
+    chunks: reconcile.chunksSeen,
+    newlyEmbedded: reconcile.newlyEmbedded,
+    failedEmbeds: reconcile.failedEmbeds,
+    promptTokens: reconcile.promptTokens,
+    estimatedUsd: initialEstimate.estimatedUsd,
     dryRun: false,
-    abortedForCost: false,
+    abortedForCost,
     rebuilt,
   });
   emit({ type: "complete", durationMs: summary.durationMs, summary });
   return summary;
-}
-
-interface EmbedTaskOutput {
-  embedded: number;
-  promptTokens: number;
-}
-
-function uniqueChunkHashes(chunks: ChunkRecord[]): string[] {
-  const set = new Set<string>();
-  for (const c of chunks) set.add(c.chunkHash);
-  return Array.from(set);
-}
-
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  if (size <= 0) return [arr];
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
 }
 
 function sumLoc(files: Map<string, WalkedFile>): number {
@@ -473,3 +418,9 @@ function finishSummary(args: {
 export { ensureGitignore } from "./ensure-gitignore.js";
 export { walkRepo, type WalkedFile, type WalkResult } from "./walk.js";
 export { estimateInit, ESTIMATE_CONSTANTS, type EstimateInput, type EstimateResult } from "./estimate.js";
+export {
+  reconcileFiles,
+  type ReconcileEvent,
+  type ReconcileInput,
+  type ReconcileSummary,
+} from "./reconcile.js";

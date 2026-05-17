@@ -80,8 +80,66 @@ export interface MerkleStore {
   getAllFileHashes(): Promise<Map<string, string>>;
   /** Compares the supplied path→sha map against the store's `file` rows. */
   diff(currentHashes: Map<string, string>): Promise<MerkleDiffResult>;
+  /**
+   * Delete one stored node row (used by reconcileFiles() when a file is
+   * removed from the working tree). M16 (ADR-0032).
+   */
+  deleteNode(nodePath: string): Promise<void>;
   /** Drops every node row (used by `--rebuild`). */
   clear(): Promise<void>;
+}
+
+/**
+ * Authoritative file→chunks junction (M16 / ADR-0032). Replaces the
+ * pre-M16 reliance on `chunks.file_path` first-writer-wins semantics.
+ * The store interface is read/test seam; the cross-table commit that
+ * keeps `chunks` + `file_chunks` + `embeddings` + `merkle` in sync on a
+ * per-file reconcile lives in `init/reconcile.ts`.
+ */
+export interface FileChunksStore {
+  /**
+   * Replace all junction rows for `filePath`. Atomic on better-sqlite3.
+   *  - DELETE existing rows for `filePath`
+   *  - INSERT new rows mapping `filePath` to each `chunkHash`
+   *  - `fileSha` stored on every row reflects the version that produced them
+   * Idempotent (same input → same end state).
+   */
+  replaceForFile(
+    filePath: string,
+    fileSha: string,
+    chunkHashes: string[],
+  ): Promise<void>;
+  /**
+   * Delete every row whose `filePath` matches. Used on file removal.
+   * Caller invokes `pruneOrphans()` separately to collect orphan chunks.
+   */
+  deleteForFile(filePath: string): Promise<void>;
+  /**
+   * Reverse lookup. Used by semantic.ts to attribute retrieved chunks to
+   * the current file(s) that own them. Returns `chunkHash → filePath[]`.
+   */
+  getFilesForHashes(chunkHashes: string[]): Promise<Map<string, string[]>>;
+  /**
+   * Forward lookup. Used by reconcileFiles() (when diagnostics need it)
+   * and tests. Returns the junction chunk hashes for `filePath`.
+   */
+  getHashesForFile(filePath: string): Promise<string[]>;
+  /** Total row count. Drives the backfill heuristic + diagnostics. */
+  count(): Promise<number>;
+  /**
+   * Reference-counted prune: delete chunks not present in any file_chunks
+   * row, then delete embeddings not present in chunks. Single transaction.
+   * Cheap O(N) full-table scans at warden's scale; called once per
+   * reconcileFiles() invocation at the end of the loops.
+   */
+  pruneOrphans(): Promise<{ chunksPruned: number; embeddingsPruned: number }>;
+  /**
+   * One-shot auto-backfill from chunks.file_path / chunks.file_sha. Runs
+   * exactly once per index (gated by `index_meta.file_chunks_backfilled_at`).
+   * Returns row count inserted; 0 if already backfilled, chunks empty, or
+   * file_chunks already has rows.
+   */
+  backfillFromChunksIfNeeded(): Promise<number>;
 }
 
 export interface Task<TInput, TOutput> {

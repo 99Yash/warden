@@ -1,5 +1,10 @@
 import type { EmbeddingProvider } from "@warden/ai";
-import type { ChunkStore, EmbeddingStore } from "../../indexing/index.js";
+import type {
+  ChunkStore,
+  EmbeddingStore,
+  FileChunksStore,
+} from "../../indexing/index.js";
+import { SqliteFileChunksStore } from "../../indexing/index.js";
 import type { DegradedEntry } from "../../schema.js";
 import type { Evidence } from "../index.js";
 
@@ -29,6 +34,11 @@ export interface SemanticSignalInput {
   embeddingProvider: EmbeddingProvider;
   embeddingStore: EmbeddingStore;
   chunkStore: ChunkStore;
+  /**
+   * Authoritative file→chunks junction (M16 / ADR-0032). When omitted, the
+   * default `SqliteFileChunksStore` is used. Tests pass an in-memory stub.
+   */
+  fileChunksStore?: FileChunksStore;
   /** Voyage SKU to query under — must equal the locked-model id of the index. */
   lockedModelId: string;
   /**
@@ -114,20 +124,35 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
     return { hitsByFile: new Map(), degraded: [] };
   }
 
-  const records = await input.chunkStore.getManyByHash(aboveThreshold.map((r) => r.chunkHash));
+  const hashes = aboveThreshold.map((r) => r.chunkHash);
+  const fileChunksStore = input.fileChunksStore ?? new SqliteFileChunksStore();
+  const [records, attributions] = await Promise.all([
+    input.chunkStore.getManyByHash(hashes),
+    fileChunksStore.getFilesForHashes(hashes),
+  ]);
   const hitsByFile = new Map<string, SemanticHit>();
   for (const r of aboveThreshold) {
     const record = records.get(r.chunkHash);
     if (!record) continue;
-    const hit: SemanticHit = {
-      chunkHash: r.chunkHash,
-      similarity: r.similarity,
-      startLine: record.startLine,
-      endLine: record.endLine,
-    };
-    const existing = hitsByFile.get(record.filePath);
-    if (!existing || existing.similarity < hit.similarity) {
-      hitsByFile.set(record.filePath, hit);
+    // Authoritative attribution via the M16 junction; fall back to the
+    // chunks row's first-writer-wins file_path during the backfill window
+    // (post-backfill, every chunk has at least one file_chunks row).
+    const attributedFiles = attributions.get(r.chunkHash);
+    const filePaths =
+      attributedFiles && attributedFiles.length > 0
+        ? attributedFiles
+        : [record.filePath];
+    for (const filePath of filePaths) {
+      const hit: SemanticHit = {
+        chunkHash: r.chunkHash,
+        similarity: r.similarity,
+        startLine: record.startLine,
+        endLine: record.endLine,
+      };
+      const existing = hitsByFile.get(filePath);
+      if (!existing || existing.similarity < hit.similarity) {
+        hitsByFile.set(filePath, hit);
+      }
     }
   }
 

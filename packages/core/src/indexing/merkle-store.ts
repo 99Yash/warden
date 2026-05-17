@@ -1,4 +1,4 @@
-import { db, merkle as merkleTable, sql } from "@warden/db";
+import { db, eq, merkle as merkleTable, sql } from "@warden/db";
 import type { MerkleDiffResult, MerkleNode, MerkleStore } from "./interfaces.js";
 
 /**
@@ -69,6 +69,10 @@ export class SqliteMerkleStore implements MerkleStore {
       if (!currentHashes.has(path)) removed.push(path);
     }
     return { changed, added, removed };
+  }
+
+  async deleteNode(nodePath: string): Promise<void> {
+    db().delete(merkleTable).where(eq(merkleTable.nodePath, nodePath)).run();
   }
 
   async clear(): Promise<void> {

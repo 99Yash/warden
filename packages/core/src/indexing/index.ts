@@ -9,6 +9,7 @@ export type {
   EmbeddingRecord,
   EmbeddingStore,
   ExportCounts,
+  FileChunksStore,
   IndexExporter,
   IndexImporter,
   JobRunResult,
@@ -22,6 +23,7 @@ export type {
 
 export { SqliteChunkStore } from "./chunk-store.js";
 export { SqliteEmbeddingStore } from "./embedding-store.js";
+export { SqliteFileChunksStore } from "./file-chunks-store.js";
 export { SqliteMerkleStore } from "./merkle-store.js";
 export { SyncJobRunner, taskIdFor } from "./job-runner.js";
 export { SqliteIndexExporter } from "./exporter.js";
