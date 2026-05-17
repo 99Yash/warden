@@ -6,15 +6,12 @@ import {
   SqliteEmbeddingStore,
   SqliteFileChunksStore,
   SqliteMerkleStore,
-  computeRepoMerkleRoot,
   readLockedModel,
   writeFormatVersion,
   writeLockedModel,
-  writeRepoMerkleRoot,
   type ChunkStore,
   type EmbeddingStore,
   type FileChunksStore,
-  type MerkleNode,
   type MerkleStore,
 } from "../indexing/index.js";
 import { ensureGitignore } from "./ensure-gitignore.js";
@@ -343,13 +340,9 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
     await writeLockedModel(lockedModelId, lockedModelVersion);
   }
 
-  // Persist the repo Merkle root + format version. The per-file merkle
-  // leaves were already committed inside reconcileFiles()'s atomic write.
-  const allNodes: MerkleNode[] = [];
-  for (const file of walked.files.values()) {
-    allNodes.push({ nodePath: file.path, hash: file.fileSha, kind: "file" });
-  }
-  await writeRepoMerkleRoot(computeRepoMerkleRoot(allNodes));
+  // `reconcileFiles()` already wrote the repo merkle root inside its atomic
+  // per-file commits + the post-loop snapshot. Init only owns the format
+  // version stamp on top of that.
   await writeFormatVersion(CURRENT_FORMAT_VERSION);
 
   const abortedForCost =

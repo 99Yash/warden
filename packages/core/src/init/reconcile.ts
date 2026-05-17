@@ -190,6 +190,7 @@ export async function reconcileFiles(
     }[] = [];
     let actualUsd = 0;
     let promptTokens = 0;
+    let fileFailed = false;
     if (missing.length > 0) {
       const hashToContent = new Map<string, string>();
       for (const c of chunksNew) {
@@ -200,7 +201,6 @@ export async function reconcileFiles(
         missing,
         input.provider.maxBatchSize(),
       );
-      let fileFailed = false;
       for (const batch of batches) {
         if (fileFailed) break;
         const batchInputs = batch.map(
@@ -244,12 +244,21 @@ export async function reconcileFiles(
           fileFailed = true;
         }
       }
-      if (fileFailed) {
-        // Pre-DB-commit failure — skip the file commit so its state on disk
-        // remains identical to before the call. Caller surfaces a degraded
-        // entry from the harness/init level if it wants to.
-        continue;
-      }
+    }
+
+    // Book provider spend regardless of whether the file commits. Successful
+    // batches consumed tokens on Voyage's side even when a later batch fails;
+    // if we only accounted post-commit, `remainingBudget` would stay inflated
+    // and `costUsd` would understate real spend.
+    remainingBudget -= actualUsd;
+    totalPromptTokens += promptTokens;
+    totalActualUsd += actualUsd;
+
+    if (fileFailed) {
+      // Pre-DB-commit failure — skip the file commit so its state on disk
+      // remains identical to before the call. Caller surfaces a degraded
+      // entry from the harness/init level if it wants to.
+      continue;
     }
 
     commitFileReconcile({
@@ -260,9 +269,6 @@ export async function reconcileFiles(
       chunkHashes: newHashes,
     });
 
-    remainingBudget -= actualUsd;
-    totalPromptTokens += promptTokens;
-    totalActualUsd += actualUsd;
     chunksSeen += newHashes.length;
     newlyEmbedded += missing.length;
     cachedEmbeddings += newHashes.length - missing.length;
