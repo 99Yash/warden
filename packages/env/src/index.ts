@@ -72,6 +72,21 @@ const envSchema = z.object({
         'WARDEN_REVIEW_WORKER_BUDGET must be a positive integer (use the round cap to disable workers)',
     })
     .optional(),
+  // ADR-0032 / M16: optional USD cap for the review-time incremental
+  // embedding refresh. Unset means the review harness uses its default
+  // budget; 0 is the explicit opt-out.
+  WARDEN_REVIEW_REFRESH_MAX_USD: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value === undefined || value === '' ? undefined : Number(value),
+    )
+    .refine(
+      (value) => value === undefined || (Number.isFinite(value) && value >= 0),
+      {
+        message: 'WARDEN_REVIEW_REFRESH_MAX_USD must be a non-negative number',
+      },
+    ),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),

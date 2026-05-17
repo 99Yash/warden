@@ -2,7 +2,6 @@ import {
   Output,
   createRetryable,
   error as anyError,
-  getBossFallbackModel,
   getBossModel,
   getModelKey,
   stepCountIs,
@@ -44,11 +43,16 @@ import {
  * object so AI SDK v6's structured-output channel parses reliably — see
  * `BossOutputSchema` below).
  *
- * Boss model is `getBossModel()` (Opus 4.6 per ADR-0030 §2). Provider
- * cascade mirrors the M4 formatter (`cascade.ts`): Anthropic → retry on
- * transient → Google fallback → hard fail. Cascade observability events
- * surface via `emit` (same `FormatterListener` the rest of the pipeline
- * uses).
+ * Boss model is `getBossModel()` (Opus 4.6 per ADR-0030 §2). Per the
+ * ADR-0017 2026-05-17 "tools + structured-output exception" amendment,
+ * the boss cascade is **Anthropic primary + 1× transient retry, hard-fail
+ * otherwise** — Gemini fallback is NOT registered at this call site
+ * because Gemini's structured-output API rejects `tools[]` combined with
+ * `responseMimeType: 'application/json'` (the `Output.object` setting).
+ * On sustained Anthropic outage, `runBossLoop()` throws with a legible
+ * message naming the cause; the review exits non-zero. Cascade
+ * observability events surface via `emit` (same `FormatterListener` the
+ * rest of the pipeline uses).
  */
 
 const DEFAULT_BOSS_ROUNDS = 5;
@@ -397,9 +401,6 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   const primary = getBossModel();
   const primaryKey = getModelKey(primary);
   const primaryId = modelLabel(primary);
-  const fallback = getBossFallbackModel();
-  const fallbackKey = fallback ? getModelKey(fallback) : undefined;
-  const fallbackId = fallback ? modelLabel(fallback) : undefined;
 
   const errorSummaries: string[] = [];
   let lastPrimarySummary: string | undefined;
@@ -414,6 +415,9 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
 
   const transientCondition = anyError.isRetryable(true).or(timeoutCondition());
 
+  // Per ADR-0017 2026-05-17 amendment: cascade for tool-using
+  // `streamText` call sites is primary + 1× transient retry only. No
+  // Gemini fallback step is registered.
   const retries: Retries<LanguageModel> = [
     transientCondition.retry({
       delay: RETRY_BACKOFF_MS,
@@ -421,17 +425,6 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       timeout: PROVIDER_TIMEOUT_MS,
     }),
   ];
-
-  if (fallback) {
-    retries.push({
-      model: fallback,
-      timeout: PROVIDER_TIMEOUT_MS,
-      // Strip Anthropic-scoped providerOptions on Google fallback. Boss does
-      // not use extended-thinking in M14 — adjudication happens through the
-      // tool-use loop, not provider-side reasoning.
-      options: { providerOptions: {} },
-    });
-  }
 
   const retryable = createRetryable<LanguageModel>({
     model: primary,
@@ -445,35 +438,21 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
         }
       }
     },
-    onRetry: (ctx: RetryContext<LanguageModel>) => {
-      const nextKey = getModelKey(ctx.current.model);
-      if (fallbackKey && nextKey === fallbackKey) {
-        input.emit?.({
-          type: "fallback-engaged",
-          from: `anthropic/${primaryId}`,
-          to: `google/${fallbackId ?? "unknown"}`,
-          reason: lastPrimarySummary ?? "unknown",
-        });
-        input.emit?.({
-          type: "phase-start",
-          phase: "llm",
-          provider: "google",
-          modelId: fallbackId ?? "unknown",
-        });
-      }
-    },
     onSuccess: (ctx: SuccessContext<LanguageModel>) => {
       servedBy = ctx.current.model;
     },
   });
 
-  // M15 (ADR-0031): wrap BossOutputSchema with the Gemini adapter so the
-  // Google fallback path doesn't 400 on numeric-literal-union TierEnum. The
-  // transform is universal (Anthropic accepts string-form enums identically
-  // — boss never sees the schema literally), and `responseTransform` coerces
-  // strings back to numbers before downstream Comment[] typing applies. When
-  // the adapter detects no numeric-literal-union in the schema (no-op case),
-  // `requestSchema === BossOutputSchema` and `responseTransform` is identity.
+  // Adapter is vestigial post-ADR-0017 2026-05-17 amendment (Gemini fallback
+  // is no longer registered at this call site — see the cascade comment
+  // above). Kept wired so the reversal block from `git log` re-enables
+  // fallback in a single edit; the adapter is universal (Anthropic accepts
+  // string-form enums identically — boss never sees the schema literally)
+  // so it costs nothing on the Anthropic-only happy path.
+  // `responseTransform` coerces strings back to numbers before downstream
+  // Comment[] typing applies. When the adapter detects no numeric-literal-
+  // union in the schema (no-op case), `requestSchema === BossOutputSchema`
+  // and `responseTransform` is identity.
   const geminiPair = transformSchemaForGemini(BossOutputSchema);
 
   try {
@@ -522,22 +501,16 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     }
     if (bossTokens) input.scratchpad.recordBossTokens(bossTokens);
 
-    const servedKey = getModelKey(servedBy);
-    const provider: "anthropic" | "google" =
-      servedKey === primaryKey ? "anthropic" : "google";
     const modelId = modelLabel(servedBy);
 
-    if (provider === "anthropic" && errorSummaries.length > 0) {
+    // Post-amendment, the only served path is Anthropic primary — fallback
+    // wiring is compile-time deleted. The retried-successfully degraded
+    // entry surfaces when a transient retry rescued the primary call.
+    if (errorSummaries.length > 0) {
       degraded.push({
         kind: "warning",
         topic: "llm",
         message: `llm: anthropic ${errorSummaries[0]}, retried successfully`,
-      });
-    } else if (provider === "google") {
-      degraded.push({
-        kind: "warning",
-        topic: "llm",
-        message: `llm: anthropic ${lastPrimarySummary ?? "failed"}, served from google`,
       });
     }
 
@@ -561,14 +534,10 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   } catch (err) {
     const primarySummary =
       lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
-    if (!fallback) {
-      throw new Error(
-        `review-harness boss: anthropic failed (${primarySummary}); GOOGLE_GENERATIVE_AI_API_KEY not set, no fallback available`,
-      );
-    }
-    const fallbackSummary = errorSummaries.at(-1) ?? errorSummary(err);
+    // Per ADR-0017 2026-05-17 amendment: tool-using call sites do not fall
+    // back to Gemini. Hard-fail cleanly with a legible message.
     throw new Error(
-      `review-harness boss: anthropic failed (${primarySummary}); google fallback also failed (${fallbackSummary})`,
+      `review-harness boss: anthropic failed (${primarySummary}); Gemini fallback skipped (tools required)`,
     );
   }
 }

@@ -1,6 +1,7 @@
 export * from "./schema/chunks.js";
 export * from "./schema/embeddings.js";
 export * from "./schema/external-knowledge.js";
+export * from "./schema/file-chunks.js";
 export * from "./schema/file-state.js";
 export * from "./schema/import-graph.js";
 export * from "./schema/index-meta.js";

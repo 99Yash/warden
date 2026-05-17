@@ -13,6 +13,8 @@ export const META_KEYS = {
   EMBEDDING_LOCKED_AT: "embedding_locked_at",
   FORMAT_VERSION: "format_version",
   REPO_MERKLE_ROOT: "repo_merkle_root",
+  /** M16 / ADR-0032 — set once after the one-shot file_chunks backfill runs. */
+  FILE_CHUNKS_BACKFILLED_AT: "file_chunks_backfilled_at",
 } as const;
 
 export type MetaKey = (typeof META_KEYS)[keyof typeof META_KEYS];

@@ -36,6 +36,13 @@
       "when": 1778639388137,
       "tag": "0004_shiny_tiger_shark",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1778983690455,
+      "tag": "0005_careless_freak",
+      "breakpoints": true
     }
   ]
 }

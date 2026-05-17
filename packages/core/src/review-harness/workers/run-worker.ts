@@ -1,11 +1,10 @@
 import {
   Output,
-  getWorkerCheapFallbackModel,
   getWorkerCheapModel,
-  getWorkerStrongFallbackModel,
   getWorkerStrongModel,
   stepCountIs,
   streamText,
+  transformSchemaForGemini,
   type LanguageModel,
   type ToolSet,
 } from "@warden/ai";
@@ -30,7 +29,20 @@ import type {
 import { makeGrepRepoTool } from "../tools/grep-repo.js";
 import { makeReadFileTool } from "../tools/read-file.js";
 import { buildFileSnippet, type FileSnippet } from "./file-snippet.js";
-import { WorkerOutputSchema, type WorkerFinding } from "./finding-schema.js";
+import {
+  WorkerOutputSchema,
+  type WorkerFinding,
+  type WorkerOutput,
+} from "./finding-schema.js";
+
+// Adapter is vestigial post-ADR-0017 2026-05-17 amendment (Gemini fallback
+// is no longer registered for tool-using worker call sites — see the cascade
+// definition in `callWorker()` below). Kept wired so the reversal block from
+// `git log` re-enables fallback in a single edit; the adapter is universal
+// (Anthropic accepts string-form enums identically) so it costs nothing on
+// the Anthropic-only happy path. The `responseTransform` coerces strings
+// back to numbers pre-`WorkerFinding`.
+const WORKER_GEMINI_PAIR = transformSchemaForGemini(WorkerOutputSchema);
 
 /**
  * Shared M14 review-harness worker runtime. The 6 concerns (`correctness`,
@@ -155,8 +167,27 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     preamble: input.preamble,
   });
 
+  let primary: LanguageModel;
+  try {
+    primary = tier === "sonnet" ? getWorkerStrongModel() : getWorkerCheapModel();
+  } catch (err) {
+    degraded.push({
+      kind: "warning",
+      topic: `worker-${input.concern}`,
+      message: `${input.concern}: anthropic ${tier} model unavailable (${formatErr(err)})`,
+    });
+    return {
+      findings: [],
+      toolCalls: 0,
+      degraded,
+      durationMs: Date.now() - startedAt,
+      tier,
+    };
+  }
+
   const call = await callWorker({
     tier,
+    primary,
     systemPrompt,
     userPrompt,
     tools,
@@ -176,14 +207,6 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       durationMs: Date.now() - startedAt,
       tier,
     };
-  }
-
-  if (call.fellBackToGoogle) {
-    degraded.push({
-      kind: "warning",
-      topic: `worker-${input.concern}`,
-      message: `${input.concern}: anthropic failed (${call.fallbackReason ?? "unknown"}), served from google`,
-    });
   }
 
   const category = CATEGORY_BY_CONCERN[input.concern];
@@ -302,15 +325,28 @@ function normalizeSources(sources: Source[], nowIso: string): Source[] {
 }
 
 // ---------------------------------------------------------------------------
-// Provider call + cascade.
+// Provider call.
+//
+// Per ADR-0017 2026-05-17 amendment ("tools + structured-output exception"),
+// tool-using worker call sites do NOT register a Gemini fallback. The cascade
+// here is **Anthropic primary only** — the 1× transient retry already lives
+// inside `ai-retry`'s default behavior when the model is constructed (not
+// wired here in v0) and intra-`streamText` provider retries are out of scope
+// for the worker path. On Anthropic failure, the caller surfaces a `warning`
+// degraded entry whose message includes the literal "Gemini fallback skipped
+// (tools required)" sentinel — see `runWorker()` above.
+//
+// Pre-amendment, this function resolved `getWorkerStrongFallbackModel()` /
+// `getWorkerCheapFallbackModel()` and made a second `tryProvider()` call on
+// Anthropic failure. That block was removed wholesale; the fallback getters
+// remain exported from `@warden/ai` so reversal is the inverse delta from
+// `git log`.
 // ---------------------------------------------------------------------------
 
 interface WorkerCallOk {
   ok: true;
   findings: WorkerFinding[];
   toolCalls: number;
-  fellBackToGoogle: boolean;
-  fallbackReason?: string;
   tokenUsage?: TokenUsage;
 }
 
@@ -319,58 +355,36 @@ interface WorkerCallErr {
   error: string;
 }
 
-async function callWorker(opts: {
+/**
+ * Worker LLM-call policy boundary. Exported so the M14 / ADR-0017 amendment
+ * smoke (`smoke-bugfloor-gemini-skip-with-tools.mts`) can drive a stub
+ * primary model directly and assert on the resulting failure shape without
+ * standing up the full `runWorker()` snippet-rendering path. Production
+ * callers all flow through `runWorker()`, which resolves `primary` from
+ * `@warden/ai`'s tier getters.
+ *
+ * @internal
+ */
+export async function callWorker(opts: {
   tier: WorkerTier;
+  primary: LanguageModel;
   systemPrompt: string;
   userPrompt: string;
   tools: ToolSet;
   timeoutMs: number;
 }): Promise<WorkerCallOk | WorkerCallErr> {
-  let primary: LanguageModel;
-  try {
-    primary = opts.tier === "sonnet" ? getWorkerStrongModel() : getWorkerCheapModel();
-  } catch (err) {
-    return { ok: false, error: `anthropic ${opts.tier} model unavailable (${formatErr(err)})` };
-  }
-  const first = await tryProvider(primary, opts);
+  const first = await tryProvider(opts.primary, opts);
   if (first.ok) {
     return {
       ok: true,
       findings: first.findings,
       toolCalls: first.toolCalls,
-      fellBackToGoogle: false,
       tokenUsage: first.tokenUsage,
-    };
-  }
-  let fallback: LanguageModel | undefined;
-  try {
-    fallback =
-      opts.tier === "sonnet"
-        ? getWorkerStrongFallbackModel()
-        : getWorkerCheapFallbackModel();
-  } catch {
-    fallback = undefined;
-  }
-  if (!fallback) {
-    return {
-      ok: false,
-      error: `anthropic ${first.error}; no google fallback configured`,
-    };
-  }
-  const second = await tryProvider(fallback, opts);
-  if (second.ok) {
-    return {
-      ok: true,
-      findings: second.findings,
-      toolCalls: second.toolCalls,
-      fellBackToGoogle: true,
-      fallbackReason: first.error,
-      tokenUsage: second.tokenUsage,
     };
   }
   return {
     ok: false,
-    error: `anthropic ${first.error}; google ${second.error}`,
+    error: `anthropic ${opts.tier} failed (${first.error}); Gemini fallback skipped (tools required)`,
   };
 }
 
@@ -397,7 +411,7 @@ async function tryProvider(
       prompt: opts.userPrompt,
       tools: opts.tools,
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
-      output: Output.object({ schema: WorkerOutputSchema }),
+      output: Output.object({ schema: WORKER_GEMINI_PAIR.requestSchema }),
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;
@@ -410,7 +424,10 @@ async function tryProvider(
         // surfaced via awaited result.output below
       }
     })();
-    const parsed = await result.output;
+    const rawOutput = await result.output;
+    // Coerce string-form numeric literals back to numbers. No-op when the
+    // schema contained no numeric-literal-union (pair is identity).
+    const parsed = WORKER_GEMINI_PAIR.responseTransform(rawOutput) as WorkerOutput;
     let tokenUsage: TokenUsage | undefined;
     try {
       const usage = await result.usage;

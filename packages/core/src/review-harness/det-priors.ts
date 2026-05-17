@@ -1,9 +1,11 @@
 import { CURRENT_DEFAULT, getEmbeddingProvider } from "@warden/ai";
+import { wardenEnv } from "@warden/env";
 import {
   bannerStateToDegraded,
   computeBannerState,
   type BannerState,
 } from "../banner/index.js";
+import { CodeChunkAdapter } from "../context/chunker.js";
 import {
   CheapSignalsSelector,
   candidatesToRetrievedContext,
@@ -20,10 +22,13 @@ import {
   type EcosystemContext,
 } from "../ecosystem/index.js";
 import { ensureGitignore } from "../init/ensure-gitignore.js";
-import { walkRepo } from "../init/walk.js";
+import { reconcileFiles, type ReconcileSummary } from "../init/reconcile.js";
+import { walkRepo, type WalkedFile } from "../init/walk.js";
 import {
   SqliteChunkStore,
   SqliteEmbeddingStore,
+  SqliteFileChunksStore,
+  SqliteMerkleStore,
   readLockedModel,
 } from "../indexing/index.js";
 import { runConsistency } from "../runners/consistency.js";
@@ -134,11 +139,15 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
 
   // Banner state (review-mode only). `check` skips — deterministic-only.
   let bannerState: BannerState = { kind: "no-banner" };
+  let walkedForRefresh: Map<string, WalkedFile> | null = null;
+  let currentHashesForRefresh: Map<string, string> | null = null;
   if (input.mode === "review") {
     try {
       const walk = await walkRepo(input.repoRoot);
+      walkedForRefresh = walk.files;
       const currentHashes = new Map<string, string>();
       for (const f of walk.files.values()) currentHashes.set(f.path, f.fileSha);
+      currentHashesForRefresh = currentHashes;
       bannerState = await computeBannerState({
         repoRoot: input.repoRoot,
         currentDefault: CURRENT_DEFAULT,
@@ -151,6 +160,76 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
         topic: "banner",
         message: `banner: state lookup failed (${formatErr(err)})`,
       });
+    }
+  }
+
+  // M16 / ADR-0032: implicit incremental refresh of the index when review
+  // sees a stale banner. The budget defaults to $0.25; set
+  // `WARDEN_REVIEW_REFRESH_MAX_USD=0` to opt out and keep the existing
+  // stale-index banner as the only surface. Failures degrade cleanly — the
+  // review continues against the (possibly stale) index.
+  if (
+    input.mode === "review" &&
+    bannerState.kind === "stale" &&
+    walkedForRefresh &&
+    currentHashesForRefresh
+  ) {
+    const refreshBudget = wardenEnv().WARDEN_REVIEW_REFRESH_MAX_USD ?? 0.25;
+    if (refreshBudget > 0) {
+      try {
+        const merkleStore = new SqliteMerkleStore();
+        const diff = await merkleStore.diff(currentHashesForRefresh);
+        const staleFiles: WalkedFile[] = [];
+        for (const path of [...diff.changed, ...diff.added]) {
+          const wf = walkedForRefresh.get(path);
+          if (wf) staleFiles.push(wf);
+        }
+        if (staleFiles.length > 0 || diff.removed.length > 0) {
+          const locked = await readLockedModel();
+          const provider = getEmbeddingProvider();
+          const reconcile = await reconcileFiles({
+            files: staleFiles,
+            removed: diff.removed,
+            repoRoot: input.repoRoot,
+            chunker: new CodeChunkAdapter(),
+            chunkStore: new SqliteChunkStore(),
+            embeddingStore: new SqliteEmbeddingStore(),
+            merkleStore,
+            fileChunksStore: new SqliteFileChunksStore(),
+            provider,
+            lockedModelId: locked?.modelId ?? CURRENT_DEFAULT,
+            lockedModelVersion:
+              locked?.modelVersion ?? `dim=1024;type=document`,
+            maxUsdBudget: refreshBudget,
+          });
+          environmentalDegraded.push(...reconcile.degraded);
+          if (reconcile.refreshed.length > 0 || reconcile.removed.length > 0) {
+            environmentalDegraded.push({
+              kind: "info",
+              topic: "context",
+              message: formatRefreshSummary(reconcile),
+            });
+          }
+          // Banner now reflects the post-reconcile state. If every stale
+          // file refreshed within budget, this clears to "no-banner".
+          try {
+            bannerState = await computeBannerState({
+              repoRoot: input.repoRoot,
+              currentDefault: CURRENT_DEFAULT,
+              currentHashes: currentHashesForRefresh,
+            });
+          } catch {
+            // Banner re-read failures are non-fatal — keep the prior stale
+            // state so the user still sees the actionable surface.
+          }
+        }
+      } catch (err) {
+        environmentalDegraded.push({
+          kind: "warning",
+          topic: "context",
+          message: `context: incremental refresh failed (${formatErr(err)}) — running against possibly-stale index`,
+        });
+      }
     }
   }
 
@@ -422,4 +501,25 @@ function uniqStrings(items: string[]): string[] {
 function formatErr(err: unknown): string {
   if (err instanceof Error) return err.message.slice(0, 160);
   return String(err).slice(0, 160);
+}
+
+function formatRefreshSummary(reconcile: ReconcileSummary): string {
+  const parts: string[] = [];
+  if (reconcile.refreshed.length > 0) {
+    parts.push(
+      `refreshed ${reconcile.refreshed.length} file${reconcile.refreshed.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (reconcile.removed.length > 0) {
+    parts.push(
+      `removed ${reconcile.removed.length} file${reconcile.removed.length === 1 ? "" : "s"}`,
+    );
+  }
+  // Voyage cost applies to refreshes only; deletes are free. Show 4 decimals
+  // — incremental refresh spend is typically $0.0008–$0.05 per review.
+  const head = `context: ${parts.join(", ")}`;
+  if (reconcile.costUsd > 0) {
+    return `${head} ($${reconcile.costUsd.toFixed(4)})`;
+  }
+  return head;
 }
