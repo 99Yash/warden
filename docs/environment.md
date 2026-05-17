@@ -1,0 +1,20 @@
+# Environment variables
+
+See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index.
+
+Validated by `wardenEnv()` from `@warden/env`. Calling it with missing required vars throws a clear error.
+
+| Var                            | Notes                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`            | Required. Even `warden check` validates env at start.                                                     |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Optional. Enables the ADR-0017 fallback (Anthropic → retry → Google). When unset, Anthropic failure is hard-fail. |
+| `WARDEN_THINKING_BUDGET`       | Optional. Anthropic extended-thinking budget in tokens. Default 4096.                                     |
+| `WARDEN_LOG_LEVEL`             | Optional. Default `info`. Values: `silent`, `error`, `warn`, `info`, `debug`.                             |
+| `WARDEN_SECURITY_CONFIDENCE_FLOOR` | Optional. Numeric `0.0`–`1.0`. Overrides the per-category confidence floor for `security` (ADR-0028 §5; default 0.8 in `packages/core/src/confidence.ts`). Tier-1 findings bypass unconditionally. The M17 deep-security harness will bypass the floor entirely per ADR-0029 §10; the live M14 review path is unaffected. |
+| `WARDEN_REVIEW_BOSS_ROUNDS`    | Optional. Positive integer, clamped to `[1, 10]`. Default 5. Step cap on the M14 review harness boss loop — each round is one `streamText` step the Opus 4.6 boss spends dispatching workers via `dispatch_worker` or emitting the final `Output.object({ comments: Comment[] })` structured result. Live since the M14 close-out wired `review()` to `runReviewHarness()` (ADR-0030; m14-plan.md). |
+| `WARDEN_REVIEW_WORKER_BUDGET`  | Optional. Positive integer; unset = unbounded. Total cap on workers dispatched across the entire M14 boss loop. When set, the `dispatch_worker` tool returns an error to the boss + emits a degraded entry past the cap (belt-and-suspenders against boss-side over-spend). Use `WARDEN_REVIEW_BOSS_ROUNDS=1` if you want zero workers; 0 is rejected here by design (ADR-0030). |
+| `WARDEN_REVIEW_REFRESH_MAX_USD` | Optional. Numeric `0.0+`. Default `0.25`. USD cap applied by `det-priors.ts` when `warden review` triggers `reconcileFiles()` over stale files (M16 — ADR-0032). Pre-flight estimate via `estimate.ts` LOC heuristic; running accountant uses actual Voyage cost from `resp.promptTokens` × `VOYAGE_MODELS` pricing. Over-budget files are skipped (subsequent files within budget still refresh) and surfaced as one actionable `degradedWorkers` entry pointing at `warden init`. Set to `0` to opt out of implicit refresh entirely — review then runs against possibly-stale embeddings. Deletes are unconditional and free of Voyage cost; the cap only gates added/changed files. Init's own `--max-cost` flag is a separate surface (full reindex budget, not per-review budget). |
+
+When adding a new env var: update `packages/env/src/index.ts`, `.env.example`, and this file.
+
+Do not use `process.env` directly in app code — always go through `wardenEnv()`.

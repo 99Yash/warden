@@ -14,7 +14,7 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **`warden review`** — Full pipeline: deterministic checks + context selection + LLM formatter that triages findings, writes citations, and orders **comments** by **priority order**. → ADR-0011, ADR-0012.
 
-**`warden init`** — Builds (or refreshes) the embedding-backed context index. Three sequential **phases**: walk → chunk → embed. Idempotent re-runs hit the cache. Flags: `--rebuild`, `--dry-run`, `--max-cost`. → ADR-0019, m6-plan.md.
+**`warden init`** — Builds (or refreshes) the embedding-backed context index. Three sequential **phases**: walk → chunk → embed. Idempotent re-runs hit the cache. Flags: `--rebuild`, `--dry-run`, `--max-cost`. Post-M16, `runInit()` is a thin wrapper over **`reconcileFiles`** (full-walk scope, unbounded budget); the same primitive powers `warden review`'s **incremental refresh** via the M16 alignment per ADR-0032. → ADR-0019, ADR-0032, m6-plan.md.
 
 **`warden patrol`** — `[deferred]` Reserved verb for watch-mode (IDE-style background scanning). → ADR-0011.
 
