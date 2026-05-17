@@ -6,6 +6,7 @@ import {
   getWorkerStrongModel,
   stepCountIs,
   streamText,
+  transformSchemaForGemini,
   type LanguageModel,
   type ToolSet,
 } from "@warden/ai";
@@ -30,7 +31,19 @@ import type {
 import { makeGrepRepoTool } from "../tools/grep-repo.js";
 import { makeReadFileTool } from "../tools/read-file.js";
 import { buildFileSnippet, type FileSnippet } from "./file-snippet.js";
-import { WorkerOutputSchema, type WorkerFinding } from "./finding-schema.js";
+import {
+  WorkerOutputSchema,
+  type WorkerFinding,
+  type WorkerOutput,
+} from "./finding-schema.js";
+
+// M16: wrap WorkerOutputSchema with the Gemini adapter so worker calls that
+// fall back to Google (run-worker.ts callWorker → fallback path) don't 400 on
+// numeric-literal-union TierEnum. Pattern lifted from boss-loop.ts:477; the
+// adapter is universal (Anthropic accepts string-form enums identically) and
+// the response transform coerces strings back to numbers pre-`WorkerFinding`.
+// Schema is static, so compute the pair once at module scope.
+const WORKER_GEMINI_PAIR = transformSchemaForGemini(WorkerOutputSchema);
 
 /**
  * Shared M14 review-harness worker runtime. The 6 concerns (`correctness`,
@@ -397,7 +410,7 @@ async function tryProvider(
       prompt: opts.userPrompt,
       tools: opts.tools,
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
-      output: Output.object({ schema: WorkerOutputSchema }),
+      output: Output.object({ schema: WORKER_GEMINI_PAIR.requestSchema }),
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;
@@ -410,7 +423,10 @@ async function tryProvider(
         // surfaced via awaited result.output below
       }
     })();
-    const parsed = await result.output;
+    const rawOutput = await result.output;
+    // Coerce string-form numeric literals back to numbers. No-op when the
+    // schema contained no numeric-literal-union (pair is identity).
+    const parsed = WORKER_GEMINI_PAIR.responseTransform(rawOutput) as WorkerOutput;
     let tokenUsage: TokenUsage | undefined;
     try {
       const usage = await result.usage;

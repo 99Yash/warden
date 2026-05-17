@@ -22,7 +22,7 @@ import {
   type EcosystemContext,
 } from "../ecosystem/index.js";
 import { ensureGitignore } from "../init/ensure-gitignore.js";
-import { reconcileFiles } from "../init/reconcile.js";
+import { reconcileFiles, type ReconcileSummary } from "../init/reconcile.js";
 import { walkRepo, type WalkedFile } from "../init/walk.js";
 import {
   SqliteChunkStore,
@@ -203,6 +203,13 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
             maxUsdBudget: refreshBudget,
           });
           environmentalDegraded.push(...reconcile.degraded);
+          if (reconcile.refreshed.length > 0 || reconcile.removed.length > 0) {
+            environmentalDegraded.push({
+              kind: "info",
+              topic: "context",
+              message: formatRefreshSummary(reconcile),
+            });
+          }
           // Banner now reflects the post-reconcile state. If every stale
           // file refreshed within budget, this clears to "no-banner".
           try {
@@ -494,4 +501,25 @@ function uniqStrings(items: string[]): string[] {
 function formatErr(err: unknown): string {
   if (err instanceof Error) return err.message.slice(0, 160);
   return String(err).slice(0, 160);
+}
+
+function formatRefreshSummary(reconcile: ReconcileSummary): string {
+  const parts: string[] = [];
+  if (reconcile.refreshed.length > 0) {
+    parts.push(
+      `refreshed ${reconcile.refreshed.length} file${reconcile.refreshed.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (reconcile.removed.length > 0) {
+    parts.push(
+      `removed ${reconcile.removed.length} file${reconcile.removed.length === 1 ? "" : "s"}`,
+    );
+  }
+  // Voyage cost applies to refreshes only; deletes are free. Show 4 decimals
+  // — incremental refresh spend is typically $0.0008–$0.05 per review.
+  const head = `context: ${parts.join(", ")}`;
+  if (reconcile.costUsd > 0) {
+    return `${head} ($${reconcile.costUsd.toFixed(4)})`;
+  }
+  return head;
 }

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { CURRENT_DEFAULT, getEmbeddingProvider, type EmbeddingProvider } from "@warden/ai";
 import { CodeChunkAdapter, type Chunker } from "../context/chunker.js";
 import {
@@ -7,6 +6,7 @@ import {
   SqliteEmbeddingStore,
   SqliteFileChunksStore,
   SqliteMerkleStore,
+  computeRepoMerkleRoot,
   readLockedModel,
   writeFormatVersion,
   writeLockedModel,
@@ -376,15 +376,6 @@ function sumLoc(files: Map<string, WalkedFile>): number {
   let total = 0;
   for (const f of files.values()) total += f.loc;
   return total;
-}
-
-function computeRepoMerkleRoot(nodes: MerkleNode[]): string {
-  const sorted = [...nodes].sort((a, b) => a.nodePath.localeCompare(b.nodePath));
-  const h = createHash("sha256");
-  for (const n of sorted) {
-    h.update(`${n.kind}:${n.nodePath}:${n.hash}\n`, "utf8");
-  }
-  return h.digest("hex");
 }
 
 function finishSummary(args: {

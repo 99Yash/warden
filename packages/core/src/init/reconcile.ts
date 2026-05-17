@@ -11,11 +11,14 @@ import type {
   ChunkRecord,
   Chunker,
 } from "../context/chunker.js";
-import type {
-  ChunkStore,
-  EmbeddingStore,
-  FileChunksStore,
-  MerkleStore,
+import {
+  computeRepoMerkleRoot,
+  writeRepoMerkleRoot,
+  type ChunkStore,
+  type EmbeddingStore,
+  type FileChunksStore,
+  type MerkleNode,
+  type MerkleStore,
 } from "../indexing/index.js";
 import type { DegradedEntry } from "../schema.js";
 import { ESTIMATE_CONSTANTS } from "./estimate.js";
@@ -210,11 +213,25 @@ export async function reconcileFiles(
           });
           for (let j = 0; j < batch.length; j++) {
             const h = batch[j]!;
+            const vector = resp.vectors[j];
+            // Provider contract: every batch input gets a non-empty vector.
+            // VoyageProvider enforces this at the source (voyage.ts:157-161);
+            // future providers may not. Fail the batch instead of writing a
+            // zero-length BLOB — silent corruption here means cosine queries
+            // return 0 with no error and no degraded surface. The existing
+            // catch promotes the throw to `failedEmbeds++`/`fileFailed`, so
+            // the file's commit is skipped and a warning degraded entry is
+            // surfaced via the file-level summary below.
+            if (!vector || vector.length === 0) {
+              throw new Error(
+                `embed: provider returned ${vector ? "empty" : "missing"} vector at batch index ${j}`,
+              );
+            }
             newEmbeddings.push({
               chunkHash: h,
               modelId: resp.modelId,
               modelVersion: resp.modelVersion,
-              vector: resp.vectors[j] ?? new Float32Array(0),
+              vector,
             });
           }
           promptTokens += resp.promptTokens;
@@ -276,6 +293,21 @@ export async function reconcileFiles(
       chunksPruned,
       embeddingsPruned,
     });
+  }
+
+  // Recompute + persist the repo merkle root if anything touched the merkle
+  // table (refreshed leaves or removed leaves). The root is informational
+  // today — staleness is computed per-leaf in `computeBannerState()` — but
+  // keeping the snapshot truthful preserves the invariant that
+  // `index_meta.repo_merkle_root` matches the current set of merkle leaves
+  // for any future tripwire / observability consumer.
+  if (refreshed.length > 0 || removedActual.length > 0) {
+    const allHashes = await input.merkleStore.getAllFileHashes();
+    const allNodes: MerkleNode[] = [];
+    for (const [path, hash] of allHashes) {
+      allNodes.push({ nodePath: path, hash, kind: "file" });
+    }
+    await writeRepoMerkleRoot(computeRepoMerkleRoot(allNodes));
   }
 
   const degraded: DegradedEntry[] = [];
