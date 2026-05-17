@@ -5,6 +5,8 @@
 > **Renumbered again 2026-05-16 by ADR-0032:** when ADR-0032 redirected M16 to **init/review alignment** (file→chunks junction + reference-counted prune + incremental refresh at review time), deep-security was pushed to M17 and this file was `git mv`'d again from `m16-plan.md` → `m17-plan.md`. The active implementation instructions below use the M17 numbering; any remaining "M15" mentions are historical renumbering context. Forward-looking post-deep-security references are written as "M18+" in the new numbering.
 >
 > **Current translation note for implementation:** references to the retired M8 spine / M13 security sub-agent are historical unless explicitly called out as "do not resurrect." When this plan is implemented as M17, compose with the live M14/M15 review harness (`packages/core/src/review-harness/`) and treat `warden review --deep` as "M14/M15 review harness plus M17 security harness", matching the CLAUDE.md milestone entry.
+>
+> **Finalisation amendment 2026-05-17:** ADR-0017's tools + structured-output exception carries into M17. Tool-less structured-output call sites may keep Gemini fallback (Boss Plan, Boss Synth, and the no-tool Haiku classifier), with `transformSchemaForGemini()` at any Gemini structured-output boundary. Tool-using investigator workers (`lookupTypeDef` + `readFile` + `grepRepo`) must not register Gemini fallback; on Anthropic failure they degrade cleanly with the same "Gemini fallback skipped (tools required)" posture as the live M14 workers. A general worker-fallback strategy remains ADR-0033 / M18+.
 
 This is the milestone brief for the agent (or future-me) implementing M17. Self-contained: read this plus `decisions.md` ADR-0029 and you have everything.
 
@@ -23,7 +25,7 @@ M17 ships the **on-demand deep tier** of `project_warden_security_depth_tiers.md
 9. **`./packages/core/src/confidence.ts`** — `applyConfidenceFloor()` stays unchanged; `applyHardRules()` skips it only for the `m17-security` harness branch.
 10. **`./packages/core/src/llm/tools/lookup-type-def.ts`** — M11 tool descriptor. M17 imports `makeLookupTypeDefTool()` for investigator workers.
 11. **`./packages/core/src/llm/verify-citations.ts`** — M10/M11 global substring-verifier. M17 calls it unchanged after boss synth.
-12. **`./packages/core/src/review-harness/boss-loop.ts`** + **`./packages/ai/src/models.ts`** — pattern for the inline Anthropic → Google cascade and model usage accounting. M17 adds `getApexModel()` + `getApexFallbackModel()` alongside existing helpers; it does not resurrect the retired M4 `llm/cascade.ts`.
+12. **`./packages/core/src/review-harness/boss-loop.ts`** + **`./packages/core/src/review-harness/workers/run-worker.ts`** + **`./packages/ai/src/models.ts`** — pattern for the inline retry/fallback boundary and model usage accounting. M17 adds `getApexModel()` + `getApexFallbackModel()` alongside existing helpers; it does not resurrect the retired M4 `llm/cascade.ts`. Obey ADR-0017's tools + structured-output exception: no Gemini fallback for tool-using investigator workers.
 13. **`./packages/env/src/index.ts`** — `wardenEnv()`. M17 adds optional `WARDEN_SECURITY_WORKER_BUDGET` (numeric string, positive integer; unset = unbounded).
 14. **`./packages/db/src/schema/`** — Drizzle schema. M17 adds new `securityRuns` table.
 15. **`./packages/cli/src/index.ts`** — commander entry. M17 registers `warden security` as a new verb + adds `--deep` flag to `warden review`.
@@ -39,6 +41,7 @@ Land ADR-0029's design in a single coherent slice:
 - **No new `Source.type`.** Workers emit existing `tool` (source-line + sink-line) and `api_def` (when a finding hinges on a library API claim) sources.
 - **No verifier changes.** `packages/core/src/llm/verify-citations.ts` dispatches on `type` exactly as today; M17 adds no new branch.
 - **Apex model tier in `@warden/ai`.** New `getApexModel()` (Anthropic `claude-opus-4-7`) + `getApexFallbackModel()` (Google `gemini-2.5-pro`). Existing helpers unchanged.
+- **Fallback boundary.** Tool-less M17 calls may use Gemini fallback: Boss Plan, Boss Synth, and the no-tool Haiku classifier. Tool-using investigator workers are Anthropic-only with clean degraded failure; do not wire `getWorkerStrongFallbackModel()` into the investigator path until ADR-0033 settles worker fallback.
 - **Env var.** `WARDEN_SECURITY_WORKER_BUDGET` (optional, positive integer; unset = unbounded). Documented in `.env.example` + CLAUDE.md env table.
 - **New SQLite table.** `securityRuns` in `@warden/db` carrying `(id, timestamp, mode, modelBoss, modelWorkerStrong, modelWorkerCheap, inputTokens, outputTokens, costUsd, commentsEmitted)`. Generate migration via `pnpm db:generate`; apply via `pnpm db:migrate`.
 - **Dedicated harness module.** New `packages/core/src/security/` directory: `harness.ts` (entry), `triage-gate.ts` (Phase 1.5), `plan.ts` (Phase 2 + Plan schema), `worker.ts` (Phase 3 investigator + classifier), `synth.ts` (Phase 4), `scratchpad.ts` (`SecurityScratchpad` class), `cost.ts` (post-hoc cost computation + static per-model rate table), `prompts/plan-system.md`, `prompts/synth-system.md`, `prompts/investigator-system.md`, `prompts/classifier-system.md`. Reuse the live review-harness tool implementations for `readFile`, `grepRepo`, and safety checks unless M17 needs a security-only wrapper.
@@ -82,7 +85,7 @@ packages/core/src/security/
 │
 ├── plan.ts                                       # NEW — Phase 2 boss Plan.
 │                                                 #   `generatePlan(input)` calls Opus apex
-│                                                 #   via cascade. Uses `generateText` with
+│                                                 #   via tool-less cascade. Uses `generateText` with
 │                                                 #   `output: Output.object(PlanSchema)`. Plan
 │                                                 #   schema includes subtasks[],
 │                                                 #   skipped_files[], rationale.
@@ -100,7 +103,7 @@ packages/core/src/security/
 │
 ├── synth.ts                                      # NEW — Phase 4 boss Synth.
 │                                                 #   `synthesize(scratchpad)` calls Opus apex
-│                                                 #   via cascade. Reads scratchpad's worker
+│                                                 #   via tool-less cascade. Reads scratchpad's worker
 │                                                 #   outputs + det priors; emits CommentSet
 │                                                 #   for category=security.
 │
@@ -278,7 +281,8 @@ packages/cli/package.json                         # MODIFIED — add `smoke:m17`
 ### Phase 2 — Boss Plan
 
 - `generatePlan({ diff, detPriors, retrievedContext, workerBudget? })`.
-- Use AI SDK v6 `generateText` with `output: Output.object(PlanSchema)` and `model: getApexModel()` wrapped in an inline Anthropic → Google cascade matching `packages/core/src/review-harness/boss-loop.ts`; do not resurrect the retired M4 `llm/cascade.ts`.
+- Use AI SDK v6 `generateText` with `output: Output.object(PlanSchema)` and `model: getApexModel()` wrapped in an inline Anthropic → retry → Gemini cascade; this call is tool-less, so ADR-0017's tools + structured-output exception does not block fallback. Do not resurrect the retired M4 `llm/cascade.ts`.
+- Wrap any Gemini structured-output request with `transformSchemaForGemini()` and reverse-transform the parsed response before storing the `Plan`.
 - Prompt: `prompts/plan-system.md` (system) + user message with diff + det priors + retrieved context + optional `workerBudget` instruction.
 - `PlanSchema` (Zod):
   ```ts
@@ -306,14 +310,16 @@ packages/cli/package.json                         # MODIFIED — add `smoke:m17`
 - Worker dispatch respects `WARDEN_SECURITY_WORKER_BUDGET`: if set and `subtasks.length > budget`, run the first `budget` subtasks and emit one info `degradedWorkers` entry (`{ kind: "info", topic: "security", message: "Worker budget ${budget} exceeded; ran ${budget} of ${subtasks.length} planned workers" }`). The boss's planning prompt already included the budget instruction, so this is a belt-and-suspenders cap.
 - **Investigator worker** (Sonnet):
   - `streamText` with `model: getWorkerStrongModel()`, `tools: { lookupTypeDef, readFile, grepRepo }`, `stopWhen: stepCountIs(8)`.
+  - Provider policy: Anthropic primary only for M17. Do not register Gemini fallback because this call combines `tools[]` with structured output; on failure return empty findings plus a warning degraded entry naming "Gemini fallback skipped (tools required)".
   - System prompt: `prompts/investigator-system.md`.
   - User message: per-subtask — file paths + slug subset + retrieved context excerpt.
   - Output: array of `SecurityFinding` (Zod-typed; carries `claim`, `path`, `line`, `kind: 'assertion' | 'question'`, `slug`, `tier`, `sources[]`).
-  - Mirror the live review-harness worker patterns for graceful no-model fallback (one info `degradedWorkers` entry, return empty findings).
+  - Mirror the live review-harness worker patterns for graceful no-Anthropic-model handling (one warning `degradedWorkers` entry, return empty findings).
   - Mirror the live review-harness lane discipline: drop findings whose `path` is not in `subtask.files` (one info entry per non-zero drop count).
   - Drop findings with no `sources[]` (uncited claims) before they become Comments.
 - **Classifier worker** (Haiku):
   - `generateText` with `model: getWorkerCheapModel()`, no tools, `output: Output.object(ClassifierResultSchema)`.
+  - Provider policy: may use the normal cheap-tier Gemini fallback because this call has no tools. Keep it wrapped with the Gemini schema adapter for consistency even if the schema has no numeric enum today.
   - System prompt: `prompts/classifier-system.md`.
   - User message: per-subtask — file path + line + candidate slugs.
   - Output: `{ slug: SecuritySlug, confidence: number, brief: string }`.
@@ -323,7 +329,8 @@ packages/cli/package.json                         # MODIFIED — add `smoke:m17`
 ### Phase 4 — Boss Synth
 
 - `synthesize({ scratchpad, repoRoot })`.
-- `generateText` with `model: getApexModel()` wrapped in cascade, `output: Output.array(CommentSchema)` (existing `CommentSchema` from `packages/core/src/schema.ts`).
+- `generateText` with `model: getApexModel()` wrapped in the tool-less Anthropic → retry → Gemini cascade, `output: Output.array(CommentSchema)` (existing `CommentSchema` from `packages/core/src/schema.ts`).
+- Wrap the Gemini structured-output branch with `transformSchemaForGemini()` because `CommentSchema` still contains numeric `TierEnum`.
 - System prompt: `prompts/synth-system.md`.
 - User message: serialize the scratchpad's findings + classifier results + det priors + diff context; instruct boss to (a) dedupe findings whose `(path, line)` overlap, (b) assign `kind: 'question' | 'assertion'` per finding, (c) assign `tier: 1 | 2 | 3` per finding, (d) preserve source citations verbatim (do not invent new sources).
 - Record cost into scratchpad; assemble final `CommentSet` carrying all surviving Comments + accumulated `degradedWorkers`.
@@ -390,6 +397,7 @@ Listed near the top of the "Goal" section; collected here for emphasis:
 - ❌ Multi-language security detection beyond TS/JS (tied to ADR-0008 multi-ecosystem rewrite).
 - ❌ BYO apex model flag (deferred to ADR-0006 BYOLLM).
 - ❌ Three-step apex cascade (Opus → Sonnet → Gemini Pro) — rejected per ADR-0029 alternatives (silent downgrade defeats opt-in deep tier).
+- ❌ Gemini fallback for tool-using investigator workers — deferred to ADR-0033 / M18+ because Gemini rejects `tools[] + responseMimeType: 'application/json'`.
 - ❌ M17 reusing the retired M8 `Runner` contract — workers have a different input/output shape; new `SecurityWorker*` types.
 
 ## CONTEXT.md additions / updates (do in same PR)
@@ -409,6 +417,7 @@ Listed near the top of the "Goal" section; collected here for emphasis:
 - **Cost computation precision:** `MODEL_PRICING` in `cost.ts` is the source of truth for $/1M tokens. Update on price changes via a one-line PR. v0 values must be verified at M17 ship time: Opus 4.7, Sonnet 4.6, Haiku 4.5, and Gemini 2.5 Pro. Document rates in the file as "as of YYYY-MM-DD".
 - **AI SDK v6 token usage:** `usage` object is returned per `generateText`/`streamText` call. Sum across all calls per invocation; record per-model breakdown.
 - **Tool error handling:** wrap each tool's `execute()` body in try/catch; return `{ error: '...' }` instead of throwing. The LLM receives the error message in the tool result; cascade retry is unaffected.
+- **Provider fallback boundary:** only tool-less M17 call sites use Gemini fallback. Investigator workers have tools and structured output, so they follow the M14 worker posture: Anthropic-only, clean degraded entry on failure. Do not partially reintroduce Gemini fallback inside `worker.ts`.
 - **`readFile` truncation marker:** when a file exceeds 1000 lines, return the first 1000 lines + `\n[… truncated. File has N total lines; request a specific range with startLine/endLine.]`. Don't silently truncate.
 - **`grepRepo` literal vs regex:** v0 ships literal-substring matching only (faster, simpler, avoids ReDoS). If dogfood evidence shows regex is needed, M18+ adds a `regex: boolean` flag with bounded complexity.
 - **`SECURITY_SENSITIVE_PATTERNS`:** intentionally over-broad in v0 (better false-proceed than false-skip — the gate's job is to filter the obvious-skip cases). Tightening happens in M18+ when the init-time inventory provides better signal.
