@@ -29,6 +29,7 @@ import type { ReviewScratchpad, TokenUsage } from "./scratchpad.js";
 import {
   makeDispatchWorkerTool,
   type Concern,
+  type DispatchConcurrency,
   type DispatchWorkerArgs,
   type DispatchWorkerResult,
   type WorkerRoute,
@@ -139,6 +140,13 @@ export interface BossLoopInput {
    * Sourced from `wardenEnv().WARDEN_REVIEW_WORKER_BUDGET` by the caller.
    */
   workerBudget?: number;
+  /**
+   * Per-tier dispatch concurrency cap (ADR-0033). Forwarded into
+   * `makeDispatchWorkerTool()` so both Round 0's `Promise.all` and the
+   * boss's in-loop dispatches throttle through the same boundary.
+   * Omitted → no cap (unit tests, smokes that want raw timing).
+   */
+  concurrency?: DispatchConcurrency;
   /** M15 (ADR-0031) calibration knobs; defaults preserve M14 behavior. */
   config?: BossLoopConfig;
   emit?: FormatterListener;
@@ -372,6 +380,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     scratchpad: input.scratchpad,
     ...(input.workerBudget !== undefined ? { workerBudget: input.workerBudget } : {}),
     route: input.route,
+    ...(input.concurrency !== undefined ? { concurrency: input.concurrency } : {}),
   });
 
   const resolved = applyBossLoopDefaults(input.config);

@@ -19,12 +19,13 @@ import type {
 } from "../../schema.js";
 import { loadWorkerSystemPrompt } from "../prompts/loader.js";
 import type { TokenUsage } from "../scratchpad.js";
-import type {
-  Concern,
-  DispatchPhase,
-  WorkerInvocation,
-  WorkerInvocationResult,
-  WorkerTier,
+import {
+  resolveWorkerTier,
+  type Concern,
+  type DispatchPhase,
+  type WorkerInvocation,
+  type WorkerInvocationResult,
+  type WorkerTier,
 } from "../tools/dispatch-worker.js";
 import { makeGrepRepoTool } from "../tools/grep-repo.js";
 import { makeReadFileTool } from "../tools/read-file.js";
@@ -65,15 +66,6 @@ const WORKER_GEMINI_PAIR = transformSchemaForGemini(WorkerOutputSchema);
 
 const PER_WORKER_STEP_CAP = 8;
 const DEFAULT_TIMEOUT_MS = 90_000;
-
-const TIER_BY_CONCERN: Record<Concern, WorkerTier> = {
-  correctness: "sonnet",
-  scalability: "sonnet",
-  consistency: "sonnet",
-  security: "sonnet",
-  committability: "haiku",
-  leverage: "haiku",
-};
 
 const CATEGORY_BY_CONCERN: Record<Concern, Category> = {
   correctness: "correctness",
@@ -133,7 +125,7 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     }
   }
 
-  const tier: WorkerTier = input.tier ?? TIER_BY_CONCERN[input.concern];
+  const tier: WorkerTier = resolveWorkerTier(input.concern, input.tier);
 
   // No usable snippets → empty result, save the LLM call. Worker had nothing
   // to look at (sensitive paths only, binary files only, or every snippet

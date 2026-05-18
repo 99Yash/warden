@@ -2,6 +2,7 @@ import { wardenEnv } from "@warden/env";
 import type { ContextSelector } from "../context/index.js";
 import type { FormatterListener } from "../llm/index.js";
 import { verifyCitations } from "../llm/verify-citations.js";
+import { Semaphore } from "../orchestration/semaphore.js";
 import type {
   CommentSet,
   CostByTier,
@@ -13,6 +14,7 @@ import type {
 import { runBossLoop, type BossLoopConfig } from "./boss-loop.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
 import { ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
+import type { DispatchConcurrency } from "./tools/dispatch-worker.js";
 import { makeWorkerRoute } from "./workers/index.js";
 
 /**
@@ -127,6 +129,13 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   const workerBudgetRaw = wardenEnv().WARDEN_REVIEW_WORKER_BUDGET;
   const workerBudget = workerBudgetRaw ? Number(workerBudgetRaw) : undefined;
 
+  // ADR-0033: per-tier dispatch concurrency. Constructed once per review;
+  // both Round 0's `Promise.all` and the boss's in-loop dispatches flow
+  // through the same per-tier semaphores. Defaults (4 strong / 8 cheap)
+  // are applied here, not in the env layer, so test/smoke call sites that
+  // bypass the harness can omit the env vars entirely.
+  const concurrency = buildDispatchConcurrency();
+
   const bossOutput = await runBossLoop({
     repoRoot: input.repoRoot,
     diff: input.diff,
@@ -134,6 +143,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     scratchpad,
     route,
     ...(workerBudget !== undefined ? { workerBudget } : {}),
+    concurrency,
     ...(input.config.bossLoop !== undefined ? { config: input.config.bossLoop } : {}),
     ...(input.emit ? { emit: input.emit } : {}),
   });
@@ -161,6 +171,21 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     ...apiClaimDegraded,
     ...verified.degraded,
   ];
+
+  // ADR-0033: emit a single info entry when the dispatch concurrency cap
+  // actually engaged. Silent on the happy path — `concurrencyAggregate()`
+  // returns null when no dispatch had to queue.
+  const concurrencyAgg = scratchpad.concurrencyAggregate();
+  if (concurrencyAgg !== null) {
+    aggregatedDegraded.push({
+      kind: "info",
+      topic: "worker-concurrency",
+      message:
+        `concurrency cap engaged: ${concurrencyAgg.totalQueued}/${concurrencyAgg.totalDispatches} ` +
+        `dispatches queued (max wait ${formatMsAsSeconds(concurrencyAgg.maxWaitMs)}, ` +
+        `total queued time ${formatMsAsSeconds(concurrencyAgg.totalQueuedMs)})`,
+    });
+  }
 
   // Per-tier token-usage bucket: opus (boss) + sonnet/haiku (workers).
   // Workers record their actual tier in the scratchpad even when the boss
@@ -299,6 +324,34 @@ function computeCosts(
 
 function round4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency cap construction + info-entry formatting (ADR-0033).
+// ---------------------------------------------------------------------------
+
+const DEFAULT_CONCURRENCY_STRONG = 4;
+const DEFAULT_CONCURRENCY_CHEAP = 8;
+
+function buildDispatchConcurrency(): DispatchConcurrency {
+  const env = wardenEnv();
+  const strong = env.WARDEN_WORKER_CONCURRENCY_STRONG
+    ? Number(env.WARDEN_WORKER_CONCURRENCY_STRONG)
+    : DEFAULT_CONCURRENCY_STRONG;
+  const cheap = env.WARDEN_WORKER_CONCURRENCY_CHEAP
+    ? Number(env.WARDEN_WORKER_CONCURRENCY_CHEAP)
+    : DEFAULT_CONCURRENCY_CHEAP;
+  return {
+    strong: new Semaphore(strong),
+    cheap: new Semaphore(cheap),
+  };
+}
+
+function formatMsAsSeconds(ms: number): string {
+  // One decimal place, with a trailing 's'. 14_234 → "14.2s". Used only
+  // by the concurrency-cap info entry — kept local to avoid a generic
+  // formatter ADR until a second call site earns it.
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function makeEmptySet(startedAt: number, degraded: DegradedEntry[]): CommentSet {

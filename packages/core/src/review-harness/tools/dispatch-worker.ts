@@ -1,5 +1,6 @@
 import { tool } from "@warden/ai";
 import { z } from "zod";
+import type { Semaphore } from "../../orchestration/semaphore.js";
 import type { Comment, DegradedEntry } from "../../schema.js";
 import type { ReviewScratchpad, TokenUsage } from "../scratchpad.js";
 
@@ -42,6 +43,52 @@ export type WorkerTier = z.infer<typeof TierEnum>;
 
 export const PhaseEnum = z.enum(["plan", "adjudicate", "synth"]);
 export type DispatchPhase = z.infer<typeof PhaseEnum>;
+
+/**
+ * Default tier per concern, per ADR-0030 §5. First four concerns get
+ * deep-reasoning Sonnet by default; last two pattern-match cheaply on
+ * Haiku. The boss can override per dispatch via the optional `tier?`
+ * field on `dispatch_worker`'s input; `resolveWorkerTier()` is the
+ * single point that applies the override-or-default rule.
+ *
+ * Exported so `run-worker.ts` (the route consumer) and the dispatch
+ * boundary (this file, where the per-tier concurrency cap is acquired
+ * per ADR-0033) read the same table.
+ */
+export const DEFAULT_TIER_BY_CONCERN: Record<Concern, WorkerTier> = {
+  correctness: "sonnet",
+  scalability: "sonnet",
+  consistency: "sonnet",
+  security: "sonnet",
+  committability: "haiku",
+  leverage: "haiku",
+};
+
+/**
+ * Resolve a dispatch's tier from the per-concern default + optional boss
+ * override. Used by the dispatch boundary (this file) to pick which
+ * per-tier semaphore to acquire, and by `run-worker.ts` to pick which
+ * `getWorker{Strong,Cheap}Model()` getter to call. Single source of
+ * truth so the slot and the model match.
+ */
+export function resolveWorkerTier(
+  concern: Concern,
+  tier: WorkerTier | undefined,
+): WorkerTier {
+  return tier ?? DEFAULT_TIER_BY_CONCERN[concern];
+}
+
+/**
+ * Per-tier semaphore pair the harness constructs once per `runReview()`
+ * and threads into `makeDispatchWorkerTool()`. `strong` caps Sonnet
+ * (deep reasoning) dispatches; `cheap` caps Haiku (pattern-match)
+ * dispatches. Per ADR-0033: strong saturation does NOT starve cheap
+ * workers — the per-tier split is the entire point.
+ */
+export interface DispatchConcurrency {
+  strong: Semaphore;
+  cheap: Semaphore;
+}
 
 const InputSchema = z.object({
   files: z
@@ -149,6 +196,16 @@ export interface MakeDispatchWorkerToolOptions {
    * the boundary clean — the dispatch tool stays pure routing + safety.
    */
   route: WorkerRoute;
+  /**
+   * Per-tier concurrency cap (ADR-0033). When provided, every dispatch
+   * acquires a slot from the tier matching the *resolved* worker tier
+   * (i.e., `args.tier ?? DEFAULT_TIER_BY_CONCERN[args.concern]`) before
+   * the route call, and releases in a `finally`. Wait time is recorded
+   * into the scratchpad via `recordConcurrencyMetric()`. Omit for
+   * unbounded dispatch — the test/smoke path defaults to this so the
+   * route stays the unit of observation.
+   */
+  concurrency?: DispatchConcurrency;
 }
 
 /**
@@ -204,10 +261,29 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       phase: args.phase,
     };
 
+    // ADR-0033: acquire a slot from the per-tier semaphore before invoking
+    // the route. Tier is resolved here (override-or-default) so the slot
+    // picked matches the tier the worker's LLM call will actually use.
+    // `release()` runs in `finally` to guarantee the slot frees on both
+    // happy + throw paths. The semaphore reports `waitMs` intrinsically
+    // (0 when the slot was free), so a `Date.now()`-measured microtask
+    // hop can't false-positive as a real queue event.
+    let release: (() => void) | undefined;
+    if (opts.concurrency) {
+      const resolvedTier = resolveWorkerTier(args.concern, args.tier);
+      const sem =
+        resolvedTier === "sonnet" ? opts.concurrency.strong : opts.concurrency.cheap;
+      const acquired = await sem.acquire();
+      release = acquired.release;
+      opts.scratchpad.recordConcurrencyMetric({ waitMs: acquired.waitMs });
+    }
+
     let result: WorkerInvocationResult;
     try {
       result = await opts.route(invocation);
     } catch (err) {
+      release?.();
+      release = undefined;
       const detail = formatErr(err);
       const entry: DegradedEntry = {
         kind: "warning",
@@ -225,6 +301,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       });
       return { findings: [], toolCalls: 0, degraded: [entry] };
     }
+    release?.();
 
     // Lane discipline: drop findings whose `path` is outside the
     // dispatched `files` set. Findings carry paths through their
