@@ -1,16 +1,22 @@
 /**
  * Bugfloor smoke for repo-audit 2026-05-18 follow-ups (#2 + #3).
  *
- *   [1] `--base <empty-tree-SHA>` resolves correctly via two-dot diff. Pre-fix
- *       this took the three-dot path which git rejects for <tree>...<commit>
- *       and `runGitDiff` silently swallowed into "" — review proceeded
- *       against an empty diff with no degraded signal.
+ *   [1] `--base <empty-tree-SHA>` (tree ref) resolves correctly via two-dot
+ *       diff. Pre-fix this took the three-dot path which git rejects for
+ *       <tree>...<commit> and `runGitDiff` silently swallowed into "" —
+ *       review proceeded against an empty diff with no degraded signal.
  *
- *   [2] `--base` pointing at a bogus ref produces an empty diff plus a
+ *   [2] `--base <commit>` preserves three-dot (PR merge-base) semantic.
+ *       When main diverges after the feature branch was cut, the diff
+ *       must NOT include reverse-applied main commits as deletions —
+ *       that's what three-dot guarantees. Regression guard for Devon's
+ *       PR review (#20) on the initial two-dot-everywhere implementation.
+ *
+ *   [3] `--base` pointing at a bogus ref produces an empty diff plus a
  *       `degraded: actionable / topic=diff-source` entry instead of silently
  *       returning "".
  *
- *   [3] `semanticSignal` drops hits whose attributed file no longer exists on
+ *   [4] `semanticSignal` drops hits whose attributed file no longer exists on
  *       disk when `repoRoot` is supplied — protects jscpd's lstat from
  *       ENOENT on M14-deleted files retained in `chunks.file_path` under
  *       first-writer-wins. Backward compat: omitting `repoRoot` skips the
@@ -86,7 +92,48 @@ assert(
   "no degraded entry surfaced on the happy path",
 );
 
-process.stdout.write(`\n[2] resolveDiff with bogus --base surfaces a degraded entry\n`);
+process.stdout.write(`\n[2] resolveDiff with --base = commit ref preserves three-dot semantic\n`);
+
+// Build the diverged-history scenario:
+//   main:  seed → main-advance        (one extra commit on main)
+//                 \
+//   feature:       feature-only       (one extra commit on feature, off seed)
+//
+// Three-dot `main...HEAD` from feature must show ONLY `feature-only.ts`.
+// Two-dot would also reverse-apply `main-advance.ts` as a deletion.
+
+git(["checkout", "-q", "-b", "main-branch"]);
+writeFileSync(resolve(TMP_ROOT, "main-advance.ts"), `export const onMain = 99;\n`);
+git(["add", "main-advance.ts"]);
+git(["commit", "-q", "-m", "main: advance", "--no-gpg-sign"]);
+
+git(["checkout", "-q", "-b", "feature-branch", "main-branch~1"]);
+writeFileSync(resolve(TMP_ROOT, "feature-only.ts"), `export const onFeature = 42;\n`);
+git(["add", "feature-only.ts"]);
+git(["commit", "-q", "-m", "feature: add", "--no-gpg-sign"]);
+
+const featureDiff = await resolveDiff({
+  repoRoot: TMP_ROOT,
+  mode: "review",
+  baseRef: "main-branch",
+});
+assert(
+  featureDiff.diff.includes("feature-only.ts"),
+  "diff includes the feature branch's own addition",
+);
+assert(
+  !featureDiff.diff.includes("main-advance.ts"),
+  "diff does NOT include main's post-divergence commit (three-dot, not two-dot)",
+);
+assert(
+  featureDiff.degraded === undefined,
+  "no degraded entry for commit-ref --base happy path",
+);
+
+// Restore initial branch context for subsequent steps.
+git(["checkout", "-q", "main-branch"]);
+
+process.stdout.write(`\n[3] resolveDiff with bogus --base surfaces a degraded entry\n`);
 
 const bogusDiff = await resolveDiff({
   repoRoot: TMP_ROOT,
@@ -108,7 +155,7 @@ assert(
   "degraded message mentions git diff",
 );
 
-process.stdout.write(`\n[3] semanticSignal drops hits attributed to deleted files\n`);
+process.stdout.write(`\n[4] semanticSignal drops hits attributed to deleted files\n`);
 
 const EXISTING_PATH = "alive.ts";
 const DELETED_PATH = "ghost.ts";
@@ -216,7 +263,7 @@ assert(
   `deleted file '${DELETED_PATH}' is filtered out (no ENOENT path to jscpd)`,
 );
 
-process.stdout.write(`\n[3b] omitting repoRoot leaves both hits in place (backward compat)\n`);
+process.stdout.write(`\n[4b] omitting repoRoot leaves both hits in place (backward compat)\n`);
 
 const backcompatOut = await semanticSignal({
   diff: "diff --git a/x b/x\n+++ b/x\n@@\n+a\n",

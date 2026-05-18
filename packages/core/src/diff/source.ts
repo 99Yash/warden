@@ -39,13 +39,24 @@ export interface ResolvedDiff {
 
 export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDiff> {
   if (opts.baseRef) {
-    // Two-dot for an explicit base: caller said "diff against this exact ref,"
-    // not "diff against branch's merge-base with HEAD." Three-dot rejects
-    // <tree>...<commit> ranges (e.g. git's empty-tree SHA), which was the
-    // silent-empty-diff path before this fix.
-    const { diff, degraded } = await runGitDiff(opts.repoRoot, [
-      `${opts.baseRef}..HEAD`,
-    ]);
+    // PR-style merge-base semantic (three-dot) for commit refs, raw two-dot
+    // comparison for tree-only refs. Probe `<ref>^{commit}` to decide:
+    //   - commit-ish (branch, tag, SHA) → `<ref>...HEAD` preserves "what
+    //     this branch added relative to merge-base," matching the
+    //     pre-2026-05 behavior most `--base origin/main` invocations rely on.
+    //   - tree-only (empty-tree SHA, raw tree hash) → `<ref>..HEAD` is the
+    //     only legal form; three-dot rejects `<tree>...<commit>` and
+    //     silently fed an empty diff before repo-audit 2026-05-18 #3.
+    const isCommit = (
+      await runGit(opts.repoRoot, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        `${opts.baseRef}^{commit}`,
+      ])
+    ).ok;
+    const range = isCommit ? `${opts.baseRef}...HEAD` : `${opts.baseRef}..HEAD`;
+    const { diff, degraded } = await runGitDiff(opts.repoRoot, [range]);
     return {
       diff,
       description: `vs ${opts.baseRef} (override)`,
