@@ -176,6 +176,13 @@ export interface ReviewInput {
   retrievedContext?: RetrievedContext;
   /** Optional listener for streaming events (phase progress, reasoning deltas). */
   emit?: FormatterListener;
+  /**
+   * Degraded entries surfaced *before* `review()` was called (e.g. by
+   * `resolveDiff()` when git itself failed). Prepended onto
+   * `metadata.degradedWorkers` so the banner + JSON consumers see the same
+   * signal the CLI receives. Repo-audit 2026-05-18 #3.
+   */
+  extraDegraded?: DegradedEntry[];
 }
 
 /**
@@ -225,7 +232,11 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     comments: ruled.comments,
     metadata: {
       durationMs: harness.metadata.durationMs,
-      degradedWorkers: [...harness.metadata.degradedWorkers, ...ruled.degraded],
+      degradedWorkers: [
+        ...(input.extraDegraded ?? []),
+        ...harness.metadata.degradedWorkers,
+        ...ruled.degraded,
+      ],
       ...(harness.metadata.tokenUsage !== undefined
         ? { tokenUsage: harness.metadata.tokenUsage }
         : {}),
@@ -261,6 +272,7 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
       metadata: {
         durationMs: Date.now() - startedAt,
         degradedWorkers: [
+          ...(input.extraDegraded ?? []),
           ...detPriors.degraded,
           {
             kind: "info",
@@ -288,7 +300,11 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
     comments: ruled.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
-      degradedWorkers: [...detPriors.degraded, ...ruled.degraded],
+      degradedWorkers: [
+        ...(input.extraDegraded ?? []),
+        ...detPriors.degraded,
+        ...ruled.degraded,
+      ],
     },
   };
 }

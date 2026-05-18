@@ -60,7 +60,8 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
   wardenEnv();
 
   const repoRoot = findRepoRoot();
-  const { diff, description } = await acquireDiff(repoRoot, mode, opts);
+  const resolved = await acquireDiff(repoRoot, mode, opts);
+  const { diff, description, degraded: diffDegraded } = resolved;
 
   if (!opts.json) {
     process.stdout.write(pc.dim(`warden ${mode}  ${description}\n`));
@@ -112,6 +113,7 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     repoRoot,
     config: { mode, verbose: opts.verbose === true },
     emit,
+    ...(diffDegraded && diffDegraded.length > 0 ? { extraDegraded: diffDegraded } : {}),
   });
 
   if (opts.json) {

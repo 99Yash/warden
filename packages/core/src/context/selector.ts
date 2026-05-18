@@ -305,6 +305,7 @@ export class CheapSignalsSelector implements ContextSelector {
         embeddingProvider: this.opts.embeddingProvider!,
         embeddingStore: this.opts.embeddingStore!,
         chunkStore: this.opts.chunkStore!,
+        repoRoot,
         lockedModelId: this.opts.lockedModelId!,
         lockedModelVersionForDocument: this.opts.lockedModelVersionForDocument!,
       });
