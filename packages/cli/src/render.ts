@@ -98,19 +98,30 @@ function truncate(s: string, max: number): string {
 /**
  * Renders the limitation banner above the phase log for `warden review`
  * (ADR-0019 #7, refined per ADR-0021 #5/#7). One dim yellow line; auto-
- * disappears when no `actionable`-kind entry mentions the index. Not
- * suppressible — banner reflects the state of the index, fixing it means
- * fixing the cause (`warden init` / `warden init --rebuild`).
+ * disappears when no `actionable`-kind entry mentions a banner topic. Not
+ * suppressible — banner reflects pipeline state the user should see before
+ * trusting the comment set.
+ *
+ *  - `context` / `embeddings`: index missing / stale — fix with
+ *    `warden init` / `warden init --rebuild`.
+ *  - `diff-source`: git itself failed (e.g. `--base` resolved to an
+ *    unknown ref). Without this, a bogus `--base` produces an empty-diff
+ *    "all clear" review with the failure buried in `--json` metadata.
+ *    Repo-audit 2026-05-18 #3.
  *
  * Reads the discriminated `kind` field instead of substring-matching on
  * message prefixes. The first matching entry wins (banner is single-line).
  */
-const BANNER_TOPICS: ReadonlySet<string> = new Set(["context", "embeddings"]);
+const BANNER_TOPICS: ReadonlySet<string> = new Set([
+  "context",
+  "embeddings",
+  "diff-source",
+]);
 
 export function renderBannerLine(degraded: DegradedEntry[]): string | null {
   for (const entry of degraded) {
     if (entry.kind === "actionable" && BANNER_TOPICS.has(entry.topic)) {
-      return pc.yellow(`! ${entry.message.replace(/^context:\s*/, "")}`);
+      return pc.yellow(`! ${entry.message.replace(/^(?:context|diff):\s*/, "")}`);
     }
   }
   return null;

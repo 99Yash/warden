@@ -25,6 +25,100 @@ Future surfaces under `apps/` (GitHub PR bot, Slack bot, ClickUp integration —
 
 The boss loop, det priors, and citation verifier are three explicit phases — same primitive `runDetPriors()` powers `warden check` (skips phases 2 + 3).
 
+## Command state machines
+
+These diagrams describe the command-level lifecycle, not every internal function call. "Degraded" states append an informational, warning, or actionable entry and keep going unless the transition explicitly exits.
+
+### `warden init`
+
+```mermaid
+stateDiagram-v2
+  [*] --> InitRequested
+  InitRequested --> EnvValidated: load env + parse flags
+  EnvValidated --> InitHardFail: missing VOYAGE_API_KEY and not dry-run
+  InitHardFail --> [*]: exit 1
+  EnvValidated --> GitignoreEnsured
+  GitignoreEnsured --> ModelLocked: read or write locked embedding model
+  ModelLocked --> RebuildDrop: --rebuild and existing lock
+  RebuildDrop --> Walk
+  ModelLocked --> Walk
+
+  Walk --> Estimate: walk repo and count LOC
+  Walk --> WalkDegraded: git unavailable
+  WalkDegraded --> Estimate: fallback fs walk
+  Estimate --> CostAbort: estimate exceeds --max-cost
+  CostAbort --> InitSummary: skip chunk/embed
+  Estimate --> DryRun: --dry-run
+  DryRun --> InitSummary: emit empty chunk/embed completion
+  Estimate --> Reconcile: run reconcileFiles on full walk
+
+  state Reconcile {
+    [*] --> Backfill
+    Backfill --> NextFile
+    NextFile --> ChunkFile
+    ChunkFile --> CheckEmbeddingCache
+    CheckEmbeddingCache --> BudgetSkip: file estimate exceeds remaining budget
+    BudgetSkip --> NextFile
+    CheckEmbeddingCache --> EmbedMissing: missing chunks
+    CheckEmbeddingCache --> CommitFile: cache hit only
+    EmbedMissing --> EmbedFailed: provider error
+    EmbedFailed --> NextFile: leave prior file state intact
+    EmbedMissing --> CommitFile
+    CommitFile --> NextFile
+    NextFile --> RemoveDeleted: all walked files processed
+    RemoveDeleted --> PruneOrphans
+    PruneOrphans --> WriteRepoMerkleRoot
+    WriteRepoMerkleRoot --> [*]
+  }
+
+  Reconcile --> PersistInitMeta: locked model + format version
+  PersistInitMeta --> InitSummary
+  InitSummary --> [*]: render JSON or phase UI
+```
+
+### `warden review`
+
+```mermaid
+stateDiagram-v2
+  [*] --> ReviewRequested
+  ReviewRequested --> EnvValidated: load env + parse flags
+  EnvValidated --> DiffResolved: stdin or git diff source
+  DiffResolved --> DetPriors
+
+  state DetPriors {
+    [*] --> DetectEcosystem
+    DetectEcosystem --> EnsureGitignore
+    EnsureGitignore --> ParseAndPruneDiff
+    ParseAndPruneDiff --> BannerLookup: review mode only
+    BannerLookup --> MaybeRefreshIndex
+    MaybeRefreshIndex --> RefreshSkipped: no stale index or budget is 0
+    MaybeRefreshIndex --> RefreshReconcile: stale index within refresh surface
+    RefreshReconcile --> RefreshSkipped: reconcile degraded entries captured
+    RefreshSkipped --> ParallelPriors
+    ParallelPriors --> ScopedJscpd: TSC, ESLint, security ESLint, vuln, selector, deadcode, consistency, scalability, leverage
+    ScopedJscpd --> AssembleContext
+    AssembleContext --> [*]
+  }
+
+  DetPriors --> NoPackageJson: no package.json at repo root
+  NoPackageJson --> ApplyHardRules: empty CommentSet + ecosystem info
+  DetPriors --> EmptyDiff: no changed files after pruning
+  EmptyDiff --> ApplyHardRules: zero LLM calls
+  DetPriors --> ScratchpadPrepared: changed files exist
+  ScratchpadPrepared --> WorkerRoutePrepared
+  WorkerRoutePrepared --> RoundZeroChoice
+  RoundZeroChoice --> RoundZeroDispatch: programmatic dispatch enabled and substantive files
+  RoundZeroChoice --> BossLoop
+  RoundZeroDispatch --> BossLoop
+
+  BossLoop --> BossHardFail: Anthropic primary + retry exhausted
+  BossHardFail --> [*]: exit 1, Gemini skipped for tool-using call
+  BossLoop --> CitationVerify: boss emits comments
+  CitationVerify --> ApplyHardRules: drop unsupported sources/comments
+  ApplyHardRules --> RenderReview
+  RenderReview --> [*]: JSON or formatted comments
+```
+
 ## Inter-package rules
 
 - **`@warden/cli` is the only direct caller of `review()`.** Future bots wrap `review()` the same way.

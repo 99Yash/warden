@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { DegradedEntry } from "../schema.js";
 
 /**
  * Diff source resolution per the M4 grilling Q3 / D1 decision.
@@ -27,19 +28,51 @@ export interface ResolvedDiff {
   diff: string;
   /** Human-readable description of which range was diffed (for telemetry / debug). */
   description: string;
+  /**
+   * Surfaced when git itself failed (e.g. `--base` resolved to a tree, an
+   * unknown ref, or any other non-zero exit). Pre-2026-05 the failure was
+   * swallowed and the review proceeded against an empty diff — repo-audit
+   * 2026-05-18 #3 caught that.
+   */
+  degraded?: DegradedEntry[];
 }
 
 export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDiff> {
   if (opts.baseRef) {
-    const diff = await runGitDiff(opts.repoRoot, [`${opts.baseRef}...HEAD`]);
-    return { diff, description: `vs ${opts.baseRef} (override)` };
+    // PR-style merge-base semantic (three-dot) for commit refs, raw two-dot
+    // comparison for tree-only refs. Probe `<ref>^{commit}` to decide:
+    //   - commit-ish (branch, tag, SHA) → `<ref>...HEAD` preserves "what
+    //     this branch added relative to merge-base," matching the
+    //     pre-2026-05 behavior most `--base origin/main` invocations rely on.
+    //   - tree-only (empty-tree SHA, raw tree hash) → `<ref>..HEAD` is the
+    //     only legal form; three-dot rejects `<tree>...<commit>` and
+    //     silently fed an empty diff before repo-audit 2026-05-18 #3.
+    const isCommit = (
+      await runGit(opts.repoRoot, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        `${opts.baseRef}^{commit}`,
+      ])
+    ).ok;
+    const range = isCommit ? `${opts.baseRef}...HEAD` : `${opts.baseRef}..HEAD`;
+    const { diff, degraded } = await runGitDiff(opts.repoRoot, [range]);
+    return {
+      diff,
+      description: `vs ${opts.baseRef} (override)`,
+      ...(degraded ? { degraded: [degraded] } : {}),
+    };
   }
 
   if (opts.mode === "check") {
     // Working tree + staged changes against HEAD. Mirrors what a developer
     // about to commit is actually looking at.
-    const diff = await runGitDiff(opts.repoRoot, ["HEAD"]);
-    return { diff, description: "uncommitted (working tree + staged)" };
+    const { diff, degraded } = await runGitDiff(opts.repoRoot, ["HEAD"]);
+    return {
+      diff,
+      description: "uncommitted (working tree + staged)",
+      ...(degraded ? { degraded: [degraded] } : {}),
+    };
   }
 
   // review mode — auto-detect default branch.
@@ -47,11 +80,19 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
   if (!base) {
     // No default branch resolvable — fall back to HEAD~1 so review at least
     // has something to operate on. degraded path; CLI will surface this.
-    const diff = await runGitDiff(opts.repoRoot, ["HEAD~1...HEAD"]);
-    return { diff, description: "vs HEAD~1 (no default branch found)" };
+    const { diff, degraded } = await runGitDiff(opts.repoRoot, ["HEAD~1...HEAD"]);
+    return {
+      diff,
+      description: "vs HEAD~1 (no default branch found)",
+      ...(degraded ? { degraded: [degraded] } : {}),
+    };
   }
-  const diff = await runGitDiff(opts.repoRoot, [`${base}...HEAD`]);
-  return { diff, description: `vs ${base}` };
+  const { diff, degraded } = await runGitDiff(opts.repoRoot, [`${base}...HEAD`]);
+  return {
+    diff,
+    description: `vs ${base}`,
+    ...(degraded ? { degraded: [degraded] } : {}),
+  };
 }
 
 /**
@@ -76,10 +117,25 @@ async function resolveDefaultBranch(repoRoot: string): Promise<string | undefine
   return undefined;
 }
 
-async function runGitDiff(repoRoot: string, args: string[]): Promise<string> {
+async function runGitDiff(
+  repoRoot: string,
+  args: string[],
+): Promise<{ diff: string; degraded?: DegradedEntry }> {
   const result = await runGit(repoRoot, ["diff", ...args]);
-  if (!result.ok) return "";
-  return result.stdout;
+  if (!result.ok) {
+    const stderrSummary = result.stderr.trim().split("\n").slice(0, 2).join(" ").slice(0, 200);
+    return {
+      diff: "",
+      degraded: {
+        kind: "actionable",
+        topic: "diff-source",
+        message: stderrSummary
+          ? `diff: git diff ${args.join(" ")} failed — ${stderrSummary}`
+          : `diff: git diff ${args.join(" ")} failed with non-zero exit`,
+      },
+    };
+  }
+  return { diff: result.stdout };
 }
 
 interface GitResult {

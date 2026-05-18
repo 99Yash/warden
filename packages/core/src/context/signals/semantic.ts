@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { EmbeddingProvider } from "@warden/ai";
 import type {
   ChunkStore,
@@ -39,6 +41,13 @@ export interface SemanticSignalInput {
    * default `SqliteFileChunksStore` is used. Tests pass an in-memory stub.
    */
   fileChunksStore?: FileChunksStore;
+  /**
+   * Repo root used to resolve relative chunk paths for the on-disk existence
+   * check (see filter below). Optional — when omitted, the filter is skipped
+   * and behavior matches the pre-2026-05 path. Selectors should always pass
+   * it so deleted files don't leak into downstream consumers (jscpd lstat).
+   */
+  repoRoot?: string;
   /** Voyage SKU to query under — must equal the locked-model id of the index. */
   lockedModelId: string;
   /**
@@ -131,6 +140,16 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
     fileChunksStore.getFilesForHashes(hashes),
   ]);
   const hitsByFile = new Map<string, SemanticHit>();
+  // Repo-audit 2026-05-18 #2: chunks.file_path can point at an M14-deleted
+  // file (first-writer-wins under the M16 backfill window). Drop hits whose
+  // resolved path no longer exists on disk before the selector consumes them
+  // — one stat per surviving hit is cheap and survives any future
+  // chunks/file_chunks drift without requiring a schema-level fix.
+  const fileExists = (filePath: string): boolean => {
+    if (!input.repoRoot) return true;
+    const abs = isAbsolute(filePath) ? filePath : resolvePath(input.repoRoot, filePath);
+    return existsSync(abs);
+  };
   for (const r of aboveThreshold) {
     const record = records.get(r.chunkHash);
     if (!record) continue;
@@ -143,6 +162,7 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
         ? attributedFiles
         : [record.filePath];
     for (const filePath of filePaths) {
+      if (!fileExists(filePath)) continue;
       const hit: SemanticHit = {
         chunkHash: r.chunkHash,
         similarity: r.similarity,
