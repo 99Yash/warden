@@ -1,0 +1,470 @@
+{
+  "comments": [],
+  "metadata": {
+    "durationMs": 95235,
+    "degradedWorkers": [
+      {
+        "kind": "warning",
+        "topic": "jscpd",
+        "message": "jscpd: detector failed (ENOENT: no such file or directory, lstat '/Users/yash/Developer/self/warden/packages/core/src/llm/formatter.ts')"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No output generated. Check the stream for errors.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-correctness",
+        "message": "correctness: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      },
+      {
+        "kind": "warning",
+        "topic": "worker-security",
+        "message": "security: anthropic sonnet failed (No object generated: could not parse the response.); Gemini fallback skipped (tools required)"
+      }
+    ],
+    "tokenUsage": {
+      "opus": {
+        "inputTokens": 33869,
+        "outputTokens": 14,
+        "cachedInputTokens": 0
+      },
+      "sonnet": {
+        "inputTokens": 879408,
+        "outputTokens": 43778,
+        "cachedInputTokens": 0
+      }
+    },
+    "costUsd": 3.4646,
+    "costByTier": {
+      "opus": 0.1697,
+      "sonnet": 3.2949
+    }
+  }
+}
