@@ -24,11 +24,8 @@ Architecture decisions are documented exhaustively in [`decisions.md`](./decisio
 # 1. Install dependencies
 pnpm install
 
-# 2. Set the API keys
-cat <<EOF > .env
-ANTHROPIC_API_KEY=sk-ant-...
-VOYAGE_API_KEY=pa-...
-EOF
+# 2. Create Warden's global config + env templates
+pnpm warden setup
 
 # 3. Build packages (required before type-checking with non-source exports;
 #    not strictly needed when packages export ./src/*.ts directly)
@@ -38,10 +35,14 @@ pnpm build
 pnpm db:generate
 pnpm db:migrate
 
-# 5. Build the embedding-backed context index (one-time; idempotent re-runs)
+# 5. Add ANTHROPIC_API_KEY / VOYAGE_API_KEY to ~/.config/warden/env,
+#    export them in your shell, or use a secret manager wrapper such as:
+#    infisical run -- pnpm warden review
+
+# 6. Build the embedding-backed context index (one-time; idempotent re-runs)
 pnpm warden init
 
-# 6. Run
+# 7. Run
 pnpm warden check       # fast, deterministic-only pass — no LLM call
 pnpm warden review      # full pipeline including LLM triage and formatter
 ```
@@ -50,10 +51,9 @@ pnpm warden review      # full pipeline including LLM triage and formatter
 
 | Var                            | Purpose                                                                                                            |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `ANTHROPIC_API_KEY`            | Required. Primary LLM provider for the review formatter (ADR-0006).                                               |
-| `VOYAGE_API_KEY`               | Required for `warden init`. Enables the semantic context selector in `warden review` (ADR-0019); when unset, review falls back to cheap signals only. |
+| `ANTHROPIC_API_KEY`            | Needed by `warden review`. Primary LLM provider for the review formatter (ADR-0006). `warden check` does not need it. |
+| `VOYAGE_API_KEY`               | Needed by `warden init`. Enables the semantic context selector in `warden review` (ADR-0019); when unset, review falls back to cheap signals only. |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Optional. Enables the Anthropic → retry → Google fallback (ADR-0017). When unset, Anthropic failure is hard-fail. |
-| `WARDEN_THINKING_BUDGET`       | Optional. Anthropic extended-thinking budget in tokens. Default 4096.                                             |
 | `WARDEN_LOG_LEVEL`             | Optional. `silent` / `error` / `warn` / `info` (default) / `debug`.                                               |
 
 ## Commands
@@ -72,6 +72,11 @@ pnpm warden <command>  # run the CLI from the workspace
 ## CLI verbs
 
 ```bash
+warden setup   # create ~/.config/warden/config.jsonc + ~/.config/warden/env
+               # and report readiness for check/review/init.
+               # Use `warden setup --check` for read-only diagnostics.
+               # Use `warden setup project` to add a repo-level warden.jsonc override.
+
 warden init     # build (or refresh) the embedding-backed context index used by `review`.
                 # Three phases: walk → chunk → embed. Idempotent re-runs hit the cache.
                 # Flags: --rebuild, --dry-run, --max-cost <usd>.
@@ -105,7 +110,7 @@ Warden is local-first by default — source code, caches, and the SQLite databas
 | API keys                                              | Env vars only — read at runtime; never logged or persisted    |
 | Tool output (TSC, ESLint, jscpd, npm-audit)           | In-memory during the run                                      |
 
-`.warden/cache.sqlite` is gitignored. It's a single file you can delete or move; `warden init` rebuilds. To back it up before destructive operations, `cp .warden/cache.sqlite .warden/cache.sqlite.bak`.
+`.warden/cache.sqlite` is gitignored. It's a single file you can delete or move; `warden init` rebuilds. Back it up outside the repo before destructive operations if you want a restore point.
 
 **Sent over the network:**
 
@@ -122,19 +127,15 @@ Warden is local-first by default — source code, caches, and the SQLite databas
 
 **What this means.** Code chunks travel to Voyage during `warden init` to produce embeddings; embeddings come back and stay local. Voyage doesn't retain inputs per their published policy, but the bits do traverse their infrastructure during the request. Diffs travel to both Voyage (query-side embedding, not cached) and Anthropic / Google (LLM review). CVE identifiers travel to OSV.dev for verification — never source code or repo metadata. Warden never uploads `.warden/cache.sqlite` itself.
 
-If you're working on code subject to strict NDAs or data-residency requirements, you should know what crosses the wire before running `warden init` or `warden review`. A local-fallback embedding path (Transformers.js, no network) is on the M7+ roadmap for sensitive-code use cases (BYOEmbedder per ADR-0019).
+If you're working on code subject to strict NDAs or data-residency requirements, you should know what crosses the wire before running `warden init` or `warden review`. A local-fallback embedding path (Transformers.js, no network) remains a deferred BYOEmbedder item per ADR-0019.
 
 ## Implementation milestones
 
-Progress tracked against the design captured in [`decisions.md`](./decisions.md) and broken down per-milestone in [`scaffolding-plan.md`](./scaffolding-plan.md).
+Progress is tracked against the design captured in [`decisions.md`](./decisions.md), with the current milestone ledger in [`docs/milestones.md`](./docs/milestones.md).
 
-- [x] M1 — Scaffold (workspace, packages, stub CLI, Drizzle harness, AI provider config)
-- [x] M2 — Ecosystem detection + TSC/ESLint runners → `warden check` produces real findings
-- [x] M3 — npm audit + OSV verification → advisories without an OSV record are dropped (citation discipline lit up)
-- [x] M4 — LLM formatter → `warden review` produces ordered, cited comments end-to-end; multi-provider fallback (Anthropic → Google) per ADR-0017
-- [x] M5 — Cheap-signals context selector (import graph, symbol refs, same-folder) + jscpd dedup runner per ADR-0018
-- [ ] M6 — Hosted embedding-backed selector + content-addressed indexing storage; `warden init` + locked-model + limitation banner per ADR-0019
-- [ ] M7+ — TBD based on M6 dogfooding (likely some combination of cross-repo retrieval, `leverage` review category, custom-code SAST worker, BYOEmbedder, async `JobRunner`, `warden index export/import` CLI verbs)
+- [x] M1–M17 — shipped local-first review CLI, deterministic checks, verified vulnerability citations, embedding-backed repo index, review harness, semantic refresh, eval calibration, worker dispatch throttling, and setup/onboarding.
+- [ ] M18 — dedicated deep-security harness + `warden security` / `warden review --deep`, preserved at [`m18-plan.md`](./m18-plan.md).
+- [ ] M19+ — BYOEmbedder, cross-repo retrieval, daemon/cloud index work, bot wrappers, and broader integration backlog.
 
 Future deployment milestones (architecturally enabled, not committed; see ADR-0013):
 

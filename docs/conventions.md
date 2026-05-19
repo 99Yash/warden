@@ -38,4 +38,4 @@ Model selection: `getBossModel()`, `getWorkerStrongModel()`, `getWorkerCheapMode
 
 ## Environment
 
-Do not use `process.env` directly in app code — always go through `wardenEnv()` from `@warden/env`. See [`environment.md`](./environment.md) for the full env-var table and the workflow for adding a new var.
+Do not use `process.env` directly in app code — always go through `@warden/env` (`wardenEnv()`, provider helpers, or setup/runtime helpers as appropriate). See [`environment.md`](./environment.md) for the full env-var table and the workflow for adding a new var.

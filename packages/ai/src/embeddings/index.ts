@@ -1,4 +1,4 @@
-import { wardenEnv } from "@warden/env";
+import { configuredEmbeddingProvider, requireProviderApiKey } from "@warden/env";
 import type { EmbeddingProvider } from "./interfaces.js";
 import { VoyageProvider } from "./voyage.js";
 import { CURRENT_DEFAULT } from "./voyage-models.js";
@@ -29,12 +29,11 @@ let _provider: EmbeddingProvider | undefined;
  */
 export function getEmbeddingProvider(): EmbeddingProvider {
   if (_provider) return _provider;
-  const apiKey = wardenEnv().VOYAGE_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "VOYAGE_API_KEY is required for `warden init` / `warden review` (M6 semantic signal). Set it in .env or your shell — see https://dash.voyageai.com.",
-    );
+  const provider = configuredEmbeddingProvider();
+  if (provider !== "voyage") {
+    throw new Error(`Unsupported embedding provider "${provider}" in this Warden build.`);
   }
+  const apiKey = requireProviderApiKey("voyage", "warden init");
   _provider = new VoyageProvider({ apiKey, modelId: CURRENT_DEFAULT });
   return _provider;
 }

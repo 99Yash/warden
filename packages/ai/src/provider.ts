@@ -1,6 +1,11 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { wardenEnv } from "@warden/env";
+import {
+  configuredLlmFallbackProviders,
+  configuredLlmPrimaryProvider,
+  providerApiKey,
+  requireProviderApiKey,
+} from "@warden/env";
 
 let _anthropic: ReturnType<typeof createAnthropic> | undefined;
 let _google: ReturnType<typeof createGoogleGenerativeAI> | undefined;
@@ -10,8 +15,14 @@ let _google: ReturnType<typeof createGoogleGenerativeAI> | undefined;
  * per ADR-0006; ADR-0017 layers a Google fallback on top via the cascade.
  */
 export function anthropicProvider(): ReturnType<typeof createAnthropic> {
+  const primary = configuredLlmPrimaryProvider();
+  if (primary !== "anthropic") {
+    throw new Error(`Unsupported primary LLM provider "${primary}" in this Warden build.`);
+  }
   if (!_anthropic) {
-    _anthropic = createAnthropic({ apiKey: wardenEnv().ANTHROPIC_API_KEY });
+    _anthropic = createAnthropic({
+      apiKey: requireProviderApiKey("anthropic", "warden review / warden security"),
+    });
   }
   return _anthropic;
 }
@@ -23,7 +34,8 @@ export function anthropicProvider(): ReturnType<typeof createAnthropic> {
  * proceeds to hard fail.
  */
 export function googleProvider(): ReturnType<typeof createGoogleGenerativeAI> | undefined {
-  const apiKey = wardenEnv().GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!configuredLlmFallbackProviders().includes("google")) return undefined;
+  const apiKey = providerApiKey("google");
   if (!apiKey) return undefined;
   if (!_google) {
     _google = createGoogleGenerativeAI({ apiKey });

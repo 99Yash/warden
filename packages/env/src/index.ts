@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { currentWardenRuntime } from './config.js';
+
+export * from './config.js';
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z
@@ -6,7 +9,8 @@ const envSchema = z.object({
     .min(
       1,
       'ANTHROPIC_API_KEY is required — see https://console.anthropic.com',
-    ),
+    )
+    .optional(),
   // Optional fallback per ADR-0017. When set, the LLM cascade routes to
   // Google Gemini after Anthropic fails post-retry. When unset, Anthropic
   // failure is hard-fail.
@@ -19,6 +23,10 @@ const envSchema = z.object({
   WARDEN_LOG_LEVEL: z
     .enum(['silent', 'error', 'warn', 'info', 'debug'])
     .default('info'),
+  // Optional one-off env-file override. Loaded by config.ts before this
+  // schema is parsed; kept here so docs-vs-code consistency checks see the
+  // supported surface.
+  WARDEN_ENV_FILE: z.string().min(1).optional(),
   // ADR-0028 / M13: per-category confidence floor override for the
   // `security` category. Parsed as a numeric string so missing/empty values
   // are unambiguous. v0 default lives in `@warden/core`'s
@@ -89,7 +97,7 @@ const envSchema = z.object({
     ),
   // ADR-0033: per-tier dispatch concurrency caps. Strong = Sonnet via
   // `getWorkerStrongModel()`; cheap = Haiku via `getWorkerCheapModel()`.
-  // Provider-neutral naming so M17 + BYOLLM inherit. Positive integers; 0
+  // Provider-neutral naming so M18 + BYOLLM inherit. Positive integers; 0
   // is rejected (the path for "no concurrency at all" is to set
   // WARDEN_REVIEW_BOSS_ROUNDS=1, a different surface). Default values
   // are applied at the consumer in `review-harness/harness.ts`.
@@ -107,6 +115,15 @@ const envSchema = z.object({
         'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
     })
     .optional(),
+  // M18 / ADR-0029: belt-and-suspenders cap for the dedicated security
+  // harness worker fan-out. The boss plan prompt receives the budget too,
+  // but this env var is the deterministic enforcement point.
+  WARDEN_SECURITY_WORKER_BUDGET: z
+    .string()
+    .regex(/^[1-9]\d*$/, {
+      message: 'WARDEN_SECURITY_WORKER_BUDGET must be a positive integer',
+    })
+    .optional(),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),
@@ -114,19 +131,16 @@ const envSchema = z.object({
 
 export type WardenEnv = z.infer<typeof envSchema>;
 
-let _env: WardenEnv | undefined;
-
 export function wardenEnv(): WardenEnv {
-  if (_env) return _env;
+  currentWardenRuntime();
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     const formatted = result.error.issues
       .map((i) => `  ${i.path.join('.')}: ${i.message}`)
       .join('\n');
     throw new Error(
-      `Missing or invalid environment variables:\n${formatted}\n\nSet them in .env at the repo root, or export them in your shell.`,
+      `Missing or invalid environment variables:\n${formatted}\n\nRun \`warden setup --check\` to see provider readiness and env file paths.`,
     );
   }
-  _env = result.data;
-  return _env;
+  return result.data;
 }
