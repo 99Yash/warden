@@ -280,28 +280,29 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
 
     let result: WorkerInvocationResult;
     try {
-      result = await opts.route(invocation);
-    } catch (err) {
+      try {
+        result = await opts.route(invocation);
+      } catch (err) {
+        const detail = formatErr(err);
+        const entry: DegradedEntry = {
+          kind: "warning",
+          topic: "review-harness",
+          message: `dispatch_worker(${args.concern}): worker threw (${detail})`,
+        };
+        opts.scratchpad.recordWorker({
+          concern: args.concern,
+          files: args.files,
+          findings: [],
+          toolCalls: 0,
+          degraded: [entry],
+          phase: args.phase,
+          durationMs: 0,
+        });
+        return { findings: [], toolCalls: 0, degraded: [entry] };
+      }
+    } finally {
       release?.();
-      release = undefined;
-      const detail = formatErr(err);
-      const entry: DegradedEntry = {
-        kind: "warning",
-        topic: "review-harness",
-        message: `dispatch_worker(${args.concern}): worker threw (${detail})`,
-      };
-      opts.scratchpad.recordWorker({
-        concern: args.concern,
-        files: args.files,
-        findings: [],
-        toolCalls: 0,
-        degraded: [entry],
-        phase: args.phase,
-        durationMs: 0,
-      });
-      return { findings: [], toolCalls: 0, degraded: [entry] };
     }
-    release?.();
 
     // Lane discipline: drop findings whose `path` is outside the
     // dispatched `files` set. Findings carry paths through their

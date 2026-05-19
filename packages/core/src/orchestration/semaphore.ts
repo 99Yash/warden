@@ -17,7 +17,7 @@
  * @example
  * ```ts
  * const sem = new Semaphore(4);
- * const release = await sem.acquire();
+ * const { release, waitMs } = await sem.acquire();
  * try { await doWork(); } finally { release(); }
  * ```
  */
