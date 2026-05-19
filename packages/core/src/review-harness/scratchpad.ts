@@ -71,12 +71,43 @@ export interface TokenUsage {
  * cost line at the end of the run; persistence lands when `--deep` ships
  * in M15+ and the cost story matters across both verbs.
  */
+/**
+ * Per-dispatch concurrency datapoint (ADR-0033). Recorded by
+ * `runOneDispatch` in the dispatch tool right after the per-tier semaphore
+ * resolves. `waitMs` is the wall-clock time the dispatch spent blocked
+ * waiting for a slot — 0 when the dispatch acquired immediately. The
+ * aggregator on `ReviewScratchpad` rolls these into a single info entry
+ * the harness emits when the cap actually engaged.
+ */
+export interface ConcurrencyMetric {
+  /** Milliseconds the dispatch spent blocked at `acquire()` before running. */
+  waitMs: number;
+}
+
+/**
+ * Output shape of `ReviewScratchpad.concurrencyAggregate()`. `null` when
+ * no dispatch was queued — i.e., the cap never engaged. The harness reads
+ * this once at the end of Phase 2 and only emits the info entry on a
+ * non-null return; the happy path stays silent.
+ */
+export interface ConcurrencyAggregate {
+  /** Total dispatches that booked a slot (regardless of wait time). */
+  totalDispatches: number;
+  /** Subset of `totalDispatches` whose `waitMs > 0`. */
+  totalQueued: number;
+  /** Max `waitMs` across all queued dispatches. */
+  maxWaitMs: number;
+  /** Sum of `waitMs` across all queued dispatches. */
+  totalQueuedMs: number;
+}
+
 export class ReviewScratchpad {
   private _detPriors: DetPriors | undefined;
   private readonly _workerOutputs: WorkerOutput[] = [];
   private readonly _degraded: DegradedEntry[] = [];
   private _bossTokens: TokenUsage | undefined;
   private _workerTokens: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  private readonly _concurrencyMetrics: ConcurrencyMetric[] = [];
 
   /**
    * Phase 1 result. Set exactly once by the harness; reading before set
@@ -157,5 +188,43 @@ export class ReviewScratchpad {
   /** Aggregate read of every worker's findings. Boss synth and render both use this. */
   flattenWorkerFindings(): Comment[] {
     return this._workerOutputs.flatMap((w) => w.findings);
+  }
+
+  /**
+   * ADR-0033 — record one dispatch's concurrency wait. Called by
+   * `runOneDispatch` in the dispatch tool right after the per-tier
+   * semaphore returns. `waitMs` of 0 means the dispatch got its slot
+   * immediately; positive values mean it queued behind in-flight work.
+   */
+  recordConcurrencyMetric(metric: ConcurrencyMetric): void {
+    this._concurrencyMetrics.push(metric);
+  }
+
+  /**
+   * ADR-0033 — fold the per-dispatch metrics into a single aggregate.
+   * Returns `null` when no dispatch was queued (the cap never engaged);
+   * the harness skips the info entry on null so the happy path stays
+   * silent. Discipline: the four numbers the surface message renders
+   * (queued/total/max-wait/total-wait) all derive from this aggregate.
+   */
+  concurrencyAggregate(): ConcurrencyAggregate | null {
+    if (this._concurrencyMetrics.length === 0) return null;
+    let totalQueued = 0;
+    let maxWaitMs = 0;
+    let totalQueuedMs = 0;
+    for (const m of this._concurrencyMetrics) {
+      if (m.waitMs > 0) {
+        totalQueued += 1;
+        totalQueuedMs += m.waitMs;
+        if (m.waitMs > maxWaitMs) maxWaitMs = m.waitMs;
+      }
+    }
+    if (totalQueued === 0) return null;
+    return {
+      totalDispatches: this._concurrencyMetrics.length,
+      totalQueued,
+      maxWaitMs,
+      totalQueuedMs,
+    };
   }
 }

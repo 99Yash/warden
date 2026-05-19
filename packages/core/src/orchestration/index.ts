@@ -10,3 +10,10 @@
 // `leverageRunner` in `runners/leverage.ts`) implement it, and it remains
 // the right shape for future Phase 1 additions.
 export type { Runner, RunnerInput, RunnerOutput } from "./runner.js";
+
+// Per-tier dispatch concurrency cap (ADR-0033) for the review harness.
+// The class is intentionally exported from `orchestration/` rather than
+// `review-harness/` because M17's deep-security harness will inherit it
+// directly — same pattern as `Runner`, which survived the M14 close-out
+// for the same reason.
+export { Semaphore } from "./semaphore.js";

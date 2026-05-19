@@ -87,6 +87,26 @@ const envSchema = z.object({
         message: 'WARDEN_REVIEW_REFRESH_MAX_USD must be a non-negative number',
       },
     ),
+  // ADR-0033: per-tier dispatch concurrency caps. Strong = Sonnet via
+  // `getWorkerStrongModel()`; cheap = Haiku via `getWorkerCheapModel()`.
+  // Provider-neutral naming so M17 + BYOLLM inherit. Positive integers; 0
+  // is rejected (the path for "no concurrency at all" is to set
+  // WARDEN_REVIEW_BOSS_ROUNDS=1, a different surface). Default values
+  // are applied at the consumer in `review-harness/harness.ts`.
+  WARDEN_WORKER_CONCURRENCY_STRONG: z
+    .string()
+    .regex(/^[1-9]\d*$/, {
+      message:
+        'WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer',
+    })
+    .optional(),
+  WARDEN_WORKER_CONCURRENCY_CHEAP: z
+    .string()
+    .regex(/^[1-9]\d*$/, {
+      message:
+        'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
+    })
+    .optional(),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),
