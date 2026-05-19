@@ -480,16 +480,29 @@ function parseEnv(text: string): Record<string, string> {
 }
 
 function parseEnvValue(raw: string): string {
-  if (
-    (raw.startsWith('"') && raw.endsWith('"')) ||
-    (raw.startsWith("'") && raw.endsWith("'"))
-  ) {
-    const inner = raw.slice(1, -1);
-    return raw.startsWith('"')
-      ? inner.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\"/g, '"')
-      : inner;
+  if (raw.startsWith('"') || raw.startsWith("'")) {
+    const quote = raw[0] as '"' | "'";
+    const end = findClosingEnvQuote(raw, quote);
+    if (end !== -1) {
+      const inner = raw.slice(1, end);
+      return quote === '"'
+        ? inner.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\"/g, '"')
+        : inner;
+    }
   }
   return raw.replace(/\s+#.*$/, "");
+}
+
+function findClosingEnvQuote(raw: string, quote: '"' | "'"): number {
+  for (let i = 1; i < raw.length; i++) {
+    const char = raw[i];
+    if (quote === '"' && char === "\\") {
+      i++;
+      continue;
+    }
+    if (char === quote) return i;
+  }
+  return -1;
 }
 
 function parseJsonc(text: string, source: string): unknown {

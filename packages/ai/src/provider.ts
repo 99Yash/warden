@@ -21,7 +21,7 @@ export function anthropicProvider(): ReturnType<typeof createAnthropic> {
   }
   if (!_anthropic) {
     _anthropic = createAnthropic({
-      apiKey: requireProviderApiKey("anthropic", "warden review"),
+      apiKey: requireProviderApiKey("anthropic", "warden review / warden security"),
     });
   }
   return _anthropic;
