@@ -55,6 +55,8 @@
     "smoke:m16-backfill": "node --import tsx/esm scripts/smoke-m16-backfill.mts",
     "smoke:m16": "pnpm smoke:m16-junction && pnpm smoke:m16-reconcile && pnpm smoke:m16-incremental-refresh && pnpm smoke:m16-backfill",
     "smoke:fix-worker-concurrency": "node --import tsx/esm scripts/smoke-fix-worker-concurrency.mts",
+    "smoke:m18-triage-gate": "node --import tsx/esm scripts/smoke-m18-triage-gate.mts",
+    "smoke:m18": "pnpm smoke:m18-triage-gate",
     "eval": "node --import tsx/esm scripts/eval/run.mts"
   },
   "dependencies": {

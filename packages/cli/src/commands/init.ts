@@ -1,5 +1,5 @@
 import { runInit, type InitEvent, type InitOptions } from "@warden/core";
-import { wardenEnv } from "@warden/env";
+import { configuredEmbeddingProvider, requireProviderApiKey } from "@warden/env";
 import pc from "picocolors";
 import { createInitRenderer } from "../render.js";
 
@@ -17,12 +17,9 @@ export interface InitCliOpts {
 }
 
 export async function runInitCommand(opts: InitCliOpts, repoRoot: string): Promise<void> {
-  // Env first — fails fast (ADR-0008 + ADR-0019 #5).
-  const env = wardenEnv();
-  if (!opts.dryRun && !env.VOYAGE_API_KEY) {
-    throw new Error(
-      "VOYAGE_API_KEY is required for `warden init`. Set it in .env or your shell — see https://dash.voyageai.com.",
-    );
+  // Env first — fails fast (ADR-0008 + ADR-0019 #5), except dry-runs never embed.
+  if (!opts.dryRun) {
+    requireProviderApiKey(configuredEmbeddingProvider(), "warden init");
   }
 
   const maxCostUsd = opts.maxCost !== undefined ? parseUsd(opts.maxCost) : undefined;

@@ -2,21 +2,39 @@
 
 See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index.
 
-Validated by `wardenEnv()` from `@warden/env`. Calling it with missing required vars throws a clear error.
+Provider setup is owned by `@warden/env`. `warden setup` creates a global
+config at `~/.config/warden/config.jsonc` and a secret env template at
+`~/.config/warden/env`; `warden setup --check` prints the same readiness report
+without writing files. Repo-specific behavior can live in `warden.jsonc`, created
+explicitly with `warden setup project`.
+
+Secret values stay env-based. Warden config files can name env vars with
+`apiKeyEnv`, but they must not contain raw provider keys. Direct process env wins,
+then configured env files load in order, then project `.env` / `.env.local`, and
+`WARDEN_ENV_FILE=/path/to/env` can add a one-off override file. This keeps
+Infisical, Doppler, 1Password, CI secrets, and shell exports as first-class paths.
 
 | Var                            | Notes                                                                                                     |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`            | Required. Even `warden check` validates env at start.                                                     |
+| `ANTHROPIC_API_KEY`            | Needed by `warden review`. Primary LLM provider for the boss loop and workers. `warden check` does not need it. |
+| `VOYAGE_API_KEY`               | Needed by `warden init` unless `--dry-run` is used. Enables semantic retrieval in `warden review`; review degrades when unset. |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Optional. Enables the ADR-0017 fallback (Anthropic → retry → Google). When unset, Anthropic failure is hard-fail. |
-| `WARDEN_THINKING_BUDGET`       | Optional. Anthropic extended-thinking budget in tokens. Default 4096.                                     |
+| `WARDEN_ENV_FILE`              | Optional. Absolute or relative path to an additional env file for one-off runs.                           |
 | `WARDEN_LOG_LEVEL`             | Optional. Default `info`. Values: `silent`, `error`, `warn`, `info`, `debug`.                             |
-| `WARDEN_SECURITY_CONFIDENCE_FLOOR` | Optional. Numeric `0.0`–`1.0`. Overrides the per-category confidence floor for `security` (ADR-0028 §5; default 0.8 in `packages/core/src/confidence.ts`). Tier-1 findings bypass unconditionally. The M17 deep-security harness will bypass the floor entirely per ADR-0029 §10; the live M14 review path is unaffected. |
+| `WARDEN_SECURITY_CONFIDENCE_FLOOR` | Optional. Numeric `0.0`–`1.0`. Overrides the per-category confidence floor for `security` (ADR-0028 §5; default 0.8 in `packages/core/src/confidence.ts`). Tier-1 findings bypass unconditionally. The M18 deep-security harness will bypass the floor entirely per ADR-0029 §10; the live M14 review path is unaffected. |
 | `WARDEN_REVIEW_BOSS_ROUNDS`    | Optional. Positive integer, clamped to `[1, 10]`. Default 5. Step cap on the M14 review harness boss loop — each round is one `streamText` step the Opus 4.6 boss spends dispatching workers via `dispatch_worker` or emitting the final `Output.object({ comments: Comment[] })` structured result. Live since the M14 close-out wired `review()` to `runReviewHarness()` (ADR-0030; m14-plan.md). |
 | `WARDEN_REVIEW_WORKER_BUDGET`  | Optional. Positive integer; unset = unbounded. Total cap on workers dispatched across the entire M14 boss loop. When set, the `dispatch_worker` tool returns an error to the boss + emits a degraded entry past the cap (belt-and-suspenders against boss-side over-spend). Use `WARDEN_REVIEW_BOSS_ROUNDS=1` if you want zero workers; 0 is rejected here by design (ADR-0030). |
 | `WARDEN_REVIEW_REFRESH_MAX_USD` | Optional. Numeric `0.0+`. Default `0.25`. USD cap applied by `det-priors.ts` when `warden review` triggers `reconcileFiles()` over stale files (M16 — ADR-0032). Pre-flight estimate via `estimate.ts` LOC heuristic; running accountant uses actual Voyage cost from `resp.promptTokens` × `VOYAGE_MODELS` pricing. Over-budget files are skipped (subsequent files within budget still refresh) and surfaced as one actionable `degradedWorkers` entry pointing at `warden init`. Set to `0` to opt out of implicit refresh entirely — review then runs against possibly-stale embeddings. Deletes are unconditional and free of Voyage cost; the cap only gates added/changed files. Init's own `--max-cost` flag is a separate surface (full reindex budget, not per-review budget). |
-| `WARDEN_WORKER_CONCURRENCY_STRONG` | Optional. Positive integer. Default `4`. Max concurrent strong-tier (Sonnet via `getWorkerStrongModel()`) worker dispatches per `runReview()` invocation (ADR-0033). Applies at the dispatch boundary inside `dispatch_worker`'s `runOneDispatch` — the single chokepoint both Round 0's `Promise.all` fan-out and the boss-loop's in-loop dispatches flow through. One per-review semaphore pair, never module-global. Throttles to keep Anthropic rate-limit windows from saturating under PD-multi Round 0 bursts; reaffirms ADR-0017's tools + structured-output no-Gemini-fallback exception under the catastrophic case. Surfaced as one aggregated `degradedWorkers` info entry (topic `worker-concurrency`) only when `totalQueued > 0`; silent on the happy path. Provider-neutral by design so M17 + BYOLLM inherit the shape. `0` is rejected — disable Round 0 entirely via `WARDEN_REVIEW_BOSS_ROUNDS=1` if that's the intent. |
+| `WARDEN_WORKER_CONCURRENCY_STRONG` | Optional. Positive integer. Default `4`. Max concurrent strong-tier (Sonnet via `getWorkerStrongModel()`) worker dispatches per `runReview()` invocation (ADR-0033). Applies at the dispatch boundary inside `dispatch_worker`'s `runOneDispatch` — the single chokepoint both Round 0's `Promise.all` fan-out and the boss-loop's in-loop dispatches flow through. One per-review semaphore pair, never module-global. Throttles to keep Anthropic rate-limit windows from saturating under PD-multi Round 0 bursts; reaffirms ADR-0017's tools + structured-output no-Gemini-fallback exception under the catastrophic case. Surfaced as one aggregated `degradedWorkers` info entry (topic `worker-concurrency`) only when `totalQueued > 0`; silent on the happy path. Provider-neutral by design so M18 + BYOLLM inherit the shape. `0` is rejected — disable Round 0 entirely via `WARDEN_REVIEW_BOSS_ROUNDS=1` if that's the intent. |
 | `WARDEN_WORKER_CONCURRENCY_CHEAP`  | Optional. Positive integer. Default `8`. Max concurrent cheap-tier (Haiku via `getWorkerCheapModel()`) worker dispatches per `runReview()` invocation (ADR-0033). Same dispatch-boundary semantics as `WARDEN_WORKER_CONCURRENCY_STRONG`; tier selection uses the *resolved* worker tier (post-`routeWorker()`), so boss-side `dispatch_worker.tier?` overrides flow through transparently. Strong-tier saturation does not starve cheap-tier slots — single-slot per dispatch, per-tier accounting. Default tuned against Anthropic tier-2 rate limits at ADR-0033 commit time (≈100 rpm for Haiku); raise after a tier bump. |
+| `WARDEN_SECURITY_WORKER_BUDGET` | Optional. Positive integer; unset = unbounded. Belt-and-suspenders cap for the M18 dedicated security harness worker fan-out. If the boss plans more workers than this number, only the first N planned workers run and Warden emits one `security` degraded entry. |
 
-When adding a new env var: update `packages/env/src/index.ts`, `.env.example`, and this file.
+Config layering:
 
-Do not use `process.env` directly in app code — always go through `wardenEnv()`.
+1. Built-in defaults: Anthropic primary LLM, Google optional fallback, Voyage embeddings.
+2. Global config: `~/.config/warden/config.jsonc`.
+3. Project config: `<repo>/warden.jsonc`.
+
+When adding a new env var: update `packages/env/src/index.ts`, `.env.example`, and this file. If it controls provider routing or setup readiness, also update `packages/env/src/config.ts`.
+
+Do not use `process.env` directly in app code — always go through `@warden/env`.

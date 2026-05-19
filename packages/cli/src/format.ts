@@ -1,5 +1,4 @@
 import type {
-  Category,
   CommentSet,
   CostByTier,
   DegradedEntry,
@@ -8,25 +7,9 @@ import type {
 } from "@warden/core";
 import pc from "picocolors";
 
-const PRIORITY_ORDER: Category[] = [
-  "correctness",
-  "security",
-  "vulnerability",
-  "contract",
-  "scalability",
-  "consistency",
-  "deadcode",
-  "committability",
-  "clarity",
-  "style",
-  "leverage",
-  "dedup",
-  "tests",
-];
-
 export function formatCommentSet(
   result: CommentSet,
-  mode: ReviewInput["config"]["mode"],
+  mode: ReviewInput["config"]["mode"] | "security",
   verbose = false,
 ): string {
   const lines: string[] = [];
@@ -34,18 +17,10 @@ export function formatCommentSet(
   if (result.comments.length === 0) {
     lines.push(pc.green(`warden ${mode}: no findings.`));
   } else {
-    const sorted = [...result.comments].sort((a, b) => {
-      const pa = PRIORITY_ORDER.indexOf(a.category);
-      const pb = PRIORITY_ORDER.indexOf(b.category);
-      if (pa !== pb) return pa - pb;
-      if (a.tier !== b.tier) return a.tier - b.tier;
-      return b.confidence - a.confidence;
-    });
-
     lines.push(
       pc.bold(`warden ${mode}: ${result.comments.length} finding${result.comments.length === 1 ? "" : "s"}`),
     );
-    for (const c of sorted) {
+    for (const c of result.comments) {
       const sev = tierSwatch(c.tier);
       const loc = pc.cyan(`${c.file}:${c.lineStart}`);
       const cat = pc.dim(`[${c.category}]`);

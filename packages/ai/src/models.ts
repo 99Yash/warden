@@ -20,6 +20,15 @@ export function getBossModel(): LanguageModel {
 }
 
 /**
+ * Apex-tier model for opt-in deep security analysis (M18 / ADR-0029).
+ * Deliberately separate from the default-review boss tier so `warden review`
+ * does not silently inherit the deep tier's higher cost.
+ */
+export function getApexModel(): LanguageModel {
+  return anthropicProvider()("claude-opus-4-7");
+}
+
+/**
  * Strong-tier worker model. Same SKU as the boss in v0 — separated as a
  * function so future tuning (e.g. switching grader to a different SKU)
  * doesn't require touching every callsite.
@@ -45,6 +54,11 @@ export function getWorkerCheapModel(): LanguageModel {
  * point-in-time and revisited on each Google generation ship.
  */
 export function getBossFallbackModel(): LanguageModel | undefined {
+  const g = googleProvider();
+  return g?.("gemini-2.5-pro");
+}
+
+export function getApexFallbackModel(): LanguageModel | undefined {
   const g = googleProvider();
   return g?.("gemini-2.5-pro");
 }

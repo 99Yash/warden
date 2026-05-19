@@ -9,6 +9,11 @@ import {
 } from "./review-harness/harness.js";
 import { runDetPriors } from "./review-harness/det-priors.js";
 import { toComment } from "./runners/to-comment.js";
+import {
+  runSecurityHarness,
+  type SecurityHarnessConfig,
+  type SecurityHarnessOutput,
+} from "./security/index.js";
 import type {
   Category,
   Comment,
@@ -144,6 +149,18 @@ export {
   runBossLoop,
 } from "./review-harness/boss-loop.js";
 export { type BossPromptVariant } from "./review-harness/prompts/loader.js";
+export {
+  runSecurityHarness,
+  evaluateTriageGate,
+  isSecuritySensitivePath,
+  SECURITY_SENSITIVE_PATTERNS,
+  type SecurityHarnessConfig,
+  type SecurityHarnessInput,
+  type SecurityHarnessMode,
+  type SecurityHarnessOutput,
+  type TriageGateInput,
+  type TriageGateResult,
+} from "./security/index.js";
 export { toComment } from "./runners/to-comment.js";
 
 export interface ReviewConfig {
@@ -157,6 +174,11 @@ export interface ReviewConfig {
    * Used by the eval suite + future bot wrappers to A/B configurations.
    */
   bossLoop?: import("./review-harness/boss-loop.js").BossLoopConfig;
+  /**
+   * M18 / ADR-0029: opt into the dedicated deep-security harness after the
+   * default M14/M15 review harness. Ignored in check mode.
+   */
+  deep?: boolean;
 }
 
 export interface ReviewInput {
@@ -228,14 +250,39 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     ...(input.emit !== undefined ? { emit: input.emit } : {}),
   });
   const ruled = applyHardRules(harness.comments, input.config);
+  const security =
+    input.config.deep === true
+      ? await runSecurityHarness({
+          diff: input.diff,
+          repoRoot: input.repoRoot,
+          config: {
+            mode: "review-deep",
+            ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}),
+          },
+        })
+      : undefined;
+  const ruledSecurity =
+    security !== undefined
+      ? applyHardRules(security.comments, {
+          mode: "review",
+          harness: "m18-security",
+          ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}),
+        })
+      : undefined;
+  const mergedComments =
+    ruledSecurity !== undefined
+      ? [...ruled.comments, ...ruledSecurity.comments]
+      : ruled.comments;
   return {
-    comments: ruled.comments,
+    comments: mergedComments,
     metadata: {
-      durationMs: harness.metadata.durationMs,
+      durationMs: harness.metadata.durationMs + (security?.metadata.durationMs ?? 0),
       degradedWorkers: [
         ...(input.extraDegraded ?? []),
         ...harness.metadata.degradedWorkers,
         ...ruled.degraded,
+        ...(security?.metadata.degradedWorkers ?? []),
+        ...(ruledSecurity?.degraded ?? []),
       ],
       ...(harness.metadata.tokenUsage !== undefined
         ? { tokenUsage: harness.metadata.tokenUsage }
@@ -246,6 +293,35 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
       ...(harness.metadata.costByTier !== undefined
         ? { costByTier: harness.metadata.costByTier }
         : {}),
+    },
+  };
+}
+
+export async function security(input: Omit<ReviewInput, "config"> & {
+  config?: Partial<SecurityHarnessConfig>;
+}): Promise<CommentSet> {
+  const harness: SecurityHarnessOutput = await runSecurityHarness({
+    diff: input.diff,
+    repoRoot: input.repoRoot,
+    config: {
+      mode: input.config?.mode ?? "security",
+      ...(input.config?.verbose !== undefined ? { verbose: input.config.verbose } : {}),
+    },
+  });
+  const ruled = applyHardRules(harness.comments, {
+    mode: "review",
+    harness: "m18-security",
+    ...(input.config?.verbose !== undefined ? { verbose: input.config.verbose } : {}),
+  });
+  return {
+    comments: ruled.comments,
+    metadata: {
+      durationMs: harness.metadata.durationMs,
+      degradedWorkers: [
+        ...(input.extraDegraded ?? []),
+        ...harness.metadata.degradedWorkers,
+        ...ruled.degraded,
+      ],
     },
   };
 }
@@ -330,14 +406,23 @@ interface HardRulesOutput {
   degraded: DegradedEntry[];
 }
 
-function applyHardRules(comments: Comment[], config: ReviewConfig): HardRulesOutput {
+type HarnessHardRulesContext = "m14-review" | "m18-security";
+
+type HardRulesConfig = Pick<ReviewConfig, "mode" | "verbose"> & {
+  harness?: HarnessHardRulesContext;
+};
+
+function applyHardRules(comments: Comment[], config: HardRulesConfig): HardRulesOutput {
   // M13 (ADR-0028 §5): confidence-floor filter runs first. Per-category
   // numeric floor; Tier-1 findings bypass unconditionally (critical-finding
   // short-circuit per `project_warden_security_depth_tiers.md`). Drops
   // surface as one info-level degraded entry per non-zero drop count per
   // category — never per dropped Comment.
-  const { kept, drops } = applyConfidenceFloor(comments);
-  const floorDegraded = dropsToDegraded(drops);
+  const shouldApplyConfidenceFloor = config.harness !== "m18-security";
+  const { kept, drops } = shouldApplyConfidenceFloor
+    ? applyConfidenceFloor(comments)
+    : { kept: comments, drops: new Map<Category, { count: number; floor: number }>() };
+  const floorDegraded = shouldApplyConfidenceFloor ? dropsToDegraded(drops) : [];
 
   // Tier-3 verbose-gate applies only in `review` mode — the LLM has had its
   // triage pass and the user wanted curation. `check` is deterministic-only

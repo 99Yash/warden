@@ -8,9 +8,9 @@ All workspace packages publish under `@warden/*`. The CLI binary is `warden`.
 
 - **`@warden/cli`** — Argument parsing, terminal output, the published `warden` binary. The single in-tree consumer of `@warden/core` in v0.
 - **`@warden/core`** — The review engine. Takes a **`ReviewInput`**, returns a **`CommentSet`**. Owns the **review harness** (M14), **det priors** (parallel deterministic runners), the **boss loop** with **`dispatch_worker`** tool, the six **worker concerns**, **citation discipline** + the **substring-verifier** post-pass, and the M16 **`reconcileFiles`** indexing primitive. I/O-pure (ADR-0013).
-- **`@warden/ai`** — The provider-dispatch seam. Exposes `getBossModel()` / `getWorkerStrongModel()` / `getWorkerCheapModel()` / `getApexModel()` (M17), the **embedding provider** abstraction, the AI-SDK `tool()` re-export, and the M15 **`transformSchemaForGemini`** adapter. The single place that imports AI SDK provider packages.
+- **`@warden/ai`** — The provider-dispatch seam. Exposes `getBossModel()` / `getWorkerStrongModel()` / `getWorkerCheapModel()` / `getApexModel()` (M18), the **embedding provider** abstraction, the AI-SDK `tool()` re-export, and the M15 **`transformSchemaForGemini`** adapter. The single place that imports AI SDK provider packages.
 - **`@warden/db`** — Drizzle schema + migrations + the better-sqlite3 connection singleton over **`.warden/cache.sqlite`**. Re-exports drizzle-orm operators (`eq`, `and`, `gt`, …) so consumers don't pull `drizzle-orm` into their own deps.
-- **`@warden/env`** — Zod-validated env-var access via `wardenEnv()`. Importable from any package. The only sanctioned reader of `process.env`. See [`environment.md`](./environment.md).
+- **`@warden/env`** — Warden config/env runtime: built-in defaults, global `~/.config/warden/config.jsonc`, project `warden.jsonc`, env-file loading, provider readiness, and Zod-validated env-var access via `wardenEnv()`. Importable from any package. The only sanctioned reader of `process.env`. See [`environment.md`](./environment.md).
 - **`@warden/config`** — Shared TS configs + oxlint base. Ships configs only; no runtime code.
 
 Future surfaces under `apps/` (GitHub PR bot, Slack bot, ClickUp integration — ADR-0013) are additional consumers of `@warden/core`, not rewrites of it.
@@ -34,7 +34,7 @@ These diagrams describe the command-level lifecycle, not every internal function
 ```mermaid
 stateDiagram-v2
   [*] --> InitRequested
-  InitRequested --> EnvValidated: load env + parse flags
+  InitRequested --> EnvValidated: load Warden runtime + parse flags
   EnvValidated --> InitHardFail: missing VOYAGE_API_KEY and not dry-run
   InitHardFail --> [*]: exit 1
   EnvValidated --> GitignoreEnsured

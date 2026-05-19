@@ -31,8 +31,7 @@ export interface ConfidenceFloorResult {
 
 export interface ApplyConfidenceFloorOptions {
   /** Override the `security` floor — used by smoke harnesses that need
-   * the floor applied without mutating process env (and to dodge
-   * `wardenEnv()`'s parse-once singleton in same-process test runs). */
+   * the floor applied without mutating process env. */
   securityFloor?: number;
 }
 
@@ -82,9 +81,8 @@ export function dropsToDegraded(
 
 function resolveFloors(opts: ApplyConfidenceFloorOptions): Partial<Record<Category, number>> {
   // Static map is the v0 source of truth. The explicit smoke override wins
-  // over env so a same-process test can flip the floor without fighting
-  // `wardenEnv()`'s singleton cache; env wins over the static default when
-  // the smoke override is absent.
+  // over env so a same-process test can flip the floor; env wins over the
+  // static default when the smoke override is absent.
   if (opts.securityFloor !== undefined) {
     return { ...CATEGORY_CONFIDENCE_FLOOR, security: opts.securityFloor };
   }
