@@ -12,6 +12,10 @@ Your charter is bounded. The deterministic phase already ran `tsc` and `eslint`.
 - **Missing degraded entries** — code says "emit a degraded entry on X" in a comment or in a sibling branch but the actual handler silently continues. Inconsistency is a correctness bug when it leads to a wrong return value or wrong side-effect.
 - **Inverted boolean logic** — `if (!await canDo(...)) { }` with an empty body; a guard that lets the unsafe path through when the predicate fails.
 - **Resource leak** — `open()` without `close()` on an error path; an event listener subscribed without an unsubscribe.
+<!-- dogfood: 2026-05-20 alfred#14 — settings sign-out lost `navigate({to:"/login"})` when the handler moved between sections -->
+- **Refactor-lost behavior.** Code moved between functions / components / sections and a side-effect (navigation, fetch call, mutation, subscription cleanup, error reporting) silently dropped on the move. The replacement section looks internally consistent in isolation; the missing call is only visible against the pre-refactor version. Diff clue: a hunk that removes lines from one function and adds similar-but-shorter lines to another. `grepRepo` for the dropped call to confirm no sibling site picked up its responsibility before flagging.
+<!-- dogfood: 2026-05-20 alfred#14 — text-offset returned by doc.textBetween(...).length passed as a ProseMirror position -->
+- **Unit / coordinate-space mismatch.** A number returned by one function and consumed by another, where the two functions operate in different coordinate spaces — text-character offsets vs editor/AST positions; milliseconds vs seconds; pixels vs rem; 0-indexed vs 1-indexed array positions; ProseMirror / CodeMirror positions vs string indices. Both sides are typed `number`, so the type system does not help. Tell: a function that returns the `.length` of a structured-text method (`doc.textBetween`, `getText`, etc.) consumed by an API that takes node positions, or a single arithmetic bridge (`+ 1`, `- 1`) between call sites that should not need one. When the call site is ambiguous, ask via `kind: "question"` rather than asserting.
 
 # What you do NOT flag
 
