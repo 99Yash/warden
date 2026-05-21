@@ -246,6 +246,8 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **dogfooding** — Personal-first development. v0 ships for one user; the OSS-quality bar holds anyway because trustworthiness is the moat. M5 and M6 PRs are reviewed by Warden itself plus Copilot for ground-truth comparison. → ADR-0001, memory: `project_warden_review_category_gaps.md`.
 
+**dogfood-lesson intake** — The discipline by which dogfood misses (bugs warden missed that another reviewer caught) enter warden's pipeline. Three lanes per ADR-0035: **detector-shaped** (M-plan backlog entry in `docs/dogfood-backlog.md`, eventually a deterministic det-prior runner per the ADR-0021 promotion path); **LLM-only residue** (prompt delta in the relevant `review-harness/prompts/workers/*-system.md` tagged with `<!-- dogfood: <YYYY-MM-DD> <repo>#<PR> — <summary> -->`); **repo-overlay-specific** (candidate for `.reviewbot/overlay.yaml`, not warden core). Retirement discipline: when a detector ships, its corresponding prompt delta is removed in the same change so warden does not double-pay. Audit cadence is `rg "<!-- dogfood:"` until active-delta volume earns the eval-suite + persistence layer named in ADR-0035's caveats. → ADR-0035, ADR-0020, ADR-0021, memory: `project_warden_alfred_pr14_misses.md`.
+
 **security depth tiers** — Always-on fast pass + default review + on-demand deep mode. Critical findings short-circuit through the gate regardless of mode. → memory: `project_warden_security_depth_tiers.md`.
 
 ---
