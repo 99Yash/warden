@@ -188,6 +188,8 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **jscpd** — Copy-paste detection runner, scoped to `changed ∪ candidates`. Surfaces dedup findings. Loaded via `createRequire` to dodge an ESM/CJS interop bug in jscpd's `colors/safe` import. → ADR-0018.
 
+**format-check runner** — `[deferred]` Deterministic formatter signal for `warden check` / `warden review`, if implemented. Must be read-only, diff-scoped, and mutation-guarded: prefer native check modes (`prettier --check`, `biome check`, `dprint check`); run write-only formatters only in a temp copy; snapshot the working tree before and after; fail fast if the real repo changed. Diagnostics outside touched files collapse into one `degradedWorkers` entry with topic `format-check`, never a spray of unrelated comments. Lives in **Det Priors** when built. → ADR-0037.
+
 **ecosystem detection** — Auto-derives ecosystem and framework from marker files (`package.json`, `requirements.txt`, `go.mod`, etc.) and from dependency contents. Zero manual config. → ADR-0008.
 
 **M7 detectors** — Three new detectors land in M7: **scalability detector** (load-then-narrow queries, sequential awaits), **deadcode detector** (unused optional params, dead branches via reverse import-graph), **consistency detector** (env-var / CLI-command / file-path claims in docs that diverge from code). → m7-plan.md.
@@ -241,6 +243,8 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 **Warden config** — JSONC behavior config loaded by `@warden/env` in three layers: built-in defaults, global `~/.config/warden/config.jsonc`, then project `<repo>/warden.jsonc`. Config may name provider env vars (`apiKeyEnv`) and route Anthropic / Google / Voyage, but must not contain raw secret values. Project config is explicit (`warden setup project`) and commit-safe by default. → ADR-0034, docs/environment.md.
 
 **provider readiness** — The command-scoped answer to "can Warden run here?" `check` is always ready because it is deterministic-only; `review` requires the configured primary LLM key (Anthropic in M17); `init` requires the configured embedding key (Voyage in M17) unless dry-run. Google Gemini fallback is additive readiness, never a blocker. → ADR-0034, docs/environment.md.
+
+**review intensity profile** — `[deferred]` User-facing depth/cost preset for `warden review`, planned as `medium`, `high`, and `xhigh`. A profile resolves to harness internals: boss rounds, Round 0 shape, worker budget/concurrency, semantic-refresh budget, M18 deep-security inclusion, model/reasoning policy, comment volume, and short-circuit gates. `medium` optimizes for P1/P2 coverage and cost; `high` is the balanced default; `xhigh` explicitly spends for risky refactors / legacy migrations / security-sensitive changes. Low-level env vars remain escape hatches, but the profile is the normal UX. → ADR-0038.
 
 **one-shot CLI** — No TUI, no REPL, no interactive prompts. Input via flags / stdin, output via stdout / JSON, process exits. Enables bots, CI integration, and scripting. → ADR-0014.
 
