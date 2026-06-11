@@ -24,6 +24,7 @@ import type { DetPriors } from "./det-priors.js";
 import {
   loadBossSystemPrompt,
   type BossPromptVariant,
+  type WorkerPromptVariant,
 } from "./prompts/loader.js";
 import type { ReviewScratchpad, TokenUsage } from "./scratchpad.js";
 import {
@@ -101,6 +102,14 @@ export interface BossLoopConfig {
   programmaticDispatch?: boolean;
   bossPromptVariant?: BossPromptVariant;
   roundZeroExtraConcerns?: Concern[];
+  /**
+   * Worker prompt variant. `'baseline'` (default) loads each worker's
+   * `<concern>-system.md`. `'sentry-borrow'` tries
+   * `<concern>-system.sentry-borrow.md` first with silent fallback to
+   * baseline. Threaded to `makeWorkerRoute()` by the harness; captured in
+   * the route closure so every worker dispatch sees the same variant.
+   */
+  workerPromptVariant?: WorkerPromptVariant;
 }
 
 /**
@@ -116,6 +125,7 @@ export const BOSS_LOOP_DEFAULTS: Required<BossLoopConfig> = {
   programmaticDispatch: true,
   bossPromptVariant: "rules",
   roundZeroExtraConcerns: ["correctness"],
+  workerPromptVariant: "baseline",
 };
 
 function applyBossLoopDefaults(config: BossLoopConfig | undefined): Required<BossLoopConfig> {
@@ -124,6 +134,8 @@ function applyBossLoopDefaults(config: BossLoopConfig | undefined): Required<Bos
     bossPromptVariant: config?.bossPromptVariant ?? BOSS_LOOP_DEFAULTS.bossPromptVariant,
     roundZeroExtraConcerns:
       config?.roundZeroExtraConcerns ?? BOSS_LOOP_DEFAULTS.roundZeroExtraConcerns,
+    workerPromptVariant:
+      config?.workerPromptVariant ?? BOSS_LOOP_DEFAULTS.workerPromptVariant,
   };
 }
 

@@ -124,6 +124,9 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     repoRoot: input.repoRoot,
     changed: detPriors.changed,
     apiClaimDegraded,
+    ...(input.config.bossLoop?.workerPromptVariant !== undefined
+      ? { workerPromptVariant: input.config.bossLoop.workerPromptVariant }
+      : {}),
   });
 
   const workerBudgetRaw = wardenEnv().WARDEN_REVIEW_WORKER_BUDGET;

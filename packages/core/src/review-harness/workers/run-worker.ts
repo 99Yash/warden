@@ -17,7 +17,10 @@ import type {
   DegradedEntry,
   Source,
 } from "../../schema.js";
-import { loadWorkerSystemPrompt } from "../prompts/loader.js";
+import {
+  loadWorkerSystemPrompt,
+  type WorkerPromptVariant,
+} from "../prompts/loader.js";
 import type { TokenUsage } from "../scratchpad.js";
 import {
   resolveWorkerTier,
@@ -103,6 +106,13 @@ export interface RunWorkerInput extends WorkerInvocation {
   preamble?: string;
   /** Override worker timeout (ms). */
   timeoutMs?: number;
+  /**
+   * Worker prompt variant; passed straight through to `loadWorkerSystemPrompt`.
+   * The eval suite flips this between configs to test whether Sentry-Warden's
+   * prompt-craft borrows close the recall gap on the M6 + alfred PR fixtures.
+   * Absent → baseline prompts.
+   */
+  workerPromptVariant?: WorkerPromptVariant;
 }
 
 export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocationResult> {
@@ -150,7 +160,10 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     grepRepo: makeGrepRepoTool({ repoRoot: input.repoRoot }),
   };
 
-  const systemPrompt = loadWorkerSystemPrompt(input.concern);
+  const systemPrompt = loadWorkerSystemPrompt(
+    input.concern,
+    input.workerPromptVariant,
+  );
   const userPrompt = renderUserPrompt({
     files: input.files,
     snippets,
