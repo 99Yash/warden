@@ -78,9 +78,39 @@ export const programmaticDispatchMulti: EvalConfig = {
   },
 };
 
+/**
+ * Sentry-Warden prompt-craft borrow probe (M-X, post-ADR-0036).
+ *
+ * Same harness shape as `programmaticDispatchMulti` (the post-ADR-0031
+ * production default — "Config A" in the M-X experiment notes) but with
+ * `workerPromptVariant: 'sentry-borrow'`. The loader silently falls back
+ * to baseline `<concern>-system.md` for any concern that lacks a
+ * `<concern>-system.sentry-borrow.md` file, so this config exercises only
+ * the four workers (correctness, scalability, consistency, security) the
+ * per-worker fit analysis identified as borrow-eligible; committability
+ * and leverage stay on baseline by design.
+ *
+ * Tests the hypothesis that warden's recall gap on `m6-misses-2d4dc0b`
+ * and `alfred-pr14-misses-1ff9057` is prompt-craft-limited (closeable by
+ * better worker prompts inside the existing citation discipline) rather
+ * than substrate-limited (would need a new `SourceType`) or thinking-
+ * limited (would need more boss rounds or apex model).
+ */
+export const sentryBorrow: EvalConfig = {
+  name: "sentry-borrow",
+  description:
+    "PD-multi + workerPromptVariant='sentry-borrow' — borrows adversarial voice + 7-step investigation + category×trigger table + severity tie-breaker into 4 of 6 worker prompts. Probes whether prompt craft closes the M6/alfred recall gap.",
+  bossLoop: {
+    programmaticDispatch: true,
+    roundZeroExtraConcerns: ["correctness"],
+    workerPromptVariant: "sentry-borrow",
+  },
+};
+
 export const ALL_CONFIGS: EvalConfig[] = [
   baseline,
   programmaticDispatch,
   programmaticDispatchExamplesFirst,
   programmaticDispatchMulti,
+  sentryBorrow,
 ];

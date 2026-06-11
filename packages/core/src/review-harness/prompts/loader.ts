@@ -31,13 +31,26 @@ const WORKERS_DIR = resolve(DIR, "workers");
  */
 export type BossPromptVariant = "rules" | "examples";
 
+/**
+ * Worker prompt variant. `'baseline'` (default) loads each worker's
+ * `<concern>-system.md`. `'sentry-borrow'` tries `<concern>-system.sentry-borrow.md`
+ * first and silently falls back to the baseline when the variant file is
+ * absent — letting us patch only the workers where Sentry-Warden's
+ * prompt-craft borrows actually fit (correctness + scalability fully;
+ * consistency + security partially; committability + leverage not at all)
+ * without requiring all 6 variant files to exist.
+ */
+export type WorkerPromptVariant = "baseline" | "sentry-borrow";
+
 const BOSS_PROMPT_PATHS: Record<BossPromptVariant, string> = {
   rules: resolve(DIR, "boss-system.md"),
   examples: resolve(DIR, "boss-system-examples.md"),
 };
 
 const bossCache = new Map<BossPromptVariant, string>();
-const workerCache = new Map<Concern, string>();
+// Cache key: `${variant}:${concern}` so baseline + variant for the same
+// concern coexist without invalidation across eval-suite config sweeps.
+const workerCache = new Map<string, string>();
 
 export function loadBossSystemPrompt(
   variant: BossPromptVariant = "rules",
@@ -49,10 +62,28 @@ export function loadBossSystemPrompt(
   return raw;
 }
 
-export function loadWorkerSystemPrompt(concern: Concern): string {
-  const cached = workerCache.get(concern);
+export function loadWorkerSystemPrompt(
+  concern: Concern,
+  variant: WorkerPromptVariant = "baseline",
+): string {
+  const key = `${variant}:${concern}`;
+  const cached = workerCache.get(key);
   if (cached !== undefined) return cached;
+
+  if (variant === "sentry-borrow") {
+    try {
+      const variantPath = resolve(WORKERS_DIR, `${concern}-system.sentry-borrow.md`);
+      const raw = readFileSync(variantPath, "utf8");
+      workerCache.set(key, raw);
+      return raw;
+    } catch {
+      // Variant file absent → fall through to baseline. Lets the experiment
+      // ship a partial set of variant files (M-X analysis: only 4 of 6
+      // workers benefit from the borrows) without requiring all 6.
+    }
+  }
+
   const raw = readFileSync(resolve(WORKERS_DIR, `${concern}-system.md`), "utf8");
-  workerCache.set(concern, raw);
+  workerCache.set(key, raw);
   return raw;
 }

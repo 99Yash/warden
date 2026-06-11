@@ -2,6 +2,7 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { ChangedFile } from "../../diff/index.js";
 import type { DegradedEntry } from "../../schema.js";
+import type { WorkerPromptVariant } from "../prompts/loader.js";
 import type {
   Concern,
   WorkerInvocation,
@@ -39,6 +40,12 @@ export interface MakeWorkerRouteOptions {
   apiClaimDegraded: DegradedEntry[];
   /** Override per-worker timeout (ms). */
   timeoutMs?: number;
+  /**
+   * Worker prompt variant captured in the route closure and forwarded to
+   * every `runWorker()` call. Absent → baseline. Threaded from
+   * `BossLoopConfig.workerPromptVariant` via `harness.ts`.
+   */
+  workerPromptVariant?: WorkerPromptVariant;
 }
 
 export function makeWorkerRoute(opts: MakeWorkerRouteOptions): WorkerRoute {
@@ -76,6 +83,9 @@ export function makeWorkerRoute(opts: MakeWorkerRouteOptions): WorkerRoute {
       apiClaimDegraded: opts.apiClaimDegraded,
       ...(preamble !== undefined ? { preamble } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.workerPromptVariant !== undefined
+        ? { workerPromptVariant: opts.workerPromptVariant }
+        : {}),
     });
   };
 }
