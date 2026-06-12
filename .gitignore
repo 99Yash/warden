@@ -49,3 +49,8 @@ lerna-debug.log*
 .cache
 tmp
 temp
+
+# Lessons system: personal durable lessons + ephemeral handoff docs.
+# The machinery (.claude/skills, .claude/hooks) is shareable; the content is not.
+.lessons/
+.handoff/
