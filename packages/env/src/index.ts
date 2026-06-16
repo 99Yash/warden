@@ -124,6 +124,17 @@ const envSchema = z.object({
       message: 'WARDEN_SECURITY_WORKER_BUDGET must be a positive integer',
     })
     .optional(),
+  // ADR-0046: opt into the `react-doctor` det-prior (subprocessed
+  // `react-doctor` CLI — its visitor rules + scan() SAST suite + the
+  // `--scope changed` delta). Default **off** while eval-gated; the
+  // `det-priors.ts` call site gates on this. Boolean-ish: `1` / `true`
+  // (case-insensitive) enable it; anything else (incl. unset) is off.
+  WARDEN_REACT_DOCTOR: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value !== undefined && /^(1|true)$/i.test(value.trim()),
+    ),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),

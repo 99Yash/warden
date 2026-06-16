@@ -73,6 +73,11 @@ export interface ReviewHarnessInput {
   retrievedContext?: RetrievedContext;
   /** Listener for streaming events (boss-loop rounds, worker progress). */
   emit?: FormatterListener;
+  /**
+   * ADR-0046: the diff's resolved base ref, forwarded to `runDetPriors` so the
+   * react-doctor det-prior can drive its `--scope changed` delta.
+   */
+  diffBase?: { baseRef?: string; description: string };
 }
 
 export type ReviewHarnessResult = CommentSet;
@@ -88,6 +93,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     mode: input.config.mode,
     selector: input.selector,
     retrievedContext: input.retrievedContext,
+    ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
 
   // No package.json → empty result with the ecosystem degraded entry.

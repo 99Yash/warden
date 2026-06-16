@@ -34,6 +34,7 @@
     "smoke:bugfloor-gemini-skip-with-tools": "node --import tsx/esm scripts/smoke-bugfloor-gemini-skip-with-tools.mts",
     "smoke:bugfloor-whole-repo-fallback": "node --import tsx/esm scripts/smoke-bugfloor-whole-repo-fallback.mts",
     "smoke:bugfloor": "pnpm smoke:bugfloor-verify-citations && pnpm smoke:bugfloor-db-automigrate && pnpm smoke:bugfloor-leverage-snippet && pnpm smoke:bugfloor-gemini-skip-with-tools && pnpm smoke:bugfloor-whole-repo-fallback",
+    "smoke:rd-cli": "node --import tsx/esm scripts/smoke-rd-cli.mts",
     "smoke:m14-verify-drop": "node --import tsx/esm scripts/smoke-m14-verify-drop.mts",
     "smoke:m14-empty-diff": "node --import tsx/esm scripts/smoke-m14-empty-diff.mts",
     "smoke:m14-correctness-worker": "node --import tsx/esm scripts/smoke-m14-correctness-worker.mts",

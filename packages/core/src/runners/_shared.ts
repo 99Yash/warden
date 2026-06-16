@@ -19,7 +19,7 @@ export type SpawnCaptureResult =
 export function spawnCapture(
   cmd: string,
   args: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv },
+  opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
 ): Promise<SpawnCaptureResult> {
   const spawnOpts: SpawnOptions = {
     cwd: opts.cwd,
@@ -30,6 +30,27 @@ export function spawnCapture(
     const child = spawn(cmd, args, spawnOpts);
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const settle = (result: SpawnCaptureResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolveP(result);
+    };
+    // ADR-0046: an optional wall-clock cap. The react-doctor det-prior passes
+    // 60s so a hung `npx` fetch can't stall the whole review; killing the
+    // child surfaces a synthetic ETIMEDOUT the caller degrades on. Callers
+    // that omit `timeoutMs` keep the original unbounded behavior.
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          child.kill("SIGKILL");
+          const error: NodeJS.ErrnoException = new Error(
+            `spawn ${cmd}: timed out after ${opts.timeoutMs}ms`,
+          );
+          error.code = "ETIMEDOUT";
+          settle({ ok: false, error });
+        }, opts.timeoutMs)
+      : undefined;
     child.stdout?.on("data", (d: Buffer) => {
       stdout += d.toString();
     });
@@ -37,10 +58,10 @@ export function spawnCapture(
       stderr += d.toString();
     });
     child.on("error", (error: NodeJS.ErrnoException) => {
-      resolveP({ ok: false, error });
+      settle({ ok: false, error });
     });
     child.on("close", (exitCode) => {
-      resolveP({ ok: true, stdout, stderr, exitCode });
+      settle({ ok: true, stdout, stderr, exitCode });
     });
   });
 }

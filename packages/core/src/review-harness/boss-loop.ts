@@ -254,6 +254,16 @@ function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
         return "security";
       }
       return "correctness";
+    // ADR-0046: react-doctor findings route off the carried `rdCategory`.
+    // Security → a security worker (matches ESLint-security); Performance →
+    // scalability. Bugs and the clarity-mapped categories (Maintainability /
+    // Accessibility) fall back to `correctness` — clarity findings post
+    // directly as sourced det-priors and should not *drive* an LLM dispatch,
+    // but Round 0 still needs a concern when one is a file's sole signal.
+    case "react-doctor":
+      if (finding.rdCategory === "Security") return "security";
+      if (finding.rdCategory === "Performance") return "scalability";
+      return "correctness";
     case "tsc":
     case "jscpd":
     case "deadcode":

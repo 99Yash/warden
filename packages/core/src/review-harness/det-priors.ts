@@ -37,6 +37,7 @@ import { runEslint } from "../runners/eslint.js";
 import { runEslintSecurity } from "../runners/eslint-security.js";
 import { runJscpd } from "../runners/jscpd.js";
 import { leverageRunner } from "../runners/leverage.js";
+import { runReactDoctor } from "../runners/react-doctor.js";
 import { scalabilityRunner } from "../runners/scalability.js";
 import { runTsc } from "../runners/tsc.js";
 import type { ToolFinding } from "../runners/types.js";
@@ -80,6 +81,13 @@ export interface DetPriorsInput {
    * and this value is propagated through. Used by test harnesses.
    */
   retrievedContext?: RetrievedContext;
+  /**
+   * ADR-0046: the diff's resolved base ref. When `WARDEN_REACT_DOCTOR` is on,
+   * the react-doctor det-prior forwards `baseRef` as `--base` so its
+   * `--scope changed` delta compares against the same base warden diffed.
+   * Undefined `baseRef` (or absent struct) → react-doctor auto-detects.
+   */
+  diffBase?: { baseRef?: string; description: string };
 }
 
 export interface DetPriors {
@@ -304,6 +312,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
     consistencyResult,
     scalabilityResult,
     leverageResult,
+    reactDoctorResult,
   ] = await Promise.all([
     runTsc(input.repoRoot, ecosystem.tsconfigPaths),
     ecosystem.hasEslint && changedPaths.length > 0
@@ -417,6 +426,29 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
           degraded: [] as DegradedEntry[],
           durationMs: 0,
         }),
+    // ADR-0046: react-doctor det-prior, gated behind WARDEN_REACT_DOCTOR
+    // (default off; eval-gated). Subprocesses the published react-doctor CLI;
+    // `runReactDoctor` never throws (every failure degrades internally), but
+    // the `.catch` mirrors the surrounding style as a belt-and-suspenders.
+    wardenEnv().WARDEN_REACT_DOCTOR && changedPaths.length > 0
+      ? runReactDoctor({
+          repoRoot: input.repoRoot,
+          changedPaths,
+          mode: input.mode,
+          ...(input.diffBase?.baseRef !== undefined
+            ? { baseRef: input.diffBase.baseRef }
+            : {}),
+        }).catch((err: unknown) => ({
+          findings: [] as ToolFinding[],
+          degraded: [
+            {
+              kind: "warning",
+              topic: "react-doctor",
+              message: `react-doctor: detector failed (${formatErr(err)})`,
+            },
+          ] as DegradedEntry[],
+        }))
+      : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
   ]);
 
   // jscpd runs sequentially after the selector — it consumes the candidate
@@ -457,6 +489,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
     ...consistencyResult.findings,
     ...scalabilityResult.findings,
     ...leverageResult.findings,
+    ...reactDoctorResult.findings,
   ];
 
   const degraded: DegradedEntry[] = [
@@ -472,6 +505,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
     ...consistencyResult.degraded,
     ...scalabilityResult.degraded,
     ...leverageResult.degraded,
+    ...reactDoctorResult.degraded,
   ];
 
   return {
