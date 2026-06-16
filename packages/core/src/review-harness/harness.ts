@@ -127,6 +127,9 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     ...(input.config.bossLoop?.workerPromptVariant !== undefined
       ? { workerPromptVariant: input.config.bossLoop.workerPromptVariant }
       : {}),
+    ...(input.config.bossLoop?.reasonedFindingMode !== undefined
+      ? { reasonedFindingMode: input.config.bossLoop.reasonedFindingMode }
+      : {}),
   });
 
   const workerBudgetRaw = wardenEnv().WARDEN_REVIEW_WORKER_BUDGET;
@@ -193,10 +196,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   // Per-tier token-usage bucket: opus (boss) + sonnet/haiku (workers).
   // Workers record their actual tier in the scratchpad even when the boss
   // overrode the per-concern default, so this aggregation is honest.
-  const tokenUsage = buildTokenUsageByTier(
-    scratchpad.bossTokens(),
-    scratchpad.workerOutputs(),
-  );
+  const tokenUsage = buildTokenUsageByTier(scratchpad.bossTokens(), scratchpad.workerOutputs());
   const costs = computeCosts(tokenUsage);
 
   return {
@@ -205,9 +205,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
       durationMs: Date.now() - startedAt,
       degradedWorkers: aggregatedDegraded,
       ...(tokenUsage !== undefined ? { tokenUsage } : {}),
-      ...(costs !== undefined
-        ? { costUsd: costs.costUsd, costByTier: costs.costByTier }
-        : {}),
+      ...(costs !== undefined ? { costUsd: costs.costUsd, costByTier: costs.costByTier } : {}),
     },
   };
 }
@@ -227,10 +225,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
 // We bill `inputTokens` at the full rate and `cachedInputTokens` at 10%.
 // ---------------------------------------------------------------------------
 
-const PRICE_PER_M_TOKENS: Record<
-  "opus" | "sonnet" | "haiku",
-  { input: number; output: number }
-> = {
+const PRICE_PER_M_TOKENS: Record<"opus" | "sonnet" | "haiku", { input: number; output: number }> = {
   opus: { input: 5, output: 25 },
   sonnet: { input: 3, output: 15 },
   haiku: { input: 1, output: 5 },
@@ -253,8 +248,7 @@ function addUsage(acc: TokenUsageBlock, next: TokenUsage): TokenUsageBlock {
     outputTokens: acc.outputTokens + next.outputTokens,
     ...(acc.cachedInputTokens !== undefined || next.cachedInputTokens !== undefined
       ? {
-          cachedInputTokens:
-            (acc.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0),
+          cachedInputTokens: (acc.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0),
         }
       : {}),
   };
@@ -369,8 +363,4 @@ function makeEmptySet(startedAt: number, degraded: DegradedEntry[]): CommentSet 
 
 export type { DetPriors };
 export { runDetPriors } from "./det-priors.js";
-export {
-  ReviewScratchpad,
-  type TokenUsage,
-  type WorkerOutput,
-} from "./scratchpad.js";
+export { ReviewScratchpad, type TokenUsage, type WorkerOutput } from "./scratchpad.js";

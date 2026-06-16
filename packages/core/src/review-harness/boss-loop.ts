@@ -110,7 +110,17 @@ export interface BossLoopConfig {
    * the route closure so every worker dispatch sees the same variant.
    */
   workerPromptVariant?: WorkerPromptVariant;
+  /**
+   * ADR-0044 eval seam. `legacy-sources-required` preserves the shipped M14
+   * behavior: worker output schema requires at least one `sources[]` entry
+   * and the runtime drops uncited findings. `allow-empty-sources` permits
+   * evidence-only reasoned findings for measurement before the public
+   * `Comment.evidence` migration lands.
+   */
+  reasonedFindingMode?: ReasonedFindingMode;
 }
+
+export type ReasonedFindingMode = "legacy-sources-required" | "allow-empty-sources";
 
 /**
  * Post-ADR-0031 defaults. `applyBossLoopDefaults()` resolves the user-
@@ -126,6 +136,7 @@ export const BOSS_LOOP_DEFAULTS: Required<BossLoopConfig> = {
   bossPromptVariant: "rules",
   roundZeroExtraConcerns: ["correctness"],
   workerPromptVariant: "baseline",
+  reasonedFindingMode: "legacy-sources-required",
 };
 
 function applyBossLoopDefaults(config: BossLoopConfig | undefined): Required<BossLoopConfig> {
@@ -134,8 +145,8 @@ function applyBossLoopDefaults(config: BossLoopConfig | undefined): Required<Bos
     bossPromptVariant: config?.bossPromptVariant ?? BOSS_LOOP_DEFAULTS.bossPromptVariant,
     roundZeroExtraConcerns:
       config?.roundZeroExtraConcerns ?? BOSS_LOOP_DEFAULTS.roundZeroExtraConcerns,
-    workerPromptVariant:
-      config?.workerPromptVariant ?? BOSS_LOOP_DEFAULTS.workerPromptVariant,
+    workerPromptVariant: config?.workerPromptVariant ?? BOSS_LOOP_DEFAULTS.workerPromptVariant,
+    reasonedFindingMode: config?.reasonedFindingMode ?? BOSS_LOOP_DEFAULTS.reasonedFindingMode,
   };
 }
 
@@ -239,10 +250,7 @@ function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
     case "leverage":
       return "leverage";
     case "eslint":
-      if (
-        finding.ruleId?.startsWith("security/") ||
-        finding.ruleId?.startsWith("no-secrets/")
-      ) {
+      if (finding.ruleId?.startsWith("security/") || finding.ruleId?.startsWith("no-secrets/")) {
         return "security";
       }
       return "correctness";
@@ -277,9 +285,7 @@ interface Round0DispatchOutput {
  * closure), so Round 0 dispatches deplete the same `workerBudget` the
  * boss would see in Round 1+.
  */
-async function runRound0Dispatch(
-  input: RunRound0DispatchInput,
-): Promise<Round0DispatchOutput> {
+async function runRound0Dispatch(input: RunRound0DispatchInput): Promise<Round0DispatchOutput> {
   const { detPriors, dispatch, workerBudget, extraConcerns = [] } = input;
 
   const findingsByPath = new Map<string, ToolFinding>();
@@ -353,9 +359,7 @@ function renderRound0Block(
       );
     }
     if (result.findings.length > ROUND_0_FINDING_CAP_PER_WORKER) {
-      lines.push(
-        `    · …and ${result.findings.length - ROUND_0_FINDING_CAP_PER_WORKER} more`,
-      );
+      lines.push(`    · …and ${result.findings.length - ROUND_0_FINDING_CAP_PER_WORKER} more`);
     }
     return lines.join("\n");
   });
@@ -504,9 +508,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     const rawOutput = await result.output;
     // Coerce string-form numeric literals back to numbers. No-op when the
     // schema contained no numeric-literal-union (geminiPair is identity).
-    const output = geminiPair.responseTransform(rawOutput) as z.infer<
-      typeof BossOutputSchema
-    >;
+    const output = geminiPair.responseTransform(rawOutput) as z.infer<typeof BossOutputSchema>;
     let bossTokens: TokenUsage | undefined;
     try {
       const usage = await result.usage;
@@ -553,8 +555,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       durationMs: Date.now() - startedAt,
     };
   } catch (err) {
-    const primarySummary =
-      lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
+    const primarySummary = lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
     // Per ADR-0017 2026-05-17 amendment: tool-using call sites do not fall
     // back to Gemini. Hard-fail cleanly with a legible message.
     throw new Error(
@@ -572,10 +573,7 @@ const DEGRADED_CAP = 20;
 const FILE_LIST_CAP = 80;
 const DIFF_CHAR_CAP = 32_000;
 
-function renderBossUserPrompt(
-  input: BossLoopInput,
-  round0Block: string | undefined,
-): string {
+function renderBossUserPrompt(input: BossLoopInput, round0Block: string | undefined): string {
   const dp = input.detPriors;
   const fileList = dp.changedPaths.slice(0, FILE_LIST_CAP);
   const fileListTrailer =
@@ -589,8 +587,7 @@ function renderBossUserPrompt(
       ? "(no deterministic findings)"
       : findings
           .map(
-            (f, i) =>
-              `${i + 1}. [${f.source}] ${f.file}:${f.line} — ${truncate(f.message, 240)}`,
+            (f, i) => `${i + 1}. [${f.source}] ${f.file}:${f.line} — ${truncate(f.message, 240)}`,
           )
           .join("\n");
   const findingsTrailer =
@@ -603,19 +600,14 @@ function renderBossUserPrompt(
       ? "(no vulnerabilities)"
       : dp.vulnComments
           .slice(0, 20)
-          .map(
-            (c, i) =>
-              `${i + 1}. ${c.file}:${c.lineStart} — ${truncate(c.claim, 240)}`,
-          )
+          .map((c, i) => `${i + 1}. ${c.file}:${c.lineStart} — ${truncate(c.claim, 240)}`)
           .join("\n");
 
   const degraded = dp.degraded.slice(0, DEGRADED_CAP);
   const degradedBlock =
     degraded.length === 0
       ? "(none)"
-      : degraded
-          .map((d) => `- [${d.kind}] ${d.topic}: ${truncate(d.message, 240)}`)
-          .join("\n");
+      : degraded.map((d) => `- [${d.kind}] ${d.topic}: ${truncate(d.message, 240)}`).join("\n");
 
   const truncatedDiff =
     input.diff.length > DIFF_CHAR_CAP
@@ -674,9 +666,7 @@ function truncate(s: string, max: number): string {
 const BossOutputSchema = z.object({
   comments: z
     .array(CommentSchema)
-    .describe(
-      "Final review-comment array. Sources must be copied verbatim from worker outputs.",
-    ),
+    .describe("Final review-comment array. Sources must be copied verbatim from worker outputs."),
 });
 
 function normalizeBossComments(comments: Comment[]): Comment[] {

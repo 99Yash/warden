@@ -11,16 +11,9 @@ import {
 import { stableCommentId } from "../../comment-id.js";
 import type { ChangedFile } from "../../diff/index.js";
 import { makeLookupTypeDefTool } from "../../llm/tools/lookup-type-def.js";
-import type {
-  Category,
-  Comment,
-  DegradedEntry,
-  Source,
-} from "../../schema.js";
-import {
-  loadWorkerSystemPrompt,
-  type WorkerPromptVariant,
-} from "../prompts/loader.js";
+import type { Category, Comment, DegradedEntry, Source } from "../../schema.js";
+import type { ReasonedFindingMode } from "../boss-loop.js";
+import { loadWorkerSystemPrompt, type WorkerPromptVariant } from "../prompts/loader.js";
 import type { TokenUsage } from "../scratchpad.js";
 import {
   resolveWorkerTier,
@@ -34,6 +27,7 @@ import { makeGrepRepoTool } from "../tools/grep-repo.js";
 import { makeReadFileTool } from "../tools/read-file.js";
 import { buildFileSnippet, type FileSnippet } from "./file-snippet.js";
 import {
+  ReasonedWorkerOutputSchema,
   WorkerOutputSchema,
   type WorkerFinding,
   type WorkerOutput,
@@ -46,7 +40,8 @@ import {
 // (Anthropic accepts string-form enums identically) so it costs nothing on
 // the Anthropic-only happy path. The `responseTransform` coerces strings
 // back to numbers pre-`WorkerFinding`.
-const WORKER_GEMINI_PAIR = transformSchemaForGemini(WorkerOutputSchema);
+const LEGACY_WORKER_GEMINI_PAIR = transformSchemaForGemini(WorkerOutputSchema);
+const REASONED_WORKER_GEMINI_PAIR = transformSchemaForGemini(ReasonedWorkerOutputSchema);
 
 /**
  * Shared M14 review-harness worker runtime. The 6 concerns (`correctness`,
@@ -113,6 +108,12 @@ export interface RunWorkerInput extends WorkerInvocation {
    * Absent → baseline prompts.
    */
   workerPromptVariant?: WorkerPromptVariant;
+  /**
+   * ADR-0044 eval seam. Default/absent preserves the M14 source-required
+   * behavior. `allow-empty-sources` lets eval retain reasoned findings with
+   * empty `sources[]` before the public `evidence` field exists.
+   */
+  reasonedFindingMode?: ReasonedFindingMode;
 }
 
 export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocationResult> {
@@ -160,9 +161,10 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     grepRepo: makeGrepRepoTool({ repoRoot: input.repoRoot }),
   };
 
-  const systemPrompt = loadWorkerSystemPrompt(
-    input.concern,
-    input.workerPromptVariant,
+  const baseSystemPrompt = loadWorkerSystemPrompt(input.concern, input.workerPromptVariant);
+  const systemPrompt = applyReasonedFindingPromptOverride(
+    baseSystemPrompt,
+    input.reasonedFindingMode,
   );
   const userPrompt = renderUserPrompt({
     files: input.files,
@@ -197,6 +199,9 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     userPrompt,
     tools,
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    ...(input.reasonedFindingMode !== undefined
+      ? { reasonedFindingMode: input.reasonedFindingMode }
+      : {}),
   });
 
   if (!call.ok) {
@@ -218,9 +223,10 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
   const nowIso = new Date().toISOString();
   const findings: Comment[] = [];
   let droppedUncited = 0;
+  const allowEmptySources = input.reasonedFindingMode === "allow-empty-sources";
   for (const f of call.findings) {
     const sources = normalizeSources(f.sources, nowIso);
-    if (sources.length === 0) {
+    if (sources.length === 0 && !allowEmptySources) {
       droppedUncited += 1;
       continue;
     }
@@ -259,11 +265,7 @@ function renderUserPrompt(opts: {
   if (opts.preamble) {
     lines.push(`<context>`, opts.preamble, `</context>`, ``);
   }
-  lines.push(
-    `<dispatch>`,
-    `phase: ${opts.phase}`,
-    `files: ${opts.files.join(", ")}`,
-  );
+  lines.push(`<dispatch>`, `phase: ${opts.phase}`, `files: ${opts.files.join(", ")}`);
   if (opts.focus) lines.push(`focus: ${opts.focus}`);
   lines.push(
     `</dispatch>`,
@@ -277,6 +279,34 @@ function renderUserPrompt(opts: {
     `</diff>`,
   );
   return lines.join("\n");
+}
+
+/**
+ * ADR-0044 eval seam (measurement only). When `allow-empty-sources` is set,
+ * appends an override letting workers emit reasoned, empty-`sources[]` findings.
+ * Two limits are deliberate and deferred with the public `Comment.evidence`
+ * migration: (1) reasoned findings carry no substring-verified evidence
+ * locator, so they receive no anti-fabrication check; (2) the degrade-to-
+ * question below is a prompt instruction, not the deterministic post-pass
+ * ADR-0044 §6 prescribes. Recall measured under this mode is therefore an
+ * upper bound — see the `reasoned-assertions` config comment.
+ */
+function applyReasonedFindingPromptOverride(
+  basePrompt: string,
+  mode: ReasonedFindingMode | undefined,
+): string {
+  if (mode !== "allow-empty-sources") return basePrompt;
+  return [
+    basePrompt,
+    ``,
+    `## ADR-0044 eval override`,
+    ``,
+    `This eval run is measuring reasoned findings. This section overrides any older cite-or-drop instruction above.`,
+    ``,
+    `- For claims whose truth is a judgment about the diff's own code, do not invent a \`tool\` source. Use \`sources: []\`; the finding is still valid when \`path\`, \`lineStart\`, and \`lineEnd\` locate the code being judged.`,
+    `- For claims whose truth rests on an external authority, still cite that authority: use \`lookupTypeDef\` for library API behavior and copy its \`api_def\` source verbatim.`,
+    `- Low confidence should change \`kind\` to \`question\`, not make you drop the finding. Empty \`sources[]\` alone is never a reason to stay silent in this eval mode.`,
+  ].join("\n");
 }
 
 function toComment(
@@ -319,10 +349,8 @@ function toComment(
 function normalizeSources(sources: Source[], nowIso: string): Source[] {
   const out: Source[] = [];
   for (const src of sources) {
-    const hasAny =
-      src.path !== undefined || src.line !== undefined || src.snippet !== undefined;
-    const hasAll =
-      src.path !== undefined && src.line !== undefined && src.snippet !== undefined;
+    const hasAny = src.path !== undefined || src.line !== undefined || src.snippet !== undefined;
+    const hasAll = src.path !== undefined && src.line !== undefined && src.snippet !== undefined;
     if (hasAny && !hasAll) continue;
     out.push(src.retrievedAt ? src : { ...src, retrievedAt: nowIso });
   }
@@ -377,6 +405,7 @@ export async function callWorker(opts: {
   userPrompt: string;
   tools: ToolSet;
   timeoutMs: number;
+  reasonedFindingMode?: ReasonedFindingMode;
 }): Promise<WorkerCallOk | WorkerCallErr> {
   const first = await tryProvider(opts.primary, opts);
   if (first.ok) {
@@ -407,16 +436,26 @@ interface ProviderErr {
 
 async function tryProvider(
   model: LanguageModel,
-  opts: { systemPrompt: string; userPrompt: string; tools: ToolSet; timeoutMs: number },
+  opts: {
+    systemPrompt: string;
+    userPrompt: string;
+    tools: ToolSet;
+    timeoutMs: number;
+    reasonedFindingMode?: ReasonedFindingMode;
+  },
 ): Promise<ProviderOk | ProviderErr> {
   try {
+    const schemaPair =
+      opts.reasonedFindingMode === "allow-empty-sources"
+        ? REASONED_WORKER_GEMINI_PAIR
+        : LEGACY_WORKER_GEMINI_PAIR;
     const result = streamText({
       model,
       system: opts.systemPrompt,
       prompt: opts.userPrompt,
       tools: opts.tools,
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
-      output: Output.object({ schema: WORKER_GEMINI_PAIR.requestSchema }),
+      output: Output.object({ schema: schemaPair.requestSchema }),
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;
@@ -432,7 +471,7 @@ async function tryProvider(
     const rawOutput = await result.output;
     // Coerce string-form numeric literals back to numbers. No-op when the
     // schema contained no numeric-literal-union (pair is identity).
-    const parsed = WORKER_GEMINI_PAIR.responseTransform(rawOutput) as WorkerOutput;
+    const parsed = schemaPair.responseTransform(rawOutput) as WorkerOutput;
     let tokenUsage: TokenUsage | undefined;
     try {
       const usage = await result.usage;

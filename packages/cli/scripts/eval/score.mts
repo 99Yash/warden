@@ -71,10 +71,7 @@ export function scoreFixtureRun(
 // Aggregate across the whole fixture set
 // ---------------------------------------------------------------------------
 
-export function aggregateScores(
-  rows: FixtureScore[],
-  configName: string,
-): AggregateScore {
+export function aggregateScores(rows: FixtureScore[], configName: string): AggregateScore {
   let syntheticCaught = 0;
   let syntheticPlants = 0;
   let realCaught = 0;
@@ -140,12 +137,16 @@ export function checkThreshold(agg: AggregateScore, rows: FixtureScore[]): Thres
   }
 
   // (b) ≥ 4 of the synthetic plants caught.
-  const passB = agg.syntheticCaught >= SYNTHETIC_PLANTS_MIN_CATCH;
-  details.push(
-    `(b) Synthetic plants caught: ${agg.syntheticCaught}/${agg.syntheticPlants} ` +
-      `(threshold ≥${SYNTHETIC_PLANTS_MIN_CATCH}) — ${passB ? "PASS" : "FAIL"}`,
-  );
-  if (!passB) failed.push("b-synthetic-plants");
+  if (agg.syntheticPlants > 0) {
+    const passB = agg.syntheticCaught >= SYNTHETIC_PLANTS_MIN_CATCH;
+    details.push(
+      `(b) Synthetic plants caught: ${agg.syntheticCaught}/${agg.syntheticPlants} ` +
+        `(threshold ≥${SYNTHETIC_PLANTS_MIN_CATCH}) — ${passB ? "PASS" : "FAIL"}`,
+    );
+    if (!passB) failed.push("b-synthetic-plants");
+  } else {
+    details.push(`(b) Synthetic plants caught: no fixture present — SKIPPED`);
+  }
 
   // (c) 0 unlabeled comments on clean fixtures.
   const passC = agg.cleanFixtureUnlabeled === 0;
