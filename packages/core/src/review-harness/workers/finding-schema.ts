@@ -19,24 +19,36 @@ import { SourceSchema } from "../../schema.js";
  *
  * `sources[]` reuses the canonical `SourceSchema` so api_def sources from
  * `lookupTypeDef` can be copied verbatim and pass schema validation
- * unchanged. The shared runtime injects `retrievedAt: new Date().toISOString()`
- * on any source missing it (`api_def` sources from `lookupTypeDef.suggestedSource`
+ * unchanged. The legacy schema keeps the pre-ADR-0044 `.min(1)` rule;
+ * the reasoned eval schema permits empty `sources[]` so the eval suite can
+ * measure the recall effect before the public `Comment.evidence` migration.
+ * The shared runtime injects `retrievedAt: new Date().toISOString()` on any
+ * source missing it (`api_def` sources from `lookupTypeDef.suggestedSource`
  * already carry the field).
  */
 
-export const WorkerFindingSchema = z.object({
-  path: z.string().min(1).describe(
-    "Repo-relative POSIX path to the file the finding is about. MUST be a member of " +
-      "the dispatched `files` set — out-of-lane findings are dropped silently.",
-  ),
+const WorkerFindingBaseSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .describe(
+      "Repo-relative POSIX path to the file the finding is about. MUST be a member of " +
+        "the dispatched `files` set — out-of-lane findings are dropped silently.",
+    ),
   lineStart: z.number().int().nonnegative().describe("1-indexed start line; 0 for file-level."),
   lineEnd: z.number().int().nonnegative().describe("1-indexed end line (≥ lineStart)."),
   tier: z.union([z.literal(1), z.literal(2), z.literal(3)]).default(2),
   kind: z.enum(["assertion", "question"]).default("assertion"),
   claim: z.string().min(1).describe("One concrete sentence."),
   explanation: z.string().min(1).describe("1–2 sentences naming the failure mode + the fix shape."),
-  suggestedAction: z.string().optional().describe("One imperative sentence; omit when the fix is obvious."),
+  suggestedAction: z
+    .string()
+    .optional()
+    .describe("One imperative sentence; omit when the fix is obvious."),
   confidence: z.number().min(0).max(1).default(0.75),
+});
+
+export const WorkerFindingSchema = WorkerFindingBaseSchema.extend({
   sources: z
     .array(SourceSchema)
     .min(1)
@@ -52,3 +64,17 @@ export const WorkerOutputSchema = z.object({
   findings: z.array(WorkerFindingSchema).default([]),
 });
 export type WorkerOutput = z.infer<typeof WorkerOutputSchema>;
+
+export const ReasonedWorkerFindingSchema = WorkerFindingBaseSchema.extend({
+  sources: z
+    .array(SourceSchema)
+    .default([])
+    .describe(
+      "Optional external/deterministic sources. Empty is valid for ADR-0044 " +
+        "reasoned eval runs when the claim is a judgment about the diff itself.",
+    ),
+});
+
+export const ReasonedWorkerOutputSchema = z.object({
+  findings: z.array(ReasonedWorkerFindingSchema).default([]),
+});

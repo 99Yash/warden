@@ -50,8 +50,7 @@ export const programmaticDispatch: EvalConfig = {
 
 export const programmaticDispatchExamplesFirst: EvalConfig = {
   name: "programmatic-dispatch-examples-first",
-  description:
-    "Programmatic Round 0 + examples-first prompt variant. ADR-0031 Config C.",
+  description: "Programmatic Round 0 + examples-first prompt variant. ADR-0031 Config C.",
   bossLoop: {
     programmaticDispatch: true,
     roundZeroExtraConcerns: [],
@@ -107,10 +106,40 @@ export const sentryBorrow: EvalConfig = {
   },
 };
 
+/**
+ * ADR-0044 eval arm: PD-multi with the universal source-mandatory gate
+ * relaxed for worker-produced diff judgments. This is intentionally a
+ * measurement seam, not the full schema migration: worker findings may
+ * have empty `sources[]`, the runtime retains them, and the existing
+ * verifier still validates any quoted sources that are present.
+ *
+ * Compare against `programmatic-dispatch-multi` for reasoned-assertions
+ * off vs on, and against `sentry-borrow` as the prompt-only control arm.
+ *
+ * Measurement caveat: empty-`sources[]` reasoned findings carry NO substring-
+ * verified evidence locator (only path/lineStart/lineEnd), and ADR-0044 §6's
+ * degrade-to-question is a prompt instruction here, not a deterministic post-
+ * pass — both deferred with the public `Comment.evidence` migration. Because
+ * the scorer matches on file+line±5+category, recall from this arm is an UPPER
+ * BOUND that can include correctly-placed-but-unverified locators; read it next
+ * to the clean-fixture precision gate (c), not on its own.
+ */
+export const reasonedAssertions: EvalConfig = {
+  name: "reasoned-assertions",
+  description:
+    "PD-multi + reasonedFindingMode='allow-empty-sources' — ADR-0044 recall probe before the public evidence/sources schema migration.",
+  bossLoop: {
+    programmaticDispatch: true,
+    roundZeroExtraConcerns: ["correctness"],
+    reasonedFindingMode: "allow-empty-sources",
+  },
+};
+
 export const ALL_CONFIGS: EvalConfig[] = [
   baseline,
   programmaticDispatch,
   programmaticDispatchExamplesFirst,
   programmaticDispatchMulti,
   sentryBorrow,
+  reasonedAssertions,
 ];

@@ -9,6 +9,7 @@
  *   pnpm eval                            # all configs × all fixtures, N=3
  *   pnpm eval --config <name>            # one config × all fixtures
  *   pnpm eval --fixture <name>           # all configs × one fixture
+ *   pnpm eval --fixture-regex misses     # all configs × matching fixture names
  *   pnpm eval --samples <n>              # override sample count
  *   pnpm eval --compare <cfgA> <cfgB>    # side-by-side scorecard diff
  *
@@ -18,26 +19,27 @@
  * configs × 3 samples) ≈ $20–90.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  runReviewHarness,
-  type CommentSet,
-  type ReviewHarnessInput,
-} from "@warden/core";
+import { runReviewHarness, type CommentSet, type ReviewHarnessInput } from "@warden/core";
 import { ALL_CONFIGS } from "./configs/index.js";
-import {
-  aggregateScores,
-  checkThreshold,
-  renderMarkdownTable,
-  scoreFixtureRun,
-} from "./score.mjs";
+import { aggregateScores, checkThreshold, renderMarkdownTable, scoreFixtureRun } from "./score.mjs";
 import type {
   AggregateScore,
   EvalConfig,
   Fixture,
   FixtureLabel,
+  FixtureMeta,
   FixtureSample,
   FixtureScore,
 } from "./types.js";
@@ -49,6 +51,7 @@ import type {
 interface Args {
   configFilter?: string;
   fixtureFilter?: string;
+  fixtureRegex?: RegExp;
   samples: number;
   compare?: [string, string];
 }
@@ -61,6 +64,9 @@ function parseArgs(argv: string[]): Args {
       args.configFilter = argv[++i];
     } else if (arg === "--fixture" && argv[i + 1]) {
       args.fixtureFilter = argv[++i];
+    } else if (arg === "--fixture-regex" && argv[i + 1]) {
+      const pattern = argv[++i];
+      if (pattern) args.fixtureRegex = new RegExp(pattern);
     } else if (arg === "--samples" && argv[i + 1]) {
       const n = Number(argv[++i]);
       if (Number.isFinite(n) && n > 0) args.samples = Math.trunc(n);
@@ -80,19 +86,38 @@ function parseArgs(argv: string[]): Args {
 const EVAL_DIR = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(EVAL_DIR, "fixtures");
 const RESULTS_DIR = resolve(EVAL_DIR, "results");
+// EVAL_DIR = <warden>/packages/cli/scripts/eval → up four to the warden root.
+const WARDEN_ROOT = resolve(EVAL_DIR, "..", "..", "..", "..");
+const WORKTREES_DIR = resolve(EVAL_DIR, ".eval-worktrees");
+
+/**
+ * Logical repo name → local checkout. Real-PR fixtures live in sibling repos;
+ * `WARDEN_EVAL_<NAME>_REPO` env vars override the default path so the eval is
+ * not wedded to a fixed sibling layout on other machines.
+ */
+function resolveRepoPath(repo: string): string | null {
+  const envOverride = process.env[`WARDEN_EVAL_${repo.toUpperCase()}_REPO`];
+  if (envOverride) return resolve(envOverride);
+  const defaults: Record<string, string> = {
+    warden: WARDEN_ROOT,
+    alfred: resolve(WARDEN_ROOT, "..", "alfred"),
+  };
+  return defaults[repo] ?? null;
+}
 
 function loadConfigs(filter: string | undefined): EvalConfig[] {
   if (!filter) return ALL_CONFIGS;
   return ALL_CONFIGS.filter((c) => c.name === filter);
 }
 
-function loadFixtures(filter: string | undefined): Fixture[] {
+function loadFixtures(filter: string | undefined, regex: RegExp | undefined): Fixture[] {
   const out: Fixture[] = [];
   for (const category of ["synthetic", "real-prs"] as const) {
     const dir = resolve(FIXTURES_DIR, category);
     if (!existsSync(dir)) continue;
     for (const name of readdirSync(dir)) {
       if (filter && name !== filter) continue;
+      if (regex && !regex.test(name)) continue;
       const fixtureDir = resolve(dir, name);
       const patchPath = resolve(fixtureDir, "diff.patch");
       const labelsPath = resolve(fixtureDir, "labels.md");
@@ -100,10 +125,90 @@ function loadFixtures(filter: string | undefined): Fixture[] {
       const diff = readFileSync(patchPath, "utf8");
       const labelsRaw = readFileSync(labelsPath, "utf8");
       const { labels, expectsEmpty } = parseLabels(labelsRaw);
-      out.push({ name, category, diff, labels, expectsEmpty });
+      out.push({ name, category, diff, labels, expectsEmpty, ...resolveRealRepo(fixtureDir) });
     }
   }
   return out;
+}
+
+/**
+ * Read a real-PR fixture's optional `meta.json` and resolve its logical repo
+ * name to a local checkout. Returns `{}` (no real-repo backing) when the file
+ * is absent, malformed, the repo is unknown, the checkout is missing, or the
+ * commit is unreachable — the fixture then falls back to sparse materialization.
+ */
+function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo"> {
+  const metaPath = resolve(fixtureDir, "meta.json");
+  if (!existsSync(metaPath)) return {};
+  let meta: FixtureMeta;
+  try {
+    meta = JSON.parse(readFileSync(metaPath, "utf8")) as FixtureMeta;
+  } catch {
+    process.stdout.write(`[eval] ${fixtureDir}: malformed meta.json — sparse fallback.\n`);
+    return {};
+  }
+  const repoPath = resolveRepoPath(meta.repo);
+  if (!repoPath || !existsSync(resolve(repoPath, ".git"))) {
+    process.stdout.write(
+      `[eval] ${meta.repo} repo not found (set WARDEN_EVAL_${meta.repo.toUpperCase()}_REPO) — sparse fallback.\n`,
+    );
+    return {};
+  }
+  try {
+    execFileSync("git", ["-C", repoPath, "cat-file", "-e", `${meta.commit}^{commit}`], {
+      stdio: "ignore",
+    });
+  } catch {
+    process.stdout.write(
+      `[eval] commit ${meta.commit} unreachable in ${meta.repo} — sparse fallback.\n`,
+    );
+    return {};
+  }
+  return { realRepo: { repoPath, commit: meta.commit } };
+}
+
+let worktreeSeq = 0;
+
+/**
+ * Check out a detached worktree at `commit` so the harness sees the full
+ * post-PR tree. The caller MUST `removeWorktree()` in a finally block.
+ */
+function addWorktree(repoPath: string, commit: string): string {
+  if (!existsSync(WORKTREES_DIR)) mkdirSync(WORKTREES_DIR, { recursive: true });
+  const dest = resolve(WORKTREES_DIR, `wt-${worktreeSeq++}`);
+  rmSync(dest, { recursive: true, force: true });
+  // `worktreeSeq` resets to 0 each process, so `wt-<n>` paths are reused across
+  // runs. If a prior run was interrupted between `add` and `removeWorktree`,
+  // git keeps `wt-<n>` registered while the dir is gone — a bare `add` then
+  // fails with `fatal: ... missing but already registered worktree`. Prune the
+  // stale admin entry first and force the add so reruns self-heal instead of
+  // wedging the whole suite.
+  try {
+    execFileSync("git", ["-C", repoPath, "worktree", "prune"], { stdio: "ignore" });
+  } catch {
+    // Best-effort — a prune failure must not abort the run.
+  }
+  execFileSync("git", ["-C", repoPath, "worktree", "add", "-f", "--detach", dest, commit], {
+    stdio: "ignore",
+  });
+  return dest;
+}
+
+function removeWorktree(repoPath: string, dest: string): void {
+  try {
+    execFileSync("git", ["-C", repoPath, "worktree", "remove", "--force", dest], {
+      stdio: "ignore",
+    });
+  } catch {
+    // `remove` failed — delete the dir and prune so the reused `wt-<n>` path is
+    // not left registered-but-missing for the next run.
+    rmSync(dest, { recursive: true, force: true });
+    try {
+      execFileSync("git", ["-C", repoPath, "worktree", "prune"], { stdio: "ignore" });
+    } catch {
+      // Best-effort.
+    }
+  }
 }
 
 /**
@@ -161,16 +266,15 @@ function parseLabelBlock(text: string): FixtureLabel | null {
 /**
  * Run one harness invocation against a fixture. Two steps:
  *
- *   1. **Materialize new-file diffs to disk.** Workers' `buildFileSnippet()`
- *      reads file content from disk via `readFile`; if the file isn't
- *      there, the snippet is empty, the worker has nothing to send to the
- *      LLM, and `runWorker` short-circuits with zero tokens — bypassing
- *      the calibration entirely. For new-file hunks (`--- /dev/null`) we
- *      extract every `+` line and write the file. Modified-file hunks
- *      and the m14-closeout real-PR fixture stay un-materialized (those
- *      need pre-state + patch apply, out of scope for v0); the synthetic
- *      plants — which exercise the calibration signal — are all new
- *      files and work.
+ *   1. **Materialize sparse post-image files to disk.** Workers'
+ *      `buildFileSnippet()` reads file content from disk via `readFile`;
+ *      if the file isn't there, the snippet is empty, the worker has
+ *      nothing to send to the LLM, and `runWorker` short-circuits with
+ *      zero tokens — bypassing the calibration entirely. We parse each
+ *      unified-diff hunk and write the post-change hunk lines at their
+ *      real line numbers, padding gaps with blank lines. This is not a
+ *      full patch apply, but it is enough for diff-scoped snippets and
+ *      citation verification on the labeled changed lines.
  *
  *   2. **Invoke the harness** with the fixture's diff text and the temp
  *      repoRoot (the diff itself is what det-priors parses; the disk
@@ -179,18 +283,43 @@ function parseLabelBlock(text: string): FixtureLabel | null {
  *   3. **Clean up** the materialized files between runs so fixtures don't
  *      leak state into each other.
  */
-async function runOnce(fixture: Fixture, config: EvalConfig, repoRoot: string): Promise<{
+async function runOnce(
+  fixture: Fixture,
+  config: EvalConfig,
+  repoRoot: string,
+): Promise<{
   result: CommentSet | null;
   error: string | null;
   wallMs: number;
 }> {
   const startedAt = Date.now();
   const materializedPaths: string[] = [];
+  // Real-PR fixtures check out the PR's head commit as a detached worktree so
+  // worker tools read the full post-PR tree. Synthetic (and any real fixture
+  // whose repo/commit didn't resolve) fall back to sparse diff materialization
+  // on the shared temp repoRoot. `worktree` is resolved inside the try so a
+  // failed `git worktree add` degrades to sparse materialization rather than
+  // aborting the whole suite (consistent with resolveRealRepo's fallbacks).
+  let worktree: string | null = null;
   try {
-    materializedPaths.push(...materializeNewFiles(fixture.diff, repoRoot));
+    if (fixture.realRepo) {
+      try {
+        worktree = addWorktree(fixture.realRepo.repoPath, fixture.realRepo.commit);
+      } catch (err) {
+        process.stdout.write(
+          `[eval] ${fixture.name}: worktree add failed ` +
+            `(${err instanceof Error ? err.message : String(err)}) — sparse fallback.\n`,
+        );
+        worktree = null;
+      }
+    }
+    const effectiveRoot = worktree ?? repoRoot;
+    if (!worktree) {
+      materializedPaths.push(...materializePatchPostImages(fixture.diff, repoRoot));
+    }
     const input: ReviewHarnessInput = {
       diff: fixture.diff,
-      repoRoot,
+      repoRoot: effectiveRoot,
       config: {
         mode: "review",
         ...(config.bossLoop !== undefined ? { bossLoop: config.bossLoop } : {}),
@@ -209,54 +338,109 @@ async function runOnce(fixture: Fixture, config: EvalConfig, repoRoot: string): 
     };
   } finally {
     cleanupMaterialized(materializedPaths);
+    if (worktree && fixture.realRepo) removeWorktree(fixture.realRepo.repoPath, worktree);
   }
 }
 
 /**
- * Parse a unified diff and write any new-file (`--- /dev/null`) content
- * to disk under `repoRoot`. Returns the list of paths written so the
- * caller can clean them up after the harness invocation.
+ * Parse a unified diff and write sparse post-image files under `repoRoot`.
+ * Returns the list of paths written so the caller can clean them up after
+ * the harness invocation.
  *
- * v0 only handles new-file hunks. Modified-file hunks require the pre-
- * state on disk (which we don't have in `.eval-tmp-repo/`); applying a
- * patch in reverse + forward is out of scope. Synthetic plant fixtures
- * are all new files, which is what calibration cares about.
+ * This intentionally does not reconstruct unchanged file regions outside
+ * diff hunks; it preserves line numbers and local hunk context, which are
+ * the only pieces the review workers and verifier need for fixture scoring.
+ *
+ * Handles standard two-sided git unified diffs only: it relies on `diff --git`
+ * separators to reset state (so a `+++` file header is never misread as hunk
+ * body), and the `@@ -a +b @@` hunk regex does not match combined/merge `@@@`
+ * headers. No fixture uses either of those shapes; broaden the regex if that
+ * changes.
  */
-function materializeNewFiles(diff: string, repoRoot: string): string[] {
-  const written: string[] = [];
-  const lines = diff.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i] ?? "";
-    if (line.startsWith("--- /dev/null")) {
-      // Next line MUST be `+++ b/<path>`.
-      const next = lines[i + 1] ?? "";
-      if (next.startsWith("+++ ")) {
-        const target = next.slice(4).trim();
-        const path = target.startsWith("b/") ? target.slice(2) : target;
-        // Collect all subsequent `+` lines until the next `diff --git` /
-        // `--- ` block, ignoring `@@` hunk headers.
-        const contentLines: string[] = [];
-        let j = i + 2;
-        while (j < lines.length) {
-          const c = lines[j] ?? "";
-          if (c.startsWith("diff --git ") || c.startsWith("--- ")) break;
-          if (c.startsWith("+") && !c.startsWith("+++")) {
-            contentLines.push(c.slice(1));
-          }
-          j++;
-        }
-        const fullPath = resolve(repoRoot, path);
-        mkdirSync(dirname(fullPath), { recursive: true });
-        writeFileSync(fullPath, contentLines.join("\n") + (contentLines.length > 0 ? "\n" : ""));
-        written.push(fullPath);
-        i = j;
-        continue;
-      }
+function materializePatchPostImages(diff: string, repoRoot: string): string[] {
+  const written = new Set<string>();
+  let currentPath: string | null = null;
+  let currentLines = new Map<number, string>();
+  let nextNewLine: number | null = null;
+
+  const flush = (): void => {
+    if (currentPath === null || currentLines.size === 0) {
+      currentPath = null;
+      currentLines = new Map<number, string>();
+      nextNewLine = null;
+      return;
     }
-    i++;
+
+    const maxLine = Math.max(...currentLines.keys());
+    const out: string[] = [];
+    for (let line = 1; line <= maxLine; line++) {
+      out.push(currentLines.get(line) ?? "");
+    }
+    const fullPath = resolve(repoRoot, currentPath);
+    const rootAbs = resolve(repoRoot);
+    // Defense-in-depth: never write outside repoRoot (an absolute or traversing
+    // `+++` target in a hand-authored fixture would otherwise escape).
+    if (fullPath !== rootAbs && !fullPath.startsWith(rootAbs + sep)) {
+      currentPath = null;
+      currentLines = new Map<number, string>();
+      nextNewLine = null;
+      return;
+    }
+    mkdirSync(dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, out.join("\n") + "\n");
+    written.add(fullPath);
+
+    currentPath = null;
+    currentLines = new Map<number, string>();
+    nextNewLine = null;
+  };
+
+  const lines = diff.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+
+    if (line.startsWith("diff --git ")) {
+      flush();
+      continue;
+    }
+
+    if (nextNewLine === null && line.startsWith("+++ ")) {
+      const target = line.slice(4).trim();
+      currentPath = target.startsWith("b/") ? target.slice(2) : target;
+      continue;
+    }
+
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      nextNewLine = Number(hunk[1]);
+      continue;
+    }
+
+    if (currentPath === null || nextNewLine === null) continue;
+
+    if (line.startsWith("+")) {
+      currentLines.set(nextNewLine, line.slice(1));
+      nextNewLine++;
+    } else if (line.startsWith(" ")) {
+      currentLines.set(nextNewLine, line.slice(1));
+      nextNewLine++;
+    } else if (line.startsWith("-")) {
+      // Deleted lines have no post-image line number.
+    } else if (line.startsWith("\\")) {
+      // "\ No newline at end of file" marker.
+    } else if (line === "") {
+      // Bare empty line inside an active hunk = blank context line. Git emits a
+      // single-space " " for these, but hand-authored fixtures write a bare "".
+      // Treat it as context (advance the counter) so the rest of the hunk is not
+      // silently truncated — dropping it would shift every later line's number.
+      currentLines.set(nextNewLine, "");
+      nextNewLine++;
+    } else {
+      nextNewLine = null;
+    }
   }
-  return written;
+  flush();
+  return [...written];
 }
 
 function cleanupMaterialized(paths: string[]): void {
@@ -277,12 +461,18 @@ function cleanupMaterialized(paths: string[]): void {
  * has a `category`) matches Comment.category. Unmatched comments increment
  * `unlabeledComments` — used as the false-positive gauge for clean fixtures.
  */
-function scoreOne(fixture: Fixture, result: CommentSet | null, sample: number, configName: string): FixtureSample {
+function scoreOne(
+  fixture: Fixture,
+  result: CommentSet | null,
+  sample: number,
+  configName: string,
+): FixtureSample {
   const base: FixtureSample = {
     fixture: fixture.name,
     config: configName,
     sample,
     commentCount: 0,
+    comments: [],
     caughtLabels: [],
     missedLabels: fixture.labels.map((l) => l.id),
     unlabeledComments: 0,
@@ -297,6 +487,18 @@ function scoreOne(fixture: Fixture, result: CommentSet | null, sample: number, c
   }
 
   base.commentCount = result.comments.length;
+  base.comments = result.comments.map((c) => ({
+    id: c.id,
+    file: c.file,
+    lineStart: c.lineStart,
+    lineEnd: c.lineEnd,
+    category: c.category,
+    kind: c.kind,
+    tier: c.tier,
+    confidence: c.confidence,
+    claim: c.claim,
+    sourcesCount: c.sources.length,
+  }));
   base.durationMs = result.metadata.durationMs;
   base.costUsd = result.metadata.costUsd ?? 0;
   base.dispatchCount = approximateDispatchCount(result);
@@ -361,8 +563,15 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const configs = loadConfigs(args.configFilter);
-  const fixtures = loadFixtures(args.fixtureFilter);
+  // `--compare a b` without an explicit `--config` runs just those two
+  // configs (not all of ALL_CONFIGS) — the comparison table only needs the
+  // named pair, so running the rest just burns tokens.
+  let configs = loadConfigs(args.configFilter);
+  if (!args.configFilter && args.compare) {
+    const [a, b] = args.compare;
+    configs = configs.filter((c) => c.name === a || c.name === b);
+  }
+  const fixtures = loadFixtures(args.fixtureFilter, args.fixtureRegex);
 
   if (configs.length === 0) {
     process.stdout.write("[eval] no configs matched.\n");
@@ -462,6 +671,8 @@ async function ensureRepoRoot(): Promise<string> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`[eval] fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+  process.stderr.write(
+    `[eval] fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+  );
   process.exit(1);
 });

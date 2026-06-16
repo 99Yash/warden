@@ -55,6 +55,22 @@ export interface Fixture {
   diff: string;
   labels: FixtureLabel[];
   expectsEmpty: boolean;
+  /**
+   * Optional real-repo backing (from the fixture's `meta.json`). When present,
+   * `runOnce` checks out a detached git worktree at `commit` and uses it as the
+   * harness `repoRoot`, so worker tools (`readFile`/`grepRepo`) read the full
+   * post-PR tree instead of the sparse diff-only reconstruction. The fixture's
+   * `commit` is the PR's head, so its tree IS the post-image ground truth.
+   */
+  realRepo?: { repoPath: string; commit: string };
+}
+
+/** Shape of a real-PR fixture's optional `meta.json`. */
+export interface FixtureMeta {
+  /** Logical repo name resolved to a path by `run.mts` (e.g. "warden", "alfred"). */
+  repo: string;
+  /** Commit-ish to check out (the PR head; its tree is the post-PR ground truth). */
+  commit: string;
 }
 
 /**
@@ -66,6 +82,7 @@ export interface FixtureSample {
   config: string;
   sample: number;
   commentCount: number;
+  comments: EvalCommentSummary[];
   caughtLabels: string[];
   missedLabels: string[];
   /** Comments cited at labeled lines but for the wrong category — usually fine. */
@@ -77,6 +94,19 @@ export interface FixtureSample {
   durationMs: number;
   /** Any error during the run; null when clean. */
   error: string | null;
+}
+
+export interface EvalCommentSummary {
+  id: string;
+  file: string;
+  lineStart: number;
+  lineEnd: number;
+  category: string;
+  kind: string;
+  tier: number;
+  confidence: number;
+  claim: string;
+  sourcesCount: number;
 }
 
 /**

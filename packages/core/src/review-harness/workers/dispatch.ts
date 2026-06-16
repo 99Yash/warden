@@ -2,6 +2,7 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { ChangedFile } from "../../diff/index.js";
 import type { DegradedEntry } from "../../schema.js";
+import type { ReasonedFindingMode } from "../boss-loop.js";
 import type { WorkerPromptVariant } from "../prompts/loader.js";
 import type {
   Concern,
@@ -46,6 +47,12 @@ export interface MakeWorkerRouteOptions {
    * `BossLoopConfig.workerPromptVariant` via `harness.ts`.
    */
   workerPromptVariant?: WorkerPromptVariant;
+  /**
+   * ADR-0044 eval seam. Absent/default keeps legacy source-required worker
+   * behavior; `allow-empty-sources` lets the eval suite retain reasoned
+   * evidence-only worker findings without the full public schema migration.
+   */
+  reasonedFindingMode?: ReasonedFindingMode;
 }
 
 export function makeWorkerRoute(opts: MakeWorkerRouteOptions): WorkerRoute {
@@ -86,6 +93,9 @@ export function makeWorkerRoute(opts: MakeWorkerRouteOptions): WorkerRoute {
       ...(opts.workerPromptVariant !== undefined
         ? { workerPromptVariant: opts.workerPromptVariant }
         : {}),
+      ...(opts.reasonedFindingMode !== undefined
+        ? { reasonedFindingMode: opts.reasonedFindingMode }
+        : {}),
     });
   };
 }
@@ -107,16 +117,9 @@ interface DepsContext {
   packageRoots: string[];
 }
 
-const MANIFEST_DEP_KEYS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-] as const;
+const MANIFEST_DEP_KEYS = ["dependencies", "devDependencies", "peerDependencies"] as const;
 
-async function buildDepsContext(
-  repoRoot: string,
-  changed: ChangedFile[],
-): Promise<DepsContext> {
+async function buildDepsContext(repoRoot: string, changed: ChangedFile[]): Promise<DepsContext> {
   const rootAbs = resolvePath(repoRoot);
   const manifestRoots = new Set<string>([rootAbs]);
 
@@ -152,10 +155,7 @@ async function buildDepsContext(
   return { preamble, dependencies, packageRoots: [...manifestRoots] };
 }
 
-async function findNearestPackageRoot(
-  startDir: string,
-  rootAbs: string,
-): Promise<string | null> {
+async function findNearestPackageRoot(startDir: string, rootAbs: string): Promise<string | null> {
   let cursor = startDir;
   while (true) {
     try {

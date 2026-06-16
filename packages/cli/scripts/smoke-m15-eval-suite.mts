@@ -144,7 +144,10 @@ const m14Labels = m14Dir
   ? parseLabels(readFileSync(resolve(REAL_PRS_DIR, m14Dir, "labels.md"), "utf8"))
   : null;
 if (m14Labels) {
-  assert(m14Labels.labels.length === 3, `m14-closeout has 3 labels (got ${m14Labels.labels.length})`);
+  assert(
+    m14Labels.labels.length === 3,
+    `m14-closeout has 3 labels (got ${m14Labels.labels.length})`,
+  );
 }
 
 // -----------------------------------------------------------------------
@@ -152,14 +155,12 @@ if (m14Labels) {
 // -----------------------------------------------------------------------
 process.stdout.write(`\n[4] scoring math: scoreFixtureRun / aggregateScores / checkThreshold\n`);
 
-const { scoreFixtureRun, aggregateScores, checkThreshold } = await import(
-  "./eval/score.mjs"
-);
+const { scoreFixtureRun, aggregateScores, checkThreshold } = await import("./eval/score.mjs");
 const { ALL_CONFIGS } = await import("./eval/configs/index.js");
 
 assert(
-  ALL_CONFIGS.length === 4,
-  `4 configs registered (baseline + B + C + PD-multi follow-up)`,
+  ALL_CONFIGS.length >= 6,
+  `≥6 configs registered (baseline + B + C + PD-multi + sentry-borrow + reasoned)`,
 );
 
 // Helper to fabricate samples for the scoring math test.
@@ -169,6 +170,7 @@ function makeSample(caughtCount: number, unlabeled: number, cost: number, dispat
     config: "fake",
     sample: 1,
     commentCount: caughtCount + unlabeled,
+    comments: [],
     caughtLabels: Array(caughtCount)
       .fill(0)
       .map((_, i) => `lbl-${i}`),
@@ -226,7 +228,10 @@ const m14Row = scoreFixtureRun(
 );
 
 const passingAgg = aggregateScores([row, cleanRow, m14Row], "test");
-assert(passingAgg.syntheticCaught === 2, `synthetic caught = 2 (got ${passingAgg.syntheticCaught})`);
+assert(
+  passingAgg.syntheticCaught === 2,
+  `synthetic caught = 2 (got ${passingAgg.syntheticCaught})`,
+);
 assert(passingAgg.realCaught === 3, `real-PR caught = 3 (got ${passingAgg.realCaught})`);
 assert(passingAgg.cleanFixtureUnlabeled === 0, `clean unlabeled = 0`);
 
@@ -281,7 +286,10 @@ const perfectM14 = scoreFixtureRun(
 );
 const perfectAgg = aggregateScores([perfectRow, cleanPerfect, perfectM14], "perfect");
 const perfectVerdict = checkThreshold(perfectAgg, perfectAgg.rows);
-assert(perfectVerdict.cleared, `perfect aggregate clears threshold (failed: ${perfectVerdict.failed.join(",")})`);
+assert(
+  perfectVerdict.cleared,
+  `perfect aggregate clears threshold (failed: ${perfectVerdict.failed.join(",")})`,
+);
 
 // Failing aggregate.
 const failingRow = scoreFixtureRun(
@@ -335,6 +343,37 @@ assert(failVerdict.failed.includes("a-m14-closeout-catch"), `(a) flagged`);
 assert(failVerdict.failed.includes("b-synthetic-plants"), `(b) flagged`);
 assert(failVerdict.failed.includes("c-clean-fixture-comments"), `(c) flagged`);
 assert(failVerdict.failed.includes("e-min-dispatch"), `(e) flagged`);
+
+// Gate (b) SKIPPED branch: a no-synthetic aggregate (e.g. a real-PR-only
+// `--fixture-regex misses` run) must SKIP the plant gate, never fail it.
+const realOnlyRow = scoreFixtureRun(
+  {
+    name: "m6-misses",
+    category: "real-prs" as const,
+    diff: "",
+    labels: [
+      { id: "a", path: "x", description: "" },
+      { id: "b", path: "x", description: "" },
+    ],
+    expectsEmpty: false,
+  },
+  [makeSample(2, 0, 1, 2), makeSample(2, 0, 1, 2), makeSample(2, 0, 1, 2)],
+  "real-only",
+);
+const noSyntheticAgg = aggregateScores([realOnlyRow], "real-only");
+assert(
+  noSyntheticAgg.syntheticPlants === 0,
+  `no-synthetic aggregate has 0 plants (got ${noSyntheticAgg.syntheticPlants})`,
+);
+const noSyntheticVerdict = checkThreshold(noSyntheticAgg, noSyntheticAgg.rows);
+assert(
+  !noSyntheticVerdict.failed.includes("b-synthetic-plants"),
+  `(b) is SKIPPED (not failed) when no synthetic plants are present`,
+);
+assert(
+  noSyntheticVerdict.details.some((d) => d.includes("(b)") && d.includes("SKIPPED")),
+  `(b) detail line reports SKIPPED`,
+);
 
 if (failed > 0) {
   process.stdout.write(`\n${failed} assertion(s) failed\n`);
