@@ -32,6 +32,7 @@ import { rmSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runReviewHarness, type CommentSet, type ReviewHarnessInput } from "@warden/core";
+import { loadWardenRuntime } from "@warden/env";
 import { ALL_CONFIGS } from "./configs/index.js";
 import { aggregateScores, checkThreshold, renderMarkdownTable, scoreFixtureRun } from "./score.mjs";
 import type {
@@ -557,6 +558,12 @@ function approximateDispatchCount(set: CommentSet): number {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  // Bootstrap the Warden runtime the same way the CLI does (index.ts:66) so the
+  // repo-root `.env` is loaded into process.env — the eval runs from
+  // packages/cli, so without this the project `.env` (which holds the keys) is
+  // never picked up and every run self-skips.
+  loadWardenRuntime({ repoRoot: WARDEN_ROOT });
 
   if (!process.env["ANTHROPIC_API_KEY"]) {
     process.stdout.write("[eval] ANTHROPIC_API_KEY not set — skipping.\n");
