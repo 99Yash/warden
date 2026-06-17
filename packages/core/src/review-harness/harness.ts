@@ -221,7 +221,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   // Workers record their actual tier in the scratchpad even when the boss
   // overrode the per-concern default, so this aggregation is honest.
   const tokenUsage = buildTokenUsageByTier(scratchpad.bossTokens(), scratchpad.workerOutputs());
-  const costs = computeCosts(tokenUsage);
+  const costs = await computeCosts(tokenUsage);
 
   return {
     comments: scoped.comments,
@@ -319,11 +319,13 @@ function tierCost(
   return inputCost + cachedCost + outputCost;
 }
 
-function computeCosts(
+async function computeCosts(
   usage: TokenUsageByTier | undefined,
-): { costUsd: number; costByTier: CostByTier; costLabels: CostLabelsByTier } | undefined {
+): Promise<
+  { costUsd: number; costByTier: CostByTier; costLabels: CostLabelsByTier } | undefined
+> {
   if (!usage) return undefined;
-  const prices = getReviewModelPricingByTier();
+  const prices = await getReviewModelPricingByTier();
   const labels = getReviewModelLabelsByTier();
   const opus = usage.opus !== undefined ? round4(tierCost(usage.opus, "opus", prices)) : undefined;
   const sonnet =

@@ -214,7 +214,14 @@ export function configuredLlmPrimaryProvider(): string {
  * per-role provider defaults instead of forcing every role onto Anthropic.
  */
 export function configuredLlmExplicitPrimaryProvider(): string | undefined {
-  return currentWardenRuntime().config.routing?.llm?.primary;
+  const runtimeInfo = currentWardenRuntime();
+  for (let i = runtimeInfo.layers.length - 1; i >= 0; i--) {
+    const layer = runtimeInfo.layers[i];
+    if (!layer || layer.kind === "defaults") continue;
+    const primary = layer.config.routing?.llm?.primary;
+    if (primary !== undefined) return primary;
+  }
+  return undefined;
 }
 
 export function configuredLlmFallbackProviders(): string[] {

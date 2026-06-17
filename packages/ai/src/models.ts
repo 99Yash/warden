@@ -10,6 +10,7 @@ import {
   isProviderConfigured,
   requireAnyProviderApiKey,
 } from "@warden/env";
+import { modelCatalogPrice } from "./model-catalog.js";
 import { anthropicProvider, googleProvider, openaiProvider } from "./provider.js";
 
 export type LlmProviderId = "anthropic" | "openai" | "google";
@@ -33,7 +34,7 @@ export interface ResolvedLlmModel {
   provider: LlmProviderId;
   modelId: string;
   label: string;
-  pricePerMillionTokens: LlmModelPrice;
+  fallbackPricePerMillionTokens: LlmModelPrice;
   providerOptions?: LlmProviderOptions;
 }
 
@@ -41,28 +42,28 @@ const ANTHROPIC_OPUS_4_8 = {
   provider: "anthropic",
   modelId: "claude-opus-4-8",
   label: "claude-opus-4-8",
-  pricePerMillionTokens: { input: 5, output: 25, cachedInput: 0.5 },
+  fallbackPricePerMillionTokens: { input: 5, output: 25, cachedInput: 0.5 },
 } satisfies ResolvedLlmModel;
 
 const ANTHROPIC_SONNET_4_6 = {
   provider: "anthropic",
   modelId: "claude-sonnet-4-6",
   label: "claude-sonnet-4-6",
-  pricePerMillionTokens: { input: 3, output: 15, cachedInput: 0.3 },
+  fallbackPricePerMillionTokens: { input: 3, output: 15, cachedInput: 0.3 },
 } satisfies ResolvedLlmModel;
 
 const ANTHROPIC_HAIKU_4_5 = {
   provider: "anthropic",
   modelId: "claude-haiku-4-5-20251001",
   label: "claude-haiku-4-5",
-  pricePerMillionTokens: { input: 1, output: 5, cachedInput: 0.1 },
+  fallbackPricePerMillionTokens: { input: 1, output: 5, cachedInput: 0.1 },
 } satisfies ResolvedLlmModel;
 
 const OPENAI_GPT_5_5 = {
   provider: "openai",
   modelId: "gpt-5.5",
   label: "gpt-5.5 xhigh",
-  pricePerMillionTokens: { input: 5, output: 30, cachedInput: 0.5 },
+  fallbackPricePerMillionTokens: { input: 5, output: 30, cachedInput: 0.5 },
   providerOptions: { openai: { reasoningEffort: "xhigh" } },
 } satisfies ResolvedLlmModel;
 
@@ -70,7 +71,7 @@ const OPENAI_GPT_5_4_MINI = {
   provider: "openai",
   modelId: "gpt-5.4-mini",
   label: "gpt-5.4-mini xhigh",
-  pricePerMillionTokens: { input: 0.75, output: 4.5, cachedInput: 0.075 },
+  fallbackPricePerMillionTokens: { input: 0.75, output: 4.5, cachedInput: 0.075 },
   providerOptions: { openai: { reasoningEffort: "xhigh" } },
 } satisfies ResolvedLlmModel;
 
@@ -189,11 +190,16 @@ export function getWorkerCheapModelInfo(): ResolvedLlmModel {
   return resolveRoleModel("workerCheap");
 }
 
-export function getReviewModelPricingByTier(): Record<ReviewCostTier, LlmModelPrice> {
+export async function getReviewModelPricingByTier(): Promise<Record<ReviewCostTier, LlmModelPrice>> {
+  const [opus, sonnet, haiku] = await Promise.all([
+    modelCatalogPrice(getBossModelInfo()),
+    modelCatalogPrice(getWorkerStrongModelInfo()),
+    modelCatalogPrice(getWorkerCheapModelInfo()),
+  ]);
   return {
-    opus: getBossModelInfo().pricePerMillionTokens,
-    sonnet: getWorkerStrongModelInfo().pricePerMillionTokens,
-    haiku: getWorkerCheapModelInfo().pricePerMillionTokens,
+    opus,
+    sonnet,
+    haiku,
   };
 }
 
