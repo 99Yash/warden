@@ -49,8 +49,8 @@ const envSchema = z.object({
   // ADR-0030 / M14: boss-loop step cap for the M14 review harness. Default 5
   // rounds; clamped to [1, 10] so neither a typo'd 0 nor a runaway 1000 can
   // wreck a review. Each round is one `streamText` step the boss spends
-  // dispatching workers via `dispatch_worker` or emitting the final
-  // `Output.object({ comments: Comment[] })` structured result.
+  // dispatching workers via `dispatch_worker` or emitting the final review by
+  // calling the terminal `submit_review` tool with `{ comments: Comment[] }`.
   WARDEN_REVIEW_BOSS_ROUNDS: z
     .string()
     .regex(/^\d+$/, {

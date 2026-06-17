@@ -205,6 +205,18 @@ export function configuredLlmPrimaryProvider(): string {
   return currentWardenRuntime().config.routing?.llm?.primary ?? "anthropic";
 }
 
+/**
+ * The primary review LLM provider only when the user has explicitly pinned
+ * `routing.llm.primary`; `undefined` otherwise. Distinct from
+ * {@link configuredLlmPrimaryProvider}, which defaults to `"anthropic"` for
+ * readiness-report ordering. Role/model selection needs to tell "user chose
+ * anthropic" apart from "user chose nothing" so an unset config preserves the
+ * per-role provider defaults instead of forcing every role onto Anthropic.
+ */
+export function configuredLlmExplicitPrimaryProvider(): string | undefined {
+  return currentWardenRuntime().config.routing?.llm?.primary;
+}
+
 export function configuredLlmFallbackProviders(): string[] {
   return currentWardenRuntime().config.routing?.llm?.fallback ?? [];
 }
