@@ -1,11 +1,14 @@
 import {
   Output,
+  getWorkerCheapModelInfo,
   getWorkerCheapModel,
+  getWorkerStrongModelInfo,
   getWorkerStrongModel,
   stepCountIs,
   streamText,
   transformSchemaForGemini,
   type LanguageModel,
+  type LlmProviderOptions,
   type ToolSet,
 } from "@warden/ai";
 import { stableCommentId } from "../../comment-id.js";
@@ -175,13 +178,18 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
   });
 
   let primary: LanguageModel;
+  let primaryLabel: string;
+  let primaryProviderOptions: LlmProviderOptions | undefined;
   try {
+    const primaryInfo = tier === "sonnet" ? getWorkerStrongModelInfo() : getWorkerCheapModelInfo();
+    primaryLabel = primaryInfo.label;
+    primaryProviderOptions = primaryInfo.providerOptions;
     primary = tier === "sonnet" ? getWorkerStrongModel() : getWorkerCheapModel();
   } catch (err) {
     degraded.push({
       kind: "warning",
       topic: `worker-${input.concern}`,
-      message: `${input.concern}: anthropic ${tier} model unavailable (${formatErr(err)})`,
+      message: `${input.concern}: ${tier} model unavailable (${formatErr(err)})`,
     });
     return {
       findings: [],
@@ -194,7 +202,9 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
 
   const call = await callWorker({
     tier,
+    modelLabel: primaryLabel,
     primary,
+    ...(primaryProviderOptions !== undefined ? { providerOptions: primaryProviderOptions } : {}),
     systemPrompt,
     userPrompt,
     tools,
@@ -401,6 +411,8 @@ interface WorkerCallErr {
 export async function callWorker(opts: {
   tier: WorkerTier;
   primary: LanguageModel;
+  modelLabel?: string;
+  providerOptions?: LlmProviderOptions;
   systemPrompt: string;
   userPrompt: string;
   tools: ToolSet;
@@ -416,9 +428,10 @@ export async function callWorker(opts: {
       tokenUsage: first.tokenUsage,
     };
   }
+  const modelLabel = opts.modelLabel ?? `anthropic ${opts.tier}`;
   return {
     ok: false,
-    error: `anthropic ${opts.tier} failed (${first.error}); Gemini fallback skipped (tools required)`,
+    error: `${modelLabel} failed (${first.error}); Gemini fallback skipped (tools required)`,
   };
 }
 
@@ -440,6 +453,7 @@ async function tryProvider(
     systemPrompt: string;
     userPrompt: string;
     tools: ToolSet;
+    providerOptions?: LlmProviderOptions;
     timeoutMs: number;
     reasonedFindingMode?: ReasonedFindingMode;
   },
@@ -456,6 +470,7 @@ async function tryProvider(
       tools: opts.tools,
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
       output: Output.object({ schema: schemaPair.requestSchema }),
+      ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;

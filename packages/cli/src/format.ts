@@ -1,6 +1,7 @@
 import type {
   CommentSet,
   CostByTier,
+  CostLabelsByTier,
   DegradedEntry,
   ReviewInput,
   Tier,
@@ -54,7 +55,7 @@ function tierSwatch(tier: Tier): string {
 }
 
 /**
- * "Done in 47.3s · $0.42 (opus-4-6 $0.31 · sonnet-4-6 $0.08 · haiku-4-5 $0.03)"
+ * "Done in 47.3s · $0.42 (claude-opus-4-8 $0.31 · gpt-5.4-mini $0.08)"
  *
  * Falls back to "duration: 4660ms" (the pre-M14 shape) when cost is
  * absent — that's the `warden check` path (no LLM calls) and the
@@ -70,19 +71,28 @@ function renderSummaryLine(result: CommentSet): string {
   if (cost === undefined || cost === 0) {
     return `duration: ${result.metadata.durationMs}ms`;
   }
-  const breakdown = renderCostBreakdown(result.metadata.costByTier);
+  const breakdown = renderCostBreakdown(result.metadata.costByTier, result.metadata.costLabels);
   const costStr = formatUsd(cost);
   return breakdown
     ? `Done in ${wall} · ${costStr} (${breakdown})`
     : `Done in ${wall} · ${costStr}`;
 }
 
-function renderCostBreakdown(costByTier: CostByTier | undefined): string {
+function renderCostBreakdown(
+  costByTier: CostByTier | undefined,
+  costLabels: CostLabelsByTier | undefined,
+): string {
   if (!costByTier) return "";
   const parts: string[] = [];
-  if (costByTier.opus !== undefined) parts.push(`opus-4-6 ${formatUsd(costByTier.opus)}`);
-  if (costByTier.sonnet !== undefined) parts.push(`sonnet-4-6 ${formatUsd(costByTier.sonnet)}`);
-  if (costByTier.haiku !== undefined) parts.push(`haiku-4-5 ${formatUsd(costByTier.haiku)}`);
+  if (costByTier.opus !== undefined) {
+    parts.push(`${costLabels?.opus ?? "opus"} ${formatUsd(costByTier.opus)}`);
+  }
+  if (costByTier.sonnet !== undefined) {
+    parts.push(`${costLabels?.sonnet ?? "sonnet"} ${formatUsd(costByTier.sonnet)}`);
+  }
+  if (costByTier.haiku !== undefined) {
+    parts.push(`${costLabels?.haiku ?? "haiku"} ${formatUsd(costByTier.haiku)}`);
+  }
   return parts.join(" · ");
 }
 

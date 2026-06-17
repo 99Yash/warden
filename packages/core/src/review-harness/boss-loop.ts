@@ -1,12 +1,14 @@
 import {
-  Output,
   createRetryable,
   error as anyError,
   getBossModel,
+  getBossModelInfo,
   getModelKey,
+  hasToolCall,
   stepCountIs,
   streamText,
   timeout as timeoutCondition,
+  tool,
   transformSchemaForGemini,
   type LanguageModel,
   type Retries,
@@ -40,10 +42,11 @@ import {
  * Phase 2 of the M14 (ADR-0030) review harness. Single `streamText` boss
  * tool-use loop, capped at `WARDEN_REVIEW_BOSS_ROUNDS` steps (default 5,
  * clamped [1,10]). The boss dispatches workers via `dispatch_worker`,
- * reads their results round-by-round, and emits the final Comment[] via
- * `Output.object({ comments: Comment[] })` in its last turn (wrapped in an
- * object so AI SDK v6's structured-output channel parses reliably — see
- * `BossOutputSchema` below).
+ * reads their results round-by-round, and emits the final Comment[] by
+ * calling the terminal `submit_review` tool in its last turn (tool-call
+ * structured output is more robust across model versions than the
+ * experimental `Output.object` channel under a tool-use loop — see
+ * `BossOutputSchema` and the `submit_review` wiring below).
  *
  * Boss model is `getBossModel()` (Opus 4.6 per ADR-0030 §2). Per the
  * ADR-0017 2026-05-17 "tools + structured-output exception" amendment,
@@ -433,9 +436,10 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   const userPrompt = renderBossUserPrompt(input, round0Block);
   const stepCap = resolveBossRounds();
 
+  const primaryInfo = getBossModelInfo();
   const primary = getBossModel();
   const primaryKey = getModelKey(primary);
-  const primaryId = modelLabel(primary);
+  const primaryId = primaryInfo.modelId;
 
   const errorSummaries: string[] = [];
   let lastPrimarySummary: string | undefined;
@@ -444,7 +448,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   input.emit?.({
     type: "phase-start",
     phase: "llm",
-    provider: "anthropic",
+    provider: primaryInfo.provider,
     modelId: primaryId,
   });
 
@@ -490,35 +494,63 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   // and `responseTransform` is identity.
   const geminiPair = transformSchemaForGemini(BossOutputSchema);
 
+  // The boss emits its final comment set by calling a terminal `submit_review`
+  // tool, not via the AI SDK's experimental `Output.object` channel. Tool-call
+  // structured output composes far more reliably with a tool-use loop across
+  // model versions: opus-4-8 deterministically failed `Output.object` here with
+  // "No object generated: could not parse the response", while opus-4-6 did
+  // not. The tool's `execute` captures the SDK-validated input;
+  // `hasToolCall("submit_review")` ends the loop as soon as it fires.
+  let submittedRaw: unknown;
+  const submitReviewTool = tool({
+    description: [
+      "Submit the final review. Call this exactly once, as your LAST action,",
+      "with the complete review as `{ comments: Comment[] }`. Copy each",
+      "Comment's `sources` verbatim from worker findings. Calling this ends",
+      "the review; an empty `comments` array is the correct submission for a",
+      "clean diff.",
+    ].join(" "),
+    inputSchema: geminiPair.requestSchema,
+    execute: (args: unknown) => {
+      submittedRaw = args;
+      const comments = (args as { comments?: unknown[] }).comments;
+      return { received: Array.isArray(comments) ? comments.length : 0 };
+    },
+  });
+
   try {
     const result = streamText({
       model: retryable,
       system: systemPrompt,
       prompt: userPrompt,
-      tools: { dispatch_worker: dispatchHandle.tool },
-      stopWhen: [stepCountIs(stepCap)],
-      output: Output.object({ schema: geminiPair.requestSchema }),
+      tools: {
+        dispatch_worker: dispatchHandle.tool,
+        submit_review: submitReviewTool,
+      },
+      stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
+      ...(primaryInfo.providerOptions !== undefined
+        ? { providerOptions: primaryInfo.providerOptions }
+        : {}),
     });
 
-    // Drain the reasoning + tool-call stream so the renderer sees boss
-    // progress in real time. Text deltas (the structured-output JSON) stay
-    // invisible — same posture as cascade.ts.
-    (async () => {
-      try {
-        for await (const part of result.fullStream) {
-          if (part.type === "reasoning-delta") {
-            input.emit?.({ type: "reasoning-delta", text: part.text });
-          }
-        }
-      } catch {
-        // surfaced via awaited result.output below.
+    // Drain the full stream to completion. This surfaces reasoning deltas to
+    // the renderer in real time AND guarantees the `submit_review` execute has
+    // run (so `submittedRaw` is populated) before we read it below. Stream
+    // errors propagate to the catch block.
+    for await (const part of result.fullStream) {
+      if (part.type === "reasoning-delta") {
+        input.emit?.({ type: "reasoning-delta", text: part.text });
       }
-    })();
+    }
 
-    const rawOutput = await result.output;
+    if (submittedRaw === undefined) {
+      throw new Error(
+        "boss ended without calling submit_review (no final comment set emitted)",
+      );
+    }
     // Coerce string-form numeric literals back to numbers. No-op when the
     // schema contained no numeric-literal-union (geminiPair is identity).
-    const output = geminiPair.responseTransform(rawOutput) as z.infer<typeof BossOutputSchema>;
+    const output = geminiPair.responseTransform(submittedRaw) as z.infer<typeof BossOutputSchema>;
     let bossTokens: TokenUsage | undefined;
     try {
       const usage = await result.usage;
@@ -543,7 +575,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       degraded.push({
         kind: "warning",
         topic: "llm",
-        message: `llm: anthropic ${errorSummaries[0]}, retried successfully`,
+        message: `llm: ${primaryInfo.label} ${errorSummaries[0]}, retried successfully`,
       });
     }
 
@@ -569,7 +601,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     // Per ADR-0017 2026-05-17 amendment: tool-using call sites do not fall
     // back to Gemini. Hard-fail cleanly with a legible message.
     throw new Error(
-      `review-harness boss: anthropic failed (${primarySummary}); Gemini fallback skipped (tools required)`,
+      `review-harness boss: ${primaryInfo.label} failed (${primarySummary}); Gemini fallback skipped (tools required)`,
     );
   }
 }
@@ -652,7 +684,7 @@ function renderBossUserPrompt(input: BossLoopInput, round0Block: string | undefi
 
   sections.push(
     ``,
-    `Plan workers per the system prompt's "How to spend your rounds" guide. Dispatch via dispatch_worker; emit the final result in your last turn as a structured object \`{ "comments": Comment[] }\` via the Output.object channel.`,
+    `Plan workers per the system prompt's "How to spend your rounds" guide. Dispatch via dispatch_worker; then emit the final result by calling \`submit_review\` with \`{ comments: Comment[] }\` as your last action.`,
   );
 
   return sections.join("\n");
@@ -668,10 +700,10 @@ function truncate(s: string, max: number): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Boss output wraps `Comment[]` in a `comments` field so AI SDK v6's
- * structured-output channel sees a top-level object (it parses object
- * schemas more reliably than raw arrays via `Output.object`). The boss
- * prompt names the field; the post-pass unwraps to `Comment[]`.
+ * Boss output wraps `Comment[]` in a `comments` field so the `submit_review`
+ * tool's input schema is a top-level object (object schemas validate more
+ * reliably than top-level arrays as tool input). The boss prompt names the
+ * field; the post-pass unwraps to `Comment[]`.
  */
 const BossOutputSchema = z.object({
   comments: z

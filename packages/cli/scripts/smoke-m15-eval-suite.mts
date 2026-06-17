@@ -9,7 +9,8 @@
  *   1. Fixture loading: every directory under `fixtures/synthetic/`
  *      contains both `diff.patch` and `labels.md`.
  *   2. Label parsing: clean-formatting-only & clean-rename are flagged as
- *      `expectsEmpty: true`; the 6 plant fixtures parse ≥1 label each.
+ *      `expectsEmpty: true`; the 6 plant fixtures parse ≥1 label each;
+ *      the alfred PR#131 false-positive fixture parses absent labels.
  *   3. `scoreFixtureRun()` against a synthetic sample stream produces a
  *      sensible row (median catch matches the median input).
  *   4. `aggregateScores()` rolls up synthetic + real-PR + clean buckets
@@ -68,7 +69,7 @@ for (const name of expectedFixtures) {
 // -----------------------------------------------------------------------
 // 2. Real-PR fixture exists
 // -----------------------------------------------------------------------
-process.stdout.write(`\n[2] real-PR fixture for M14 close-out exists\n`);
+process.stdout.write(`\n[2] real-PR fixtures exist\n`);
 
 const realDirs = readdirSync(REAL_PRS_DIR);
 const m14Dirs = realDirs.filter((d) => d.startsWith("m14-closeout"));
@@ -79,6 +80,14 @@ if (m14Dir) {
   assert(existsSync(resolve(d, "diff.patch")), `${m14Dir}/diff.patch exists`);
   assert(existsSync(resolve(d, "labels.md")), `${m14Dir}/labels.md exists`);
 }
+const falseposDir = "alfred-pr131-falsepos-9349d565";
+assert(realDirs.includes(falseposDir), `${falseposDir} fixture exists`);
+{
+  const d = resolve(REAL_PRS_DIR, falseposDir);
+  assert(existsSync(resolve(d, "diff.patch")), `${falseposDir}/diff.patch exists`);
+  assert(existsSync(resolve(d, "labels.md")), `${falseposDir}/labels.md exists`);
+  assert(existsSync(resolve(d, "meta.json")), `${falseposDir}/meta.json exists`);
+}
 
 // -----------------------------------------------------------------------
 // 3. Label parsing: expectsEmpty + label-count sanity
@@ -88,7 +97,15 @@ process.stdout.write(`\n[3] label parsing (expectsEmpty + per-fixture counts)\n`
 // Inline-port the parseLabels logic so the smoke doesn't import run.mts
 // (which would pull the whole harness graph).
 interface ParsedLabels {
-  labels: { id: string; path: string; line?: number; category?: string; description: string }[];
+  labels: {
+    id: string;
+    expect?: "present" | "absent";
+    path: string;
+    line?: number;
+    category?: string;
+    claimIncludes?: string;
+    description: string;
+  }[];
   expectsEmpty: boolean;
 }
 function parseLabels(raw: string): ParsedLabels {
@@ -111,6 +128,7 @@ function parseLabels(raw: string): ParsedLabels {
     if (!kv["id"] || !kv["path"]) continue;
     const entry: ParsedLabels["labels"][number] = {
       id: kv["id"],
+      expect: parseLabelExpectation(kv["expect"] ?? kv["expected"]),
       path: kv["path"],
       description: kv["description"] ?? "",
     };
@@ -119,9 +137,24 @@ function parseLabels(raw: string): ParsedLabels {
       if (Number.isFinite(n)) entry.line = n;
     }
     if (kv["category"]) entry.category = kv["category"];
+    if (kv["claim_includes"]) entry.claimIncludes = kv["claim_includes"];
     labels.push(entry);
   }
   return { labels, expectsEmpty: false };
+}
+function parseLabelExpectation(raw: string | undefined): "present" | "absent" {
+  if (!raw) return "present";
+  const normalized = raw.toLowerCase().trim();
+  if (
+    normalized === "absent" ||
+    normalized === "forbidden" ||
+    normalized === "false-positive" ||
+    normalized === "false_positive" ||
+    normalized === "no-comment"
+  ) {
+    return "absent";
+  }
+  return "present";
 }
 
 const cleanFormat = parseLabels(
@@ -150,6 +183,19 @@ if (m14Labels) {
   );
 }
 
+const falseposLabels = parseLabels(
+  readFileSync(resolve(REAL_PRS_DIR, falseposDir, "labels.md"), "utf8"),
+);
+assert(falseposLabels.labels.length === 8, `${falseposDir} has 8 labels`);
+assert(
+  falseposLabels.labels.every((l) => l.expect === "absent"),
+  `${falseposDir} labels are absent traps`,
+);
+assert(
+  falseposLabels.labels.every((l) => l.claimIncludes !== undefined),
+  `${falseposDir} labels pin claim_includes`,
+);
+
 // -----------------------------------------------------------------------
 // 4. score.mts math
 // -----------------------------------------------------------------------
@@ -164,7 +210,13 @@ assert(
 );
 
 // Helper to fabricate samples for the scoring math test.
-function makeSample(caughtCount: number, unlabeled: number, cost: number, dispatches: number) {
+function makeSample(
+  caughtCount: number,
+  unlabeled: number,
+  cost: number,
+  dispatches: number,
+  forbiddenCount = 0,
+) {
   return {
     fixture: "fake",
     config: "fake",
@@ -175,6 +227,9 @@ function makeSample(caughtCount: number, unlabeled: number, cost: number, dispat
       .fill(0)
       .map((_, i) => `lbl-${i}`),
     missedLabels: [],
+    forbiddenLabels: Array(forbiddenCount)
+      .fill(0)
+      .map((_, i) => `fp-${i}`),
     unlabeledComments: unlabeled,
     dispatchCount: dispatches,
     costUsd: cost,
@@ -235,6 +290,25 @@ assert(
 assert(passingAgg.realCaught === 3, `real-PR caught = 3 (got ${passingAgg.realCaught})`);
 assert(passingAgg.cleanFixtureUnlabeled === 0, `clean unlabeled = 0`);
 
+const falseposFixture = {
+  name: "falsepos-fake",
+  category: "real-prs" as const,
+  diff: "",
+  labels: [
+    { id: "fp-a", expect: "absent" as const, path: "x", description: "" },
+    { id: "fp-b", expect: "absent" as const, path: "x", description: "" },
+  ],
+  expectsEmpty: false,
+};
+const falseposCleanRow = scoreFixtureRun(
+  falseposFixture,
+  [makeSample(0, 0, 0.05, 1), makeSample(0, 0, 0.05, 1), makeSample(0, 0, 0.05, 1)],
+  "test",
+);
+assert(falseposCleanRow.totalLabels === 0, `false-positive traps add no recall labels`);
+assert(falseposCleanRow.totalForbiddenLabels === 2, `false-positive traps counted as forbidden`);
+assert(falseposCleanRow.maxForbidden === 0, `absent labels have 0 hits when clean`);
+
 // -----------------------------------------------------------------------
 // 5. threshold gate
 // -----------------------------------------------------------------------
@@ -284,7 +358,16 @@ const perfectM14 = scoreFixtureRun(
   [makeSample(3, 0, 0.5, 4), makeSample(3, 0, 0.5, 4), makeSample(3, 0, 0.5, 4)],
   "perfect",
 );
-const perfectAgg = aggregateScores([perfectRow, cleanPerfect, perfectM14], "perfect");
+const perfectFalsepos = scoreFixtureRun(
+  falseposFixture,
+  [makeSample(0, 0, 0.05, 1), makeSample(0, 0, 0.05, 1), makeSample(0, 0, 0.05, 1)],
+  "perfect",
+);
+const perfectAgg = aggregateScores([perfectRow, cleanPerfect, perfectM14, perfectFalsepos], "perfect");
+assert(
+  perfectAgg.falsePositiveTrapHits === 0 && perfectAgg.falsePositiveTraps === 2,
+  `perfect aggregate has 0/2 false-positive trap hits`,
+);
 const perfectVerdict = checkThreshold(perfectAgg, perfectAgg.rows);
 assert(
   perfectVerdict.cleared,
@@ -343,6 +426,38 @@ assert(failVerdict.failed.includes("a-m14-closeout-catch"), `(a) flagged`);
 assert(failVerdict.failed.includes("b-synthetic-plants"), `(b) flagged`);
 assert(failVerdict.failed.includes("c-clean-fixture-comments"), `(c) flagged`);
 assert(failVerdict.failed.includes("e-min-dispatch"), `(e) flagged`);
+
+const falseposHit = scoreFixtureRun(
+  falseposFixture,
+  [makeSample(0, 1, 0.05, 1, 1), makeSample(0, 1, 0.05, 1, 1), makeSample(0, 1, 0.05, 1, 1)],
+  "falsepos-hit",
+);
+const falseposFailAgg = aggregateScores([perfectRow, cleanPerfect, perfectM14, falseposHit], "falsepos-hit");
+const falseposFailVerdict = checkThreshold(falseposFailAgg, falseposFailAgg.rows);
+assert(
+  !falseposFailVerdict.cleared,
+  `false-positive trap hit does NOT clear threshold`,
+);
+assert(
+  falseposFailVerdict.failed.includes("f-false-positive-traps"),
+  `(f) flagged`,
+);
+
+const intermittentFalsepos = scoreFixtureRun(
+  falseposFixture,
+  [makeSample(0, 0, 0.05, 1), makeSample(0, 1, 0.05, 1, 1), makeSample(0, 0, 0.05, 1)],
+  "falsepos-intermittent",
+);
+const intermittentAgg = aggregateScores(
+  [perfectRow, cleanPerfect, perfectM14, intermittentFalsepos],
+  "falsepos-intermittent",
+);
+const intermittentVerdict = checkThreshold(intermittentAgg, intermittentAgg.rows);
+assert(intermittentAgg.falsePositiveTrapHits === 1, `1-of-3 trap hit is counted`);
+assert(
+  intermittentVerdict.failed.includes("f-false-positive-traps"),
+  `(f) catches intermittent false positives`,
+);
 
 // Gate (b) SKIPPED branch: a no-synthetic aggregate (e.g. a real-PR-only
 // `--fixture-regex misses` run) must SKIP the plant gate, never fail it.

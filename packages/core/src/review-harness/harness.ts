@@ -1,3 +1,9 @@
+import {
+  getReviewModelLabelsByTier,
+  getReviewModelPricingByTier,
+  type LlmModelPrice,
+  type ReviewCostTier,
+} from "@warden/ai";
 import { wardenEnv } from "@warden/env";
 import type { ContextSelector } from "../context/index.js";
 import type { FormatterListener } from "../llm/index.js";
@@ -6,12 +12,14 @@ import { Semaphore } from "../orchestration/semaphore.js";
 import type {
   CommentSet,
   CostByTier,
+  CostLabelsByTier,
   DegradedEntry,
   RetrievedContext,
   TokenUsageBlock,
   TokenUsageByTier,
 } from "../schema.js";
 import { runBossLoop, type BossLoopConfig } from "./boss-loop.js";
+import { scopeCommentsToDiff } from "./comment-scope.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
 import { ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import type { DispatchConcurrency } from "./tools/dispatch-worker.js";
@@ -170,6 +178,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     comments: bossOutput.comments,
     repoRoot: input.repoRoot,
   });
+  const scoped = scopeCommentsToDiff(verified.comments, detPriors.changed);
 
   // Aggregate degraded entries from every layer: det-priors, every worker
   // recorded into the scratchpad, the dispatch tool's budget-cap entries
@@ -183,6 +192,15 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     ...apiClaimDegraded,
     ...verified.degraded,
   ];
+  if (scoped.droppedCount > 0) {
+    aggregatedDegraded.push({
+      kind: "info",
+      topic: "review-harness",
+      message:
+        `diff-scope: dropped ${scoped.droppedCount} ` +
+        `comment${scoped.droppedCount === 1 ? "" : "s"} outside added diff lines`,
+    });
+  }
 
   // ADR-0033: emit a single info entry when the dispatch concurrency cap
   // actually engaged. Silent on the happy path — `concurrencyAggregate()`
@@ -206,37 +224,34 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   const costs = computeCosts(tokenUsage);
 
   return {
-    comments: verified.comments,
+    comments: scoped.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
       degradedWorkers: aggregatedDegraded,
       ...(tokenUsage !== undefined ? { tokenUsage } : {}),
-      ...(costs !== undefined ? { costUsd: costs.costUsd, costByTier: costs.costByTier } : {}),
+      ...(costs !== undefined
+        ? {
+            costUsd: costs.costUsd,
+            costByTier: costs.costByTier,
+            costLabels: costs.costLabels,
+          }
+        : {}),
     },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Per-tier usage aggregation + static pricing table.
+// Per-tier usage aggregation + resolved model pricing.
 //
-// Pricing is per ADR-0030 §Caveats + the M14 plan's render-UX section:
-//   Opus 4.6   = $5  / $25  per 1M tokens (input/output)
-//   Sonnet 4.6 = $3  / $15  per 1M tokens
-//   Haiku 4.5  = $1  / $5   per 1M tokens
+// The `opus`/`sonnet`/`haiku` keys are retained as compatibility aliases:
+// boss / worker-strong / worker-cheap. The concrete provider model behind
+// each alias is resolved by `@warden/ai` from the available API keys.
 //
-// Cached input tokens (Anthropic reports them when prompt caching kicks
-// in) are charged at 10% of the standard input price — the
+// Cached input tokens are charged at the model's cached-input price. The
 // `cachedInputTokens` figure is *non-cumulative* with `inputTokens`; the
 // usage object reports them as a separate count for the cache-hit portion.
-// We bill `inputTokens` at the full rate and `cachedInputTokens` at 10%.
+// We bill `inputTokens` at the full rate and `cachedInputTokens` separately.
 // ---------------------------------------------------------------------------
-
-const PRICE_PER_M_TOKENS: Record<"opus" | "sonnet" | "haiku", { input: number; output: number }> = {
-  opus: { input: 5, output: 25 },
-  sonnet: { input: 3, output: 15 },
-  haiku: { input: 1, output: 5 },
-};
-const CACHE_HIT_PRICE_MULTIPLIER = 0.1;
 
 function toUsageBlock(usage: TokenUsage): TokenUsageBlock {
   return {
@@ -286,15 +301,19 @@ function buildTokenUsageByTier(
   };
 }
 
-function tierCost(block: TokenUsageBlock | undefined, tier: "opus" | "sonnet" | "haiku"): number {
+function tierCost(
+  block: TokenUsageBlock | undefined,
+  tier: ReviewCostTier,
+  prices: Record<ReviewCostTier, LlmModelPrice>,
+): number {
   if (!block) return 0;
-  const price = PRICE_PER_M_TOKENS[tier];
+  const price = prices[tier];
   // `inputTokens` per AI SDK v6 already excludes the cache-hit portion when
-  // `cachedInputTokens` is reported — bill them separately at 10× discount.
+  // `cachedInputTokens` is reported — bill them separately at the cache rate.
   const inputCost = (block.inputTokens / 1_000_000) * price.input;
   const cachedCost =
     block.cachedInputTokens !== undefined
-      ? (block.cachedInputTokens / 1_000_000) * price.input * CACHE_HIT_PRICE_MULTIPLIER
+      ? (block.cachedInputTokens / 1_000_000) * price.cachedInput
       : 0;
   const outputCost = (block.outputTokens / 1_000_000) * price.output;
   return inputCost + cachedCost + outputCost;
@@ -302,18 +321,22 @@ function tierCost(block: TokenUsageBlock | undefined, tier: "opus" | "sonnet" | 
 
 function computeCosts(
   usage: TokenUsageByTier | undefined,
-): { costUsd: number; costByTier: CostByTier } | undefined {
+): { costUsd: number; costByTier: CostByTier; costLabels: CostLabelsByTier } | undefined {
   if (!usage) return undefined;
-  const opus = usage.opus !== undefined ? round4(tierCost(usage.opus, "opus")) : undefined;
-  const sonnet = usage.sonnet !== undefined ? round4(tierCost(usage.sonnet, "sonnet")) : undefined;
-  const haiku = usage.haiku !== undefined ? round4(tierCost(usage.haiku, "haiku")) : undefined;
+  const prices = getReviewModelPricingByTier();
+  const labels = getReviewModelLabelsByTier();
+  const opus = usage.opus !== undefined ? round4(tierCost(usage.opus, "opus", prices)) : undefined;
+  const sonnet =
+    usage.sonnet !== undefined ? round4(tierCost(usage.sonnet, "sonnet", prices)) : undefined;
+  const haiku =
+    usage.haiku !== undefined ? round4(tierCost(usage.haiku, "haiku", prices)) : undefined;
   // Sum the raw (unrounded) tier costs then round once to preserve the
   // pre-refactor `costUsd` value to the cent. Individual tier figures are
   // rounded for display.
   const total = round4(
-    tierCost(usage.opus, "opus") +
-      tierCost(usage.sonnet, "sonnet") +
-      tierCost(usage.haiku, "haiku"),
+    tierCost(usage.opus, "opus", prices) +
+      tierCost(usage.sonnet, "sonnet", prices) +
+      tierCost(usage.haiku, "haiku", prices),
   );
   return {
     costUsd: total,
@@ -322,6 +345,7 @@ function computeCosts(
       ...(sonnet !== undefined ? { sonnet } : {}),
       ...(haiku !== undefined ? { haiku } : {}),
     },
+    costLabels: labels,
   };
 }
 

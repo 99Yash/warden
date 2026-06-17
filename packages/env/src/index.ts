@@ -6,15 +6,14 @@ export * from './config.js';
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z
     .string()
-    .min(
-      1,
-      'ANTHROPIC_API_KEY is required — see https://console.anthropic.com',
-    )
+    .min(1, 'ANTHROPIC_API_KEY is required — see https://console.anthropic.com')
     .optional(),
-  // Optional fallback per ADR-0017. When set, the LLM cascade routes to
-  // Google Gemini after Anthropic fails post-retry. When unset, Anthropic
-  // failure is hard-fail.
+  // Optional fallback per ADR-0017. Tool-using review call sites still
+  // skip Gemini fallback; provider wiring remains for non-tool cascades.
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  // Optional review LLM provider. When set, Warden prefers OpenAI for
+  // worker dispatch and can run review without Anthropic.
+  OPENAI_API_KEY: z.string().min(1).optional(),
   // Required for `warden init` and the `warden review` semantic signal
   // (ADR-0019). Optional at env-validate time so `warden check` (which
   // never touches the index) doesn't surprise users; the embedding-provider
@@ -104,15 +103,13 @@ const envSchema = z.object({
   WARDEN_WORKER_CONCURRENCY_STRONG: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message:
-        'WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer',
+      message: 'WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer',
     })
     .optional(),
   WARDEN_WORKER_CONCURRENCY_CHEAP: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message:
-        'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
+      message: 'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
     })
     .optional(),
   // M18 / ADR-0029: belt-and-suspenders cap for the dedicated security
@@ -132,8 +129,8 @@ const envSchema = z.object({
   WARDEN_REACT_DOCTOR: z
     .string()
     .optional()
-    .transform((value) =>
-      value !== undefined && /^(1|true)$/i.test(value.trim()),
+    .transform(
+      (value) => value !== undefined && /^(1|true)$/i.test(value.trim()),
     ),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])

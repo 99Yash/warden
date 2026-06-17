@@ -9,7 +9,7 @@ export {
 // Re-export the AI SDK primitives `@warden/core` consumes. Per the package
 // boundary table in CLAUDE.md, `core` is forbidden from importing `ai`
 // directly — every AI SDK touchpoint flows through `@warden/ai`.
-export { Output, stepCountIs, streamText, generateText, tool } from "ai";
+export { Output, hasToolCall, stepCountIs, streamText, generateText, tool } from "ai";
 export type { ToolSet } from "ai";
 // LanguageModel is narrowed to ai-retry's alias (`LanguageModelV3`) so it can
 // flow into both `streamText` (a supertype consumer) and `createRetryable`

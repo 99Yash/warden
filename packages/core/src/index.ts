@@ -302,6 +302,9 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
       ...(harness.metadata.costByTier !== undefined
         ? { costByTier: harness.metadata.costByTier }
         : {}),
+      ...(harness.metadata.costLabels !== undefined
+        ? { costLabels: harness.metadata.costLabels }
+        : {}),
     },
   };
 }

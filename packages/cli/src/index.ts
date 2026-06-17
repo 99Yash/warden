@@ -11,9 +11,9 @@ import {
   type ResolvedDiff,
 } from "@warden/core";
 import {
-  configuredLlmPrimaryProvider,
+  configuredReviewLlmProviders,
   loadWardenRuntime,
-  requireProviderApiKey,
+  requireAnyProviderApiKey,
 } from "@warden/env";
 import { Command } from "commander";
 import pc from "picocolors";
@@ -65,7 +65,7 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
   const repoRoot = findRepoRoot();
   loadWardenRuntime({ repoRoot });
   if (mode === "review") {
-    requireProviderApiKey(configuredLlmPrimaryProvider(), "warden review");
+    requireAnyProviderApiKey(configuredReviewLlmProviders(), "warden review");
   }
 
   const resolved = await acquireDiff(repoRoot, mode, opts);
