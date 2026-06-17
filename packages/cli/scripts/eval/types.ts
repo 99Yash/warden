@@ -33,12 +33,20 @@ export interface EvalConfig {
 export interface FixtureLabel {
   /** Free-form identifier (e.g. "missing-null-check"). Used in scorecards. */
   id: string;
+  /**
+   * Whether this label describes a finding the harness should catch or a known
+   * false-positive trap it must avoid. Defaults to `present` for existing
+   * recall fixtures.
+   */
+  expect?: "present" | "absent";
   /** Repo-relative path of the file the issue lives in. */
   path: string;
   /** Optional 1-indexed line; when present, comments must cite within ±5. */
   line?: number;
   /** Expected Comment.category if the boss catches this. */
   category?: string;
+  /** Optional case-insensitive substring that must appear in the Comment claim. */
+  claimIncludes?: string;
   /** Free-text reminder of what to look for. */
   description: string;
 }
@@ -85,7 +93,8 @@ export interface FixtureSample {
   comments: EvalCommentSummary[];
   caughtLabels: string[];
   missedLabels: string[];
-  /** Comments cited at labeled lines but for the wrong category — usually fine. */
+  /** Known false-positive labels that matched at least one emitted comment. */
+  forbiddenLabels: string[];
   /** Total Comments minus the ones that matched labels — proxy for false-positive count. */
   unlabeledComments: number;
   /** Number of dispatch_worker tool-calls observed during the run (proxy for boss work). */
@@ -111,7 +120,8 @@ export interface EvalCommentSummary {
 
 /**
  * Aggregated across N samples of one (fixture, config) pair. Medians for
- * cost and dispatch suppress LLM variance.
+ * recall, cost, and dispatch suppress LLM variance; forbidden traps use
+ * max/any-sample semantics so intermittent false positives still fail.
  */
 export interface FixtureScore {
   fixture: string;
@@ -122,6 +132,9 @@ export interface FixtureScore {
   /** Median of `caughtLabels.length` across samples. */
   caughtCount: number;
   totalLabels: number;
+  totalForbiddenLabels: number;
+  /** Maximum `forbiddenLabels.length` across samples; any recurrence is a failure. */
+  maxForbidden: number;
   /** Median of `unlabeledComments` — used for false-positive gauge on clean fixtures. */
   medianUnlabeled: number;
   medianCost: number;
@@ -145,6 +158,10 @@ export interface AggregateScore {
   /** Total real-PR labels caught across all real-PR fixtures. */
   realCaught: number;
   realPlants: number;
+  /** Total known false-positive traps across fixtures. */
+  falsePositiveTraps: number;
+  /** Max-summed known false-positive hits across fixtures. Threshold: zero. */
+  falsePositiveTrapHits: number;
   /** Total unlabeled comments across BOTH clean-control fixtures (proxy: false-positive count). */
   cleanFixtureUnlabeled: number;
   /** Total cost summed across all (fixture × samples). */

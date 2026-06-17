@@ -205,6 +205,14 @@ export interface ReviewInput {
    * signal the CLI receives. Repo-audit 2026-05-18 #3.
    */
   extraDegraded?: DegradedEntry[];
+  /**
+   * ADR-0046: the diff's resolved base ref + human description, forwarded from
+   * `resolveDiff()`. The react-doctor det-prior uses `baseRef` to drive its
+   * `--scope changed` delta against the same base warden diffed. Public
+   * surface — the `apps/github-bot/` wrapper supplies this too. Absent (or
+   * `baseRef` undefined) → react-doctor auto-detects working-tree changes.
+   */
+  diffBase?: { baseRef?: string; description: string };
 }
 
 /**
@@ -248,6 +256,7 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     ...(input.selector !== undefined ? { selector: input.selector } : {}),
     ...(input.retrievedContext !== undefined ? { retrievedContext: input.retrievedContext } : {}),
     ...(input.emit !== undefined ? { emit: input.emit } : {}),
+    ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
   const ruled = applyHardRules(harness.comments, input.config);
   const security =
@@ -293,6 +302,9 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
       ...(harness.metadata.costByTier !== undefined
         ? { costByTier: harness.metadata.costByTier }
         : {}),
+      ...(harness.metadata.costLabels !== undefined
+        ? { costLabels: harness.metadata.costLabels }
+        : {}),
     },
   };
 }
@@ -335,6 +347,7 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
     // check mode never invokes the selector — the LLM is the only consumer
     // of retrieved context and check skips the LLM entirely.
     selector: null,
+    ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
 
   // No package.json at repoRoot → preserve pre-M14 behavior: short-circuit

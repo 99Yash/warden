@@ -11,9 +11,9 @@ import {
   type ResolvedDiff,
 } from "@warden/core";
 import {
-  configuredLlmPrimaryProvider,
+  configuredReviewLlmProviders,
   loadWardenRuntime,
-  requireProviderApiKey,
+  requireAnyProviderApiKey,
 } from "@warden/env";
 import { Command } from "commander";
 import pc from "picocolors";
@@ -65,11 +65,11 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
   const repoRoot = findRepoRoot();
   loadWardenRuntime({ repoRoot });
   if (mode === "review") {
-    requireProviderApiKey(configuredLlmPrimaryProvider(), "warden review");
+    requireAnyProviderApiKey(configuredReviewLlmProviders(), "warden review");
   }
 
   const resolved = await acquireDiff(repoRoot, mode, opts);
-  const { diff, description, degraded: diffDegraded } = resolved;
+  const { diff, description, baseRef, degraded: diffDegraded } = resolved;
 
   if (!opts.json) {
     process.stdout.write(pc.dim(`warden ${mode}  ${description}\n`));
@@ -126,6 +126,9 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     },
     emit,
     ...(diffDegraded && diffDegraded.length > 0 ? { extraDegraded: diffDegraded } : {}),
+    // ADR-0046: forward the resolved base so the react-doctor det-prior can
+    // drive its `--scope changed` delta against the same base warden diffed.
+    diffBase: { ...(baseRef !== undefined ? { baseRef } : {}), description },
   });
 
   if (writeJsonResult(result, opts)) return;

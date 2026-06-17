@@ -15,7 +15,9 @@
  *
  * Sampling: each (fixture × config) ran N=3 times by default. The scorer
  * takes the median catch count + median cost + median dispatch count so
- * one bad LLM sample doesn't flip a verdict.
+ * one bad LLM sample doesn't flip a recall verdict. Known false-positive
+ * traps intentionally use max/any-sample semantics: a recurrence in any
+ * sample fails the precision gate.
  */
 
 import type {
@@ -42,8 +44,12 @@ export function scoreFixtureRun(
   samples: FixtureSample[],
   configName: string,
 ): FixtureScore {
-  const totalLabels = fixture.labels.length;
+  const totalLabels = fixture.labels.filter((l) => labelExpectation(l) === "present").length;
+  const totalForbiddenLabels = fixture.labels.filter(
+    (l) => labelExpectation(l) === "absent",
+  ).length;
   const caughtCounts = samples.map((s) => s.caughtLabels.length);
+  const forbiddenCounts = samples.map((s) => s.forbiddenLabels.length);
   const unlabeledCounts = samples.map((s) => s.unlabeledComments);
   const costs = samples.map((s) => s.costUsd);
   const dispatches = samples.map((s) => s.dispatchCount);
@@ -58,6 +64,8 @@ export function scoreFixtureRun(
     samples: samples.length,
     caughtCount: median(caughtCounts),
     totalLabels,
+    totalForbiddenLabels,
+    maxForbidden: max(forbiddenCounts),
     medianUnlabeled: median(unlabeledCounts),
     medianCost: median(costs),
     medianDispatches: median(dispatches),
@@ -76,17 +84,21 @@ export function aggregateScores(rows: FixtureScore[], configName: string): Aggre
   let syntheticPlants = 0;
   let realCaught = 0;
   let realPlants = 0;
+  let falsePositiveTraps = 0;
+  let falsePositiveTrapHits = 0;
   let cleanFixtureUnlabeled = 0;
   let totalCost = 0;
   const substantiveDispatches: number[] = [];
 
   for (const row of rows) {
     totalCost += row.medianCost;
+    falsePositiveTraps += row.totalForbiddenLabels;
+    falsePositiveTrapHits += row.maxForbidden;
 
-    if (row.category === "synthetic" && !row.expectsEmpty) {
+    if (row.category === "synthetic" && !row.expectsEmpty && row.totalLabels > 0) {
       syntheticPlants += row.totalLabels;
       syntheticCaught += row.caughtCount;
-    } else if (row.category === "real-prs") {
+    } else if (row.category === "real-prs" && row.totalLabels > 0) {
       realPlants += row.totalLabels;
       realCaught += row.caughtCount;
     } else if (row.expectsEmpty) {
@@ -104,6 +116,8 @@ export function aggregateScores(rows: FixtureScore[], configName: string): Aggre
     syntheticPlants,
     realCaught,
     realPlants,
+    falsePositiveTraps,
+    falsePositiveTrapHits,
     cleanFixtureUnlabeled,
     totalCost: round4(totalCost),
     medianDispatchesOnSubstantive: median(substantiveDispatches),
@@ -179,6 +193,18 @@ export function checkThreshold(agg: AggregateScore, rows: FixtureScore[]): Thres
   );
   if (!passE) failed.push("e-min-dispatch");
 
+  // (f) Known false-positive traps must not reappear.
+  if (agg.falsePositiveTraps > 0) {
+    const passF = agg.falsePositiveTrapHits === 0;
+    details.push(
+      `(f) False-positive trap hits: ${agg.falsePositiveTrapHits}/${agg.falsePositiveTraps} ` +
+        `(threshold 0) — ${passF ? "PASS" : "FAIL"}`,
+    );
+    if (!passF) failed.push("f-false-positive-traps");
+  } else {
+    details.push(`(f) False-positive trap hits: no fixture present — SKIPPED`);
+  }
+
   return {
     cleared: failed.length === 0,
     failed,
@@ -192,14 +218,14 @@ export function checkThreshold(agg: AggregateScore, rows: FixtureScore[]): Thres
 
 export function renderMarkdownTable(agg: AggregateScore): string {
   const header = [
-    `| fixture | category | caught | total | unlabeled | dispatches | cost $ | duration ms |`,
-    `|---------|----------|--------|-------|-----------|------------|--------|-------------|`,
+    `| fixture | category | caught | total | forbidden max | unlabeled | dispatches | cost $ | duration ms |`,
+    `|---------|----------|--------|-------|-----------|-----------|------------|--------|-------------|`,
   ];
   const rows = agg.rows.map((r) => {
     const expectsEmpty = r.expectsEmpty ? ` (expects 0)` : "";
     return (
       `| \`${r.fixture}\`${expectsEmpty} | ${r.category} | ` +
-      `${r.caughtCount} | ${r.totalLabels} | ${r.medianUnlabeled} | ` +
+      `${r.caughtCount} | ${r.totalLabels} | ${r.maxForbidden}/${r.totalForbiddenLabels} | ${r.medianUnlabeled} | ` +
       `${r.medianDispatches} | ${r.medianCost.toFixed(4)} | ${r.medianDurationMs} |`
     );
   });
@@ -208,6 +234,7 @@ export function renderMarkdownTable(agg: AggregateScore): string {
     `**Aggregate for \`${agg.config}\`:**`,
     `- Synthetic catch: ${agg.syntheticCaught}/${agg.syntheticPlants}`,
     `- Real-PR catch: ${agg.realCaught}/${agg.realPlants}`,
+    `- False-positive trap hits: ${agg.falsePositiveTrapHits}/${agg.falsePositiveTraps}`,
     `- Clean-fixture unlabeled: ${agg.cleanFixtureUnlabeled}`,
     `- Total cost: $${agg.totalCost.toFixed(4)}`,
     `- Min substantive dispatches: ${agg.medianDispatchesOnSubstantive}`,
@@ -232,6 +259,14 @@ function median(values: number[]): number {
   return (a + b) / 2;
 }
 
+function max(values: number[]): number {
+  return values.length === 0 ? 0 : Math.max(...values);
+}
+
 function round4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
+}
+
+function labelExpectation(label: Fixture["labels"][number]): "present" | "absent" {
+  return label.expect ?? "present";
 }

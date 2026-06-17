@@ -6,15 +6,14 @@ export * from './config.js';
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z
     .string()
-    .min(
-      1,
-      'ANTHROPIC_API_KEY is required — see https://console.anthropic.com',
-    )
+    .min(1, 'ANTHROPIC_API_KEY is required — see https://console.anthropic.com')
     .optional(),
-  // Optional fallback per ADR-0017. When set, the LLM cascade routes to
-  // Google Gemini after Anthropic fails post-retry. When unset, Anthropic
-  // failure is hard-fail.
+  // Optional fallback per ADR-0017. Tool-using review call sites still
+  // skip Gemini fallback; provider wiring remains for non-tool cascades.
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  // Optional review LLM provider. When set, Warden prefers OpenAI for
+  // worker dispatch and can run review without Anthropic.
+  OPENAI_API_KEY: z.string().min(1).optional(),
   // Required for `warden init` and the `warden review` semantic signal
   // (ADR-0019). Optional at env-validate time so `warden check` (which
   // never touches the index) doesn't surprise users; the embedding-provider
@@ -50,8 +49,8 @@ const envSchema = z.object({
   // ADR-0030 / M14: boss-loop step cap for the M14 review harness. Default 5
   // rounds; clamped to [1, 10] so neither a typo'd 0 nor a runaway 1000 can
   // wreck a review. Each round is one `streamText` step the boss spends
-  // dispatching workers via `dispatch_worker` or emitting the final
-  // `Output.object({ comments: Comment[] })` structured result.
+  // dispatching workers via `dispatch_worker` or emitting the final review by
+  // calling the terminal `submit_review` tool with `{ comments: Comment[] }`.
   WARDEN_REVIEW_BOSS_ROUNDS: z
     .string()
     .regex(/^\d+$/, {
@@ -104,15 +103,13 @@ const envSchema = z.object({
   WARDEN_WORKER_CONCURRENCY_STRONG: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message:
-        'WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer',
+      message: 'WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer',
     })
     .optional(),
   WARDEN_WORKER_CONCURRENCY_CHEAP: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message:
-        'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
+      message: 'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
     })
     .optional(),
   // M18 / ADR-0029: belt-and-suspenders cap for the dedicated security
@@ -124,6 +121,17 @@ const envSchema = z.object({
       message: 'WARDEN_SECURITY_WORKER_BUDGET must be a positive integer',
     })
     .optional(),
+  // ADR-0046: opt into the `react-doctor` det-prior (subprocessed
+  // `react-doctor` CLI — its visitor rules + scan() SAST suite + the
+  // `--scope changed` delta). Default **off** while eval-gated; the
+  // `det-priors.ts` call site gates on this. Boolean-ish: `1` / `true`
+  // (case-insensitive) enable it; anything else (incl. unset) is off.
+  WARDEN_REACT_DOCTOR: z
+    .string()
+    .optional()
+    .transform(
+      (value) => value !== undefined && /^(1|true)$/i.test(value.trim()),
+    ),
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
     .default('development'),

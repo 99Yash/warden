@@ -29,6 +29,15 @@ export interface ResolvedDiff {
   /** Human-readable description of which range was diffed (for telemetry / debug). */
   description: string;
   /**
+   * ADR-0046: the resolved base ref behind the diffed range — the value left
+   * of `...HEAD` / `..HEAD` (the `--base` override, the auto-detected default
+   * branch, or the `HEAD~1` fallback). Undefined in `check` mode, where the
+   * diff is the working tree against HEAD and there's no meaningful base to
+   * forward. Threaded down to the react-doctor det-prior so its
+   * `--scope changed` delta compares against the same base warden diffed.
+   */
+  baseRef?: string;
+  /**
    * Surfaced when git itself failed (e.g. `--base` resolved to a tree, an
    * unknown ref, or any other non-zero exit). Pre-2026-05 the failure was
    * swallowed and the review proceeded against an empty diff — repo-audit
@@ -60,13 +69,15 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
     return {
       diff,
       description: `vs ${opts.baseRef} (override)`,
+      baseRef: opts.baseRef,
       ...(degraded ? { degraded: [degraded] } : {}),
     };
   }
 
   if (opts.mode === "check") {
     // Working tree + staged changes against HEAD. Mirrors what a developer
-    // about to commit is actually looking at.
+    // about to commit is actually looking at. No base ref forwarded — the
+    // react-doctor det-prior auto-detects working-tree changes (ADR-0046).
     const { diff, degraded } = await runGitDiff(opts.repoRoot, ["HEAD"]);
     return {
       diff,
@@ -84,6 +95,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
     return {
       diff,
       description: "vs HEAD~1 (no default branch found)",
+      baseRef: "HEAD~1",
       ...(degraded ? { degraded: [degraded] } : {}),
     };
   }
@@ -91,6 +103,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
   return {
     diff,
     description: `vs ${base}`,
+    baseRef: base,
     ...(degraded ? { degraded: [degraded] } : {}),
   };
 }

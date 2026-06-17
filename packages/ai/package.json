@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/google": "catalog:",
+    "@ai-sdk/openai": "catalog:",
     "@warden/env": "workspace:*",
     "ai": "catalog:",
     "ai-retry": "catalog:",

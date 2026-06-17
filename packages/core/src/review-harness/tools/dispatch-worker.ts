@@ -358,7 +358,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       "(rounds 2-4: follow up on specific files based on earlier output),",
       "and synth (final round: optional last-mile dispatches before",
       "emitting the comment set). The boss MUST emit the final comment",
-      "array via the structured output, NOT through this tool.",
+      "array by calling the `submit_review` tool, NOT through this tool.",
     ].join(" "),
     inputSchema: InputSchema,
     execute: runOneDispatch,

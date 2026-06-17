@@ -5,18 +5,85 @@
 // `streamText` (a supertype consumer) and `createRetryable` (which generics
 // strictly over `LanguageModelV3`) want.
 import type { LanguageModel } from "ai-retry";
-import { anthropicProvider, googleProvider } from "./provider.js";
+import {
+  configuredLlmExplicitPrimaryProvider,
+  isProviderConfigured,
+  requireAnyProviderApiKey,
+} from "@warden/env";
+import { modelCatalogPrice } from "./model-catalog.js";
+import { anthropicProvider, googleProvider, openaiProvider } from "./provider.js";
+
+export type LlmProviderId = "anthropic" | "openai" | "google";
+export type ReviewCostTier = "opus" | "sonnet" | "haiku";
+export type LlmJsonValue = null | string | number | boolean | LlmJsonObject | LlmJsonValue[];
+export interface LlmJsonObject {
+  [key: string]: LlmJsonValue | undefined;
+}
+export type LlmProviderOptions = Record<string, LlmJsonObject>;
+
+export interface LlmModelPrice {
+  /** USD per 1M uncached input tokens. */
+  input: number;
+  /** USD per 1M output tokens. */
+  output: number;
+  /** USD per 1M cached input tokens, when the provider reports them. */
+  cachedInput: number;
+}
+
+export interface ResolvedLlmModel {
+  provider: LlmProviderId;
+  modelId: string;
+  label: string;
+  fallbackPricePerMillionTokens: LlmModelPrice;
+  providerOptions?: LlmProviderOptions;
+}
+
+const ANTHROPIC_OPUS_4_8 = {
+  provider: "anthropic",
+  modelId: "claude-opus-4-8",
+  label: "claude-opus-4-8",
+  fallbackPricePerMillionTokens: { input: 5, output: 25, cachedInput: 0.5 },
+} satisfies ResolvedLlmModel;
+
+const ANTHROPIC_SONNET_4_6 = {
+  provider: "anthropic",
+  modelId: "claude-sonnet-4-6",
+  label: "claude-sonnet-4-6",
+  fallbackPricePerMillionTokens: { input: 3, output: 15, cachedInput: 0.3 },
+} satisfies ResolvedLlmModel;
+
+const ANTHROPIC_HAIKU_4_5 = {
+  provider: "anthropic",
+  modelId: "claude-haiku-4-5-20251001",
+  label: "claude-haiku-4-5",
+  fallbackPricePerMillionTokens: { input: 1, output: 5, cachedInput: 0.1 },
+} satisfies ResolvedLlmModel;
+
+const OPENAI_GPT_5_5 = {
+  provider: "openai",
+  modelId: "gpt-5.5",
+  label: "gpt-5.5 xhigh",
+  fallbackPricePerMillionTokens: { input: 5, output: 30, cachedInput: 0.5 },
+  providerOptions: { openai: { reasoningEffort: "xhigh" } },
+} satisfies ResolvedLlmModel;
+
+const OPENAI_GPT_5_4_MINI = {
+  provider: "openai",
+  modelId: "gpt-5.4-mini",
+  label: "gpt-5.4-mini xhigh",
+  fallbackPricePerMillionTokens: { input: 0.75, output: 4.5, cachedInput: 0.075 },
+  providerOptions: { openai: { reasoningEffort: "xhigh" } },
+} satisfies ResolvedLlmModel;
 
 /**
  * Boss model. Used by the M14 review harness as the single planning brain
- * across the 5-round `dispatch_worker` tool-use loop, and previously by the
- * M4/M8 formatter/synthesizer (both retired for review-mode under ADR-0030).
- * Opus 4.6 for the 1M context window + cross-file planning the harness
- * relies on; 4.7's 1.4× premium is deferred to a future deep-tier milestone
- * (ADR-0029 / m15-plan.md). Per ADR-0006 + vision.md §3 worker tiering.
+ * across the `dispatch_worker` tool-use loop. Default role policy:
+ * Anthropic key present -> Claude Opus 4.8 boss; otherwise OpenAI key
+ * present -> GPT-5.5 boss. An explicit `routing.llm.primary` overrides this
+ * (the pinned provider wins for every role when its key is configured).
  */
 export function getBossModel(): LanguageModel {
-  return anthropicProvider()("claude-opus-4-6");
+  return modelFromInfo(getBossModelInfo());
 }
 
 /**
@@ -25,24 +92,123 @@ export function getBossModel(): LanguageModel {
  * does not silently inherit the deep tier's higher cost.
  */
 export function getApexModel(): LanguageModel {
-  return anthropicProvider()("claude-opus-4-7");
+  return modelFromInfo(getApexModelInfo());
 }
 
 /**
- * Strong-tier worker model. Same SKU as the boss in v0 — separated as a
- * function so future tuning (e.g. switching grader to a different SKU)
- * doesn't require touching every callsite.
+ * Strong-tier worker model. By default OpenAI is preferred when configured
+ * because GPT-5.4 mini is the intended cost/performance worker default, with
+ * Anthropic Sonnet as the no-OpenAI fallback. An explicit `routing.llm.primary`
+ * overrides this and pins workers to the chosen provider.
  */
 export function getWorkerStrongModel(): LanguageModel {
-  return anthropicProvider()("claude-sonnet-4-6");
+  return modelFromInfo(getWorkerStrongModelInfo());
 }
 
 /**
- * Cheap-tier worker model for pattern-matching tasks (contract checks,
- * best-practices) that don't need deep reasoning. Per ADR-0006.
+ * Cheap-tier worker model for pattern-matching tasks. For now the OpenAI
+ * default deliberately collapses strong/cheap workers onto GPT-5.4 mini;
+ * a future CLI model policy can split this further once there are evals.
  */
 export function getWorkerCheapModel(): LanguageModel {
-  return anthropicProvider()("claude-haiku-4-5-20251001");
+  return modelFromInfo(getWorkerCheapModelInfo());
+}
+
+type ReviewRole = "boss" | "apex" | "workerStrong" | "workerCheap";
+type ReviewLlmProvider = Extract<LlmProviderId, "anthropic" | "openai">;
+
+/** Per-provider model for each review role. */
+const PROVIDER_ROLE_MODELS: Record<ReviewLlmProvider, Record<ReviewRole, ResolvedLlmModel>> = {
+  anthropic: {
+    boss: ANTHROPIC_OPUS_4_8,
+    apex: ANTHROPIC_OPUS_4_8,
+    workerStrong: ANTHROPIC_SONNET_4_6,
+    workerCheap: ANTHROPIC_HAIKU_4_5,
+  },
+  openai: {
+    boss: OPENAI_GPT_5_5,
+    apex: OPENAI_GPT_5_5,
+    // OpenAI deliberately collapses strong/cheap workers onto GPT-5.4 mini for
+    // now; a future model policy can split this once there are evals.
+    workerStrong: OPENAI_GPT_5_4_MINI,
+    workerCheap: OPENAI_GPT_5_4_MINI,
+  },
+};
+
+/**
+ * Default provider preference per role when the user has not pinned
+ * `routing.llm.primary`. Boss/apex favor Anthropic Opus for planning; workers
+ * favor OpenAI GPT-5.4 mini for cost/performance. An explicit primary overrides
+ * this for every role (see {@link roleProviderOrder}).
+ */
+const ROLE_DEFAULT_PROVIDER_ORDER: Record<ReviewRole, readonly ReviewLlmProvider[]> = {
+  boss: ["anthropic", "openai"],
+  apex: ["anthropic", "openai"],
+  workerStrong: ["openai", "anthropic"],
+  workerCheap: ["openai", "anthropic"],
+};
+
+function isReviewLlmProvider(id: string | undefined): id is ReviewLlmProvider {
+  return id === "anthropic" || id === "openai";
+}
+
+/**
+ * Provider preference for a role. An explicitly configured `routing.llm.primary`
+ * wins for every role (when it is a review LLM provider); the role default order
+ * is the tiebreaker / fallback. Honors ADR routing config that model selection
+ * previously ignored.
+ */
+function roleProviderOrder(role: ReviewRole): readonly ReviewLlmProvider[] {
+  const order = ROLE_DEFAULT_PROVIDER_ORDER[role];
+  const primary = configuredLlmExplicitPrimaryProvider();
+  if (isReviewLlmProvider(primary)) {
+    return [primary, ...order.filter((p) => p !== primary)];
+  }
+  return order;
+}
+
+function resolveRoleModel(role: ReviewRole): ResolvedLlmModel {
+  for (const provider of roleProviderOrder(role)) {
+    if (isProviderConfigured(provider)) return PROVIDER_ROLE_MODELS[provider][role];
+  }
+  return throwMissingReviewLlmProvider();
+}
+
+export function getBossModelInfo(): ResolvedLlmModel {
+  return resolveRoleModel("boss");
+}
+
+export function getApexModelInfo(): ResolvedLlmModel {
+  return resolveRoleModel("apex");
+}
+
+export function getWorkerStrongModelInfo(): ResolvedLlmModel {
+  return resolveRoleModel("workerStrong");
+}
+
+export function getWorkerCheapModelInfo(): ResolvedLlmModel {
+  return resolveRoleModel("workerCheap");
+}
+
+export async function getReviewModelPricingByTier(): Promise<Record<ReviewCostTier, LlmModelPrice>> {
+  const [opus, sonnet, haiku] = await Promise.all([
+    modelCatalogPrice(getBossModelInfo()),
+    modelCatalogPrice(getWorkerStrongModelInfo()),
+    modelCatalogPrice(getWorkerCheapModelInfo()),
+  ]);
+  return {
+    opus,
+    sonnet,
+    haiku,
+  };
+}
+
+export function getReviewModelLabelsByTier(): Record<ReviewCostTier, string> {
+  return {
+    opus: getBossModelInfo().label,
+    sonnet: getWorkerStrongModelInfo().label,
+    haiku: getWorkerCheapModelInfo().label,
+  };
 }
 
 /**
@@ -71,4 +237,25 @@ export function getWorkerStrongFallbackModel(): LanguageModel | undefined {
 export function getWorkerCheapFallbackModel(): LanguageModel | undefined {
   const g = googleProvider();
   return g?.("gemini-2.5-flash");
+}
+
+function modelFromInfo(info: ResolvedLlmModel): LanguageModel {
+  switch (info.provider) {
+    case "anthropic":
+      return anthropicProvider()(info.modelId);
+    case "openai":
+      return openaiProvider()(info.modelId);
+    case "google": {
+      const g = googleProvider();
+      if (!g) {
+        throw new Error(`Provider "google" is not configured for ${info.modelId}.`);
+      }
+      return g(info.modelId);
+    }
+  }
+}
+
+function throwMissingReviewLlmProvider(): never {
+  requireAnyProviderApiKey(["anthropic", "openai"], "warden review");
+  throw new Error("No supported review LLM provider is configured.");
 }

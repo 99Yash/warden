@@ -66,6 +66,27 @@ export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } 
   if (f.source === "leverage") {
     return { tier: 2, category: "leverage" };
   }
+  // ADR-0046: react-doctor findings route off the carried `rdCategory`
+  // (react-doctor's coarse category), NOT severity. Tiers are category-fixed:
+  // Security → Tier 1 (matches the ESLint-security precedent below — the
+  // Tier-3 verbose gate must not suppress security), Bugs/Performance → Tier 2,
+  // Maintainability/Accessibility → Tier 3. react-doctor's error/warning is
+  // kept on the finding for debug but intentionally ignored here.
+  if (f.source === "react-doctor") {
+    switch (f.rdCategory) {
+      case "Security":
+        return { tier: 1, category: "security" };
+      case "Bugs":
+        return { tier: 2, category: "correctness" };
+      case "Performance":
+        return { tier: 2, category: "scalability" };
+      case "Maintainability":
+      case "Accessibility":
+        return { tier: 3, category: "clarity" };
+      default:
+        return { tier: 3, category: "clarity" };
+    }
+  }
   // ADR-0028 §7 / M13: ESLint findings from the Warden-managed security
   // pass carry rule IDs prefixed `security/*` or `no-secrets/*`. Route them
   // to the `security` category at Tier 1 unconditionally — these patterns
