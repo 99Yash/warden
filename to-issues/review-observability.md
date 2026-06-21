@@ -1,6 +1,15 @@
 # Per-worker review observability (trace what each worker investigated)
 
-**Severity:** medium (tooling). **Maybe an ADR** if we adopt a hosted backend.
+> **Superseded by ADR-0048 (2026-06-21).** This issue is now a locked decision,
+> not an open follow-up. The recommendation below ("local trace first, defer
+> hosted") was **overridden**: we go straight to a live OTEL→self-hosted-Langfuse
+> surface that *complements* ADR-0044 §7's persisted prose-free review trace
+> (two surfaces, one run-id), captures the dropped-candidate events ourselves,
+> and operationalizes the `reviewRuns` table. See `decisions.md` ADR-0048 for the
+> grilled design and `CONTEXT.md §9` for the vocabulary. Original notes kept below
+> for provenance.
+
+**Severity:** medium (tooling). **Now an ADR** — ADR-0048.
 
 ## Problem
 

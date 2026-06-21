@@ -11,7 +11,8 @@ harness's 5). See memories `project_warden_pr235_openai_headhead` and
 | [openai-worker-false-clean](./openai-worker-false-clean.md) | high (correctness) | no |
 | [intent-context-for-review](./intent-context-for-review.md) | high (recall) | yes — lever B |
 | [lane-discipline-cross-file-evidence](./lane-discipline-cross-file-evidence.md) | medium (recall) | yes — lever C |
-| [review-observability](./review-observability.md) | medium (tooling) | maybe |
+| [review-observability](./review-observability.md) | medium (tooling) | ✅ ADR-0048 (locked, shipping) |
+| [resume-from-review-run](./resume-from-review-run.md) | medium (cost + iteration) | designed in ADR-0048 §8; impl ADR pending |
 | [prune-transparency-large-generated-drops](./prune-transparency-large-generated-drops.md) | low | no |
 
 **Shipped already this session (not issues):** precise prune of generated

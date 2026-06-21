@@ -330,6 +330,24 @@ Named shorthand for things not yet built. Useful when reading docs that referenc
 
 ---
 
+## 9. Observability + review runs
+
+`[M-tbd, ADR-0048]` Two distinct surfaces share one **review run** identity. Keep them separate in language: the **review trace** is the persisted audit artifact (trust spine); the **observability surface** is the live dev tool.
+
+**review run** — One invocation of the review harness, identified by a **run-id**. The unit a **review trace**, the **observability surface**, and (future) resume all key off. Persisted as a `reviewRuns` row in `.warden/cache.sqlite` (mirroring `securityRuns`), cloud-compatible via the ADR-0016 storage interfaces. → ADR-0048, ADR-0044 §7.
+
+**run-id** — The random, durable identity of a **review run** (`createId("run")`). Doubles as the Langfuse trace-grouping key so a boss + all its workers collapse into one trace tree. Minted once in `runReviewHarness()`, threaded to workers via `dispatch_worker` and to the eval harness (which tags traces by config / fixture / sample). Distinct from **input-hash** — two genuine re-runs of the same diff get different run-ids but the same input-hash. → ADR-0048.
+
+**input-hash** — The content-addressed key of a **review run**: a hash over `(diff_hash, resolved config, sorted model-set)`. The dedup / resume lookup key (does a prior run of *this exact review* exist?). Supersedes the dead `llm_review_cache` content key (ADR-0007) as the resume substrate. The per-worker resume sub-key adds `(concern, sorted dispatched files, prompt-hash, model)`. Resume itself is designed-but-deferred. → ADR-0048 §8.
+
+**review trace** — `[ADR-0044 §7]` The trust spine: a read-model derived from `ReviewScratchpad` at the end of `runReviewHarness()`, recording the *deterministic* pipeline facts (det-priors fired, dispatches `(file, concern, tier, toolCalls[])`, per-finding `{provenance, confidence, kind, evidenceVerified, sources[].type}`, and the deterministic transforms that changed the output). **Local, descriptive, prose-free, and never a gate** — it records *how* a review was produced, never decides *what posts*, and excludes the boss's free-text reasoning. Persisted on the `reviewRuns` row; a compact summary rides `CommentSet.metadata`. → ADR-0044 §7.
+
+**observability surface** — `[ADR-0048]` The live, dev-time debugging + cross-run-diffing tool, distinct from the **review trace**. OTEL spans (AI-SDK `experimental_telemetry` auto-instruments every LLM + tool call; exporter isolated to `@warden/ai`) shipped to a **self-hosted** Langfuse stack (`docker/langfuse/`), grouped by **run-id**. Non-authoritative — it never becomes the audit artifact and never gates output. Self-hosted only (source in prompts must not leave the box); I/O capture (incl. boss prose) defaults ON via `WARDEN_LANGFUSE_CAPTURE_IO`. The prose-free invariant of the **review trace** binds the persisted audit artifact only — it does not bind this surface (ADR-0048 §6 carve-out). No keys → total no-op. → ADR-0048.
+
+**dropped-candidate event** — `[ADR-0048 §4]` An explicit trace event emitted when a finding the harness *considered* is discarded by a deterministic transform: lane-discipline path drop, uncited-finding drop, off-hunk / non-patch-line scope drop (`scopeCommentsToDiff()`), volume-cap discard, or confidence→kind degrade. The recall signal generic tool-spans miss — a dropped candidate never becomes a tool call, so we emit it. Same source (the ADR-0044 scratchpad read-model), two sinks: the persisted **review trace** and live OTEL span events on the **observability surface**. → ADR-0048 §4, ADR-0044 §7.
+
+---
+
 ## Open inconsistencies
 
 Things the docs spell more than one way. Pick one before they ossify.
