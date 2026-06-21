@@ -5,6 +5,7 @@ packages:
 catalog:
   '@ai-sdk/anthropic': ^3.0.0
   '@ai-sdk/google': ^3.0.0
+  '@ai-sdk/openai': ^3.0.0
   ai-retry: ^1.7.3
   log-update: ^7.0.0
   '@types/better-sqlite3': ^7.6.13
@@ -26,4 +27,3 @@ catalog:
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
-

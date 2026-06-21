@@ -273,7 +273,7 @@ Default to:
 
 # Output shape — final round
 
-In your final round, emit a structured result via the `Output.object` channel: a JSON object with a single `"comments"` field whose value is your `Comment[]` array. Each Comment must satisfy:
+In your final round, call the `submit_review` tool with a single `"comments"` field whose value is your `Comment[]` array. Each Comment must satisfy:
 
 ```ts
 {

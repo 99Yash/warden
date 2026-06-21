@@ -13,8 +13,8 @@
  *   pnpm eval --samples <n>              # override sample count
  *   pnpm eval --compare <cfgA> <cfgB>    # side-by-side scorecard diff
  *
- * Requires `ANTHROPIC_API_KEY`; emits a skip notice and exits 0 when
- * unset. Each run takes ~$0.20–$1.00 per fixture per sample per
+ * Requires at least one configured review LLM provider key; emits a skip
+ * notice and exits 0 when unset. Each run takes ~$0.20–$1.00 per fixture per sample per
  * `feedback_milestone_closeout.md`; full-suite cycle (~10 fixtures × 3
  * configs × 3 samples) ≈ $20–90.
  */
@@ -32,7 +32,7 @@ import { rmSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runReviewHarness, type CommentSet, type ReviewHarnessInput } from "@warden/core";
-import { loadWardenRuntime } from "@warden/env";
+import { configuredReviewLlmProviders, loadWardenRuntime, providerApiKey } from "@warden/env";
 import { ALL_CONFIGS } from "./configs/index.js";
 import { aggregateScores, checkThreshold, renderMarkdownTable, scoreFixtureRun } from "./score.mjs";
 import type {
@@ -216,9 +216,10 @@ function removeWorktree(repoPath: string, dest: string): void {
  * Parse `labels.md`. Two shapes:
  *   1. `expected: zero comments` (clean-control). Returns `expectsEmpty: true`.
  *   2. List of `- id: <id>` blocks with `path`, `line` (optional),
- *      `category` (optional), `description` properties. We accept a
- *      lightweight YAML-ish key:value format inside fenced ```yaml``` blocks
- *      to keep authoring trivial.
+ *      `category` (optional), `description` properties. `expect: absent`
+ *      marks a known false-positive trap. We accept a lightweight YAML-ish
+ *      key:value format inside fenced ```yaml``` blocks to keep authoring
+ *      trivial.
  */
 function parseLabels(raw: string): { labels: FixtureLabel[]; expectsEmpty: boolean } {
   if (/expected:\s*(zero|no)\s+comments/i.test(raw)) {
@@ -249,6 +250,7 @@ function parseLabelBlock(text: string): FixtureLabel | null {
   if (!kv["id"] || !kv["path"]) return null;
   const label: FixtureLabel = {
     id: kv["id"],
+    expect: parseLabelExpectation(kv["expect"] ?? kv["expected"]),
     path: kv["path"],
     description: kv["description"] ?? "",
   };
@@ -257,7 +259,23 @@ function parseLabelBlock(text: string): FixtureLabel | null {
     if (Number.isFinite(n)) label.line = n;
   }
   if (kv["category"]) label.category = kv["category"];
+  if (kv["claim_includes"]) label.claimIncludes = kv["claim_includes"];
   return label;
+}
+
+function parseLabelExpectation(raw: string | undefined): "present" | "absent" {
+  if (!raw) return "present";
+  const normalized = raw.toLowerCase().trim();
+  if (
+    normalized === "absent" ||
+    normalized === "forbidden" ||
+    normalized === "false-positive" ||
+    normalized === "false_positive" ||
+    normalized === "no-comment"
+  ) {
+    return "absent";
+  }
+  return "present";
 }
 
 // ---------------------------------------------------------------------------
@@ -457,10 +475,12 @@ function cleanupMaterialized(paths: string[]): void {
 /**
  * Score a single harness result against the fixture's labels.
  *
- * A label is "caught" iff at least one Comment cites its `path` AND (when
- * the label has a `line`) cites within ±5 lines of it AND (when the label
- * has a `category`) matches Comment.category. Unmatched comments increment
- * `unlabeledComments` — used as the false-positive gauge for clean fixtures.
+ * A `present` label is "caught" iff at least one Comment cites its `path` AND
+ * (when the label has a `line`) cites within ±5 lines of it AND (when the
+ * label has a `category`) matches Comment.category. An `absent` label is a
+ * known false-positive trap; any matching comment records a forbidden hit.
+ * Unmatched comments increment `unlabeledComments` — used as the
+ * false-positive gauge for clean fixtures.
  */
 function scoreOne(
   fixture: Fixture,
@@ -475,7 +495,8 @@ function scoreOne(
     commentCount: 0,
     comments: [],
     caughtLabels: [],
-    missedLabels: fixture.labels.map((l) => l.id),
+    missedLabels: fixture.labels.filter((l) => labelExpectation(l) === "present").map((l) => l.id),
+    forbiddenLabels: [],
     unlabeledComments: 0,
     dispatchCount: 0,
     costUsd: 0,
@@ -504,9 +525,12 @@ function scoreOne(
   base.costUsd = result.metadata.costUsd ?? 0;
   base.dispatchCount = approximateDispatchCount(result);
 
+  const presentLabels = fixture.labels.filter((l) => labelExpectation(l) === "present");
+  const absentLabels = fixture.labels.filter((l) => labelExpectation(l) === "absent");
   const labelHits = new Set<string>();
+  const forbiddenHits = new Set<string>();
   const matchedCommentIds = new Set<string>();
-  for (const label of fixture.labels) {
+  for (const label of presentLabels) {
     for (const comment of result.comments) {
       if (matchesLabel(comment, label)) {
         labelHits.add(label.id);
@@ -515,14 +539,23 @@ function scoreOne(
       }
     }
   }
+  for (const label of absentLabels) {
+    for (const comment of result.comments) {
+      if (matchesLabel(comment, label)) {
+        forbiddenHits.add(label.id);
+        break;
+      }
+    }
+  }
   base.caughtLabels = [...labelHits];
-  base.missedLabels = fixture.labels.filter((l) => !labelHits.has(l.id)).map((l) => l.id);
+  base.missedLabels = presentLabels.filter((l) => !labelHits.has(l.id)).map((l) => l.id);
+  base.forbiddenLabels = [...forbiddenHits];
   base.unlabeledComments = result.comments.filter((c) => !matchedCommentIds.has(c.id)).length;
   return base;
 }
 
 function matchesLabel(
-  comment: { file: string; lineStart: number; lineEnd: number; category: string },
+  comment: { file: string; lineStart: number; lineEnd: number; category: string; claim: string },
   label: FixtureLabel,
 ): boolean {
   if (comment.file !== label.path) return false;
@@ -533,7 +566,17 @@ function matchesLabel(
     if (label.line < lo || label.line > hi) return false;
   }
   if (label.category !== undefined && comment.category !== label.category) return false;
+  if (
+    label.claimIncludes !== undefined &&
+    !comment.claim.toLowerCase().includes(label.claimIncludes.toLowerCase())
+  ) {
+    return false;
+  }
   return true;
+}
+
+function labelExpectation(label: FixtureLabel): "present" | "absent" {
+  return label.expect ?? "present";
 }
 
 /**
@@ -565,8 +608,13 @@ async function main(): Promise<void> {
   // never picked up and every run self-skips.
   loadWardenRuntime({ repoRoot: WARDEN_ROOT });
 
-  if (!process.env["ANTHROPIC_API_KEY"]) {
-    process.stdout.write("[eval] ANTHROPIC_API_KEY not set — skipping.\n");
+  const configuredProviders = configuredReviewLlmProviders().filter(
+    (providerId) => providerApiKey(providerId) !== undefined,
+  );
+  if (configuredProviders.length === 0) {
+    process.stdout.write(
+      "[eval] no review LLM provider key set — skipping (set ANTHROPIC_API_KEY or OPENAI_API_KEY).\n",
+    );
     process.exit(0);
   }
 
@@ -605,9 +653,11 @@ async function main(): Promise<void> {
         const score = scoreOne(fixture, result, i + 1, config.name);
         if (error !== null) score.error = error;
         samples.push(score);
+        const presentLabelCount = fixture.labels.filter((l) => labelExpectation(l) === "present").length;
         process.stdout.write(
           `      sample ${i + 1}/${args.samples}: ` +
-            `caught ${score.caughtLabels.length}/${fixture.labels.length}, ` +
+            `caught ${score.caughtLabels.length}/${presentLabelCount}, ` +
+            `forbidden ${score.forbiddenLabels.length}, ` +
             `comments ${score.commentCount}, ` +
             `cost $${score.costUsd.toFixed(4)}, ` +
             `${score.durationMs}ms` +
@@ -658,6 +708,7 @@ function renderCompareTable(a: AggregateScore, b: AggregateScore): string {
     `|--------|-------------|-------------|---|`,
     `| synthetic caught | ${a.syntheticCaught}/${a.syntheticPlants} | ${b.syntheticCaught}/${b.syntheticPlants} | ${b.syntheticCaught - a.syntheticCaught} |`,
     `| real-PR caught | ${a.realCaught}/${a.realPlants} | ${b.realCaught}/${b.realPlants} | ${b.realCaught - a.realCaught} |`,
+    `| false-positive trap hits | ${a.falsePositiveTrapHits}/${a.falsePositiveTraps} | ${b.falsePositiveTrapHits}/${b.falsePositiveTraps} | ${b.falsePositiveTrapHits - a.falsePositiveTrapHits} |`,
     `| clean unlabeled | ${a.cleanFixtureUnlabeled} | ${b.cleanFixtureUnlabeled} | ${b.cleanFixtureUnlabeled - a.cleanFixtureUnlabeled} |`,
     `| total cost | $${a.totalCost.toFixed(4)} | $${b.totalCost.toFixed(4)} | $${(b.totalCost - a.totalCost).toFixed(4)} |`,
   ];

@@ -9,6 +9,7 @@ export const WARDEN_PROJECT_CONFIG = "warden.jsonc";
 export const WARDEN_ENV_FILE_ENV = "WARDEN_ENV_FILE";
 
 const STARTUP_ENV_KEYS = new Set(Object.keys(process.env));
+const REVIEW_LLM_PROVIDER_CANDIDATES = ["anthropic", "openai"] as const;
 
 const envNameSchema = z
   .string()
@@ -141,6 +142,10 @@ export function defaultWardenConfig(): WardenConfig {
         kind: "llm",
         apiKeyEnv: "GOOGLE_GENERATIVE_AI_API_KEY",
       },
+      openai: {
+        kind: "llm",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
       voyage: {
         kind: "embedding",
         apiKeyEnv: "VOYAGE_API_KEY",
@@ -200,8 +205,31 @@ export function configuredLlmPrimaryProvider(): string {
   return currentWardenRuntime().config.routing?.llm?.primary ?? "anthropic";
 }
 
+/**
+ * The primary review LLM provider only when the user has explicitly pinned
+ * `routing.llm.primary`; `undefined` otherwise. Distinct from
+ * {@link configuredLlmPrimaryProvider}, which defaults to `"anthropic"` for
+ * readiness-report ordering. Role/model selection needs to tell "user chose
+ * anthropic" apart from "user chose nothing" so an unset config preserves the
+ * per-role provider defaults instead of forcing every role onto Anthropic.
+ */
+export function configuredLlmExplicitPrimaryProvider(): string | undefined {
+  const runtimeInfo = currentWardenRuntime();
+  for (let i = runtimeInfo.layers.length - 1; i >= 0; i--) {
+    const layer = runtimeInfo.layers[i];
+    if (!layer || layer.kind === "defaults") continue;
+    const primary = layer.config.routing?.llm?.primary;
+    if (primary !== undefined) return primary;
+  }
+  return undefined;
+}
+
 export function configuredLlmFallbackProviders(): string[] {
   return currentWardenRuntime().config.routing?.llm?.fallback ?? [];
+}
+
+export function configuredReviewLlmProviders(): string[] {
+  return reviewLlmProviderCandidates(currentWardenRuntime());
 }
 
 export function configuredEmbeddingProvider(): string {
@@ -224,6 +252,25 @@ export function requireProviderApiKey(providerId: string, command: string): stri
   const value = process.env[provider.apiKeyEnv];
   if (value && value.length > 0) return value;
   throw new Error(formatMissingEnvMessage(provider.apiKeyEnv, command, runtimeInfo));
+}
+
+export function requireAnyProviderApiKey(
+  providerIds: readonly string[],
+  command: string,
+): { providerId: string; apiKey: string } {
+  const runtimeInfo = currentWardenRuntime();
+  const missing: string[] = [];
+  for (const providerId of providerIds) {
+    const provider = runtimeInfo.config.providers?.[providerId];
+    if (!provider) {
+      missing.push(`provider:${providerId}`);
+      continue;
+    }
+    const value = process.env[provider.apiKeyEnv];
+    if (value && value.length > 0) return { providerId, apiKey: value };
+    missing.push(provider.apiKeyEnv);
+  }
+  throw new Error(formatMissingAnyEnvMessage(missing, command, runtimeInfo));
 }
 
 export function envVarSource(envName: string): EnvVarSource | undefined {
@@ -256,22 +303,25 @@ export interface WardenReadiness {
 }
 
 export function computeReadiness(info: WardenRuntime = currentWardenRuntime()): WardenReadiness {
-  const primary = info.config.routing?.llm?.primary ?? "anthropic";
   const fallbacks = new Set(info.config.routing?.llm?.fallback ?? []);
   const embedding = info.config.routing?.embeddings?.primary ?? "voyage";
+  const reviewProviders = reviewLlmProviderCandidates(info);
+  const configuredReviewProviders = new Set(
+    reviewProviders.filter((providerId) => missingForProvider(providerId, info).length === 0),
+  );
   const providers = Object.entries(info.config.providers ?? {}).map(([id, provider]) => {
     const source = envVarSourceFromRuntime(info, provider.apiKeyEnv);
     return {
       id,
       kind: provider.kind,
       apiKeyEnv: provider.apiKeyEnv,
-      requiredFor: requiredForProvider(id, primary, embedding),
-      optionalFor: fallbacks.has(id) ? ["review fallback"] : [],
+      requiredFor: requiredForProvider(id, embedding, reviewProviders, configuredReviewProviders),
+      optionalFor: optionalForProvider(id, fallbacks, reviewProviders, configuredReviewProviders),
       configured: source !== undefined,
       ...(source ? { source } : {}),
     };
   });
-  const reviewMissing = missingForProvider(primary, info);
+  const reviewMissing = missingForAnyProvider(reviewProviders, info);
   const initMissing = missingForProvider(embedding, info);
   return {
     providers,
@@ -335,8 +385,13 @@ export function defaultEnvTemplate(): string {
   return `# Warden provider secrets
 # Secrets can also come from your shell, Infisical, Doppler, 1Password, CI, etc.
 
-# Required for \`warden review\`
+# Recommended for \`warden review\` boss planning. Review can also run with
+# only OPENAI_API_KEY.
 # ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI review provider. With both Anthropic and OpenAI configured, Warden
+# defaults to Claude Opus for the boss and GPT-5.4 mini xhigh for workers.
+# OPENAI_API_KEY=sk-...
 
 # Optional fallback for \`warden review\`
 # GOOGLE_GENERATIVE_AI_API_KEY=...
@@ -635,12 +690,70 @@ function missingForProvider(providerId: string, info: WardenRuntime): string[] {
   return process.env[provider.apiKeyEnv] ? [] : [provider.apiKeyEnv];
 }
 
-function requiredForProvider(id: string, primary: string, embedding: string): string[] {
+function missingForAnyProvider(providerIds: readonly string[], info: WardenRuntime): string[] {
+  const missing: string[] = [];
+  for (const providerId of providerIds) {
+    const provider = info.config.providers?.[providerId];
+    if (!provider) {
+      missing.push(`provider:${providerId}`);
+      continue;
+    }
+    if (process.env[provider.apiKeyEnv]) return [];
+    missing.push(provider.apiKeyEnv);
+  }
+  return [formatAnyProviderRequirement(missing)];
+}
+
+function requiredForProvider(
+  id: string,
+  embedding: string,
+  reviewProviders: readonly string[],
+  configuredReviewProviders: ReadonlySet<string>,
+): string[] {
   const required: string[] = [];
-  if (id === primary) required.push("review");
+  if (
+    reviewProviders.includes(id) &&
+    (configuredReviewProviders.size === 0 || configuredReviewProviders.has(id))
+  ) {
+    required.push(configuredReviewProviders.size === 0 ? "review (one of)" : "review");
+  }
   if (id === embedding) required.push("init");
   return required;
 }
+
+function optionalForProvider(
+  id: string,
+  fallbacks: ReadonlySet<string>,
+  reviewProviders: readonly string[],
+  configuredReviewProviders: ReadonlySet<string>,
+): string[] {
+  const optional: string[] = [];
+  if (fallbacks.has(id)) optional.push("review fallback");
+  if (
+    reviewProviders.includes(id) &&
+    configuredReviewProviders.size > 0 &&
+    !configuredReviewProviders.has(id)
+  ) {
+    optional.push("review alternative");
+  }
+  return optional;
+}
+
+function reviewLlmProviderCandidates(info: WardenRuntime): string[] {
+  const primary = info.config.routing?.llm?.primary ?? "anthropic";
+  const providers = new Set<string>();
+  if (REVIEW_LLM_PROVIDER_CANDIDATES.includes(primary as ReviewLlmProviderCandidate)) {
+    providers.add(primary);
+  }
+  for (const provider of REVIEW_LLM_PROVIDER_CANDIDATES) {
+    providers.add(provider);
+  }
+  return [...providers].filter((providerId) => {
+    return info.config.providers?.[providerId]?.kind === "llm";
+  });
+}
+
+type ReviewLlmProviderCandidate = (typeof REVIEW_LLM_PROVIDER_CANDIDATES)[number];
 
 function formatMissingEnvMessage(envName: string, command: string, info: WardenRuntime): string {
   const checked = info.envFiles.map((file) => `  ${file.path}${file.exists ? "" : " (missing)"}`);
@@ -654,6 +767,30 @@ function formatMissingEnvMessage(envName: string, command: string, info: WardenR
     `Add ${envName} to ${info.globalEnvPath}, export it in your shell, or run through your secret manager:`,
     `  infisical run -- ${command}`,
   ].join("\n");
+}
+
+function formatMissingAnyEnvMessage(
+  missing: readonly string[],
+  command: string,
+  info: WardenRuntime,
+): string {
+  const checked = info.envFiles.map((file) => `  ${file.path}${file.exists ? "" : " (missing)"}`);
+  return [
+    `${command} needs ${formatAnyProviderRequirement(missing)}`,
+    "",
+    "Checked:",
+    "  process env",
+    ...checked,
+    "",
+    `Add one of those keys to ${info.globalEnvPath}, export it in your shell, or run through your secret manager:`,
+    `  infisical run -- ${command}`,
+  ].join("\n");
+}
+
+function formatAnyProviderRequirement(missing: readonly string[]): string {
+  const envNames = [...new Set(missing.filter((name) => !name.startsWith("provider:")))];
+  if (envNames.length > 0) return `one of: ${envNames.join(", ")}`;
+  return missing.length > 0 ? `one of: ${missing.join(", ")}` : "a review LLM provider key";
 }
 
 async function chmodIfNeeded(target: string, wanted: number): Promise<boolean> {

@@ -62,7 +62,15 @@ export type Kind = z.infer<typeof KindEnum>;
 export const SourceSchema = z
   .object({
     type: SourceTypeEnum,
-    url: z.url().optional(),
+    // `z.string().refine(...)` rather than `z.url()`: the latter serializes to
+    // JSON-schema `format: "uri"`, which OpenAI's strict structured-output
+    // validator rejects (`invalid_json_schema`). A refinement keeps URL
+    // validation at parse time without emitting an unsupported `format` keyword,
+    // so the same schema works across the Anthropic and OpenAI provider paths.
+    url: z
+      .string()
+      .refine((v) => URL.canParse(v), "must be a valid URL")
+      .optional(),
     id: z.string().optional(),
     title: z.string().optional(),
     /** ISO-8601 timestamp when the source was retrieved (citation freshness). */
@@ -136,10 +144,10 @@ export type DegradedEntry = z.infer<typeof DegradedEntrySchema>;
 
 /**
  * M14 (ADR-0030): per-model-tier token usage surfaced on `CommentSet`.
- * `opus` is the boss; `sonnet` and `haiku` are the worker tiers
- * (sonnet for correctness/scalability/consistency/security; haiku for
- * committability/leverage by default). Cached input tokens are tracked
- * when the provider reports them (Anthropic ≥ 2026-01).
+ * Keys are legacy logical aliases: `opus` is boss, `sonnet` is worker-strong,
+ * and `haiku` is worker-cheap. `metadata.costLabels` carries the concrete
+ * provider model behind each alias. Cached input tokens are tracked when the
+ * provider reports them.
  */
 export const TokenUsageBlockSchema = z.object({
   inputTokens: z.number().nonnegative(),
@@ -167,6 +175,13 @@ export const CostByTierSchema = z.object({
 });
 export type CostByTier = z.infer<typeof CostByTierSchema>;
 
+export const CostLabelsByTierSchema = z.object({
+  opus: z.string().optional(),
+  sonnet: z.string().optional(),
+  haiku: z.string().optional(),
+});
+export type CostLabelsByTier = z.infer<typeof CostLabelsByTierSchema>;
+
 export const CommentSetMetadataSchema = z.object({
   durationMs: z.number().nonnegative(),
   /** Workers that timed out or otherwise failed; surfaced per `vision.md` §11. */
@@ -179,19 +194,23 @@ export const CommentSetMetadataSchema = z.object({
    */
   tokenUsage: TokenUsageByTierSchema.optional(),
   /**
-   * Total estimated USD cost of the LLM calls. Computed from
-   * `tokenUsage` via a static pricing table inline in the harness
-   * (Opus 4.6 = $5/$25 per 1M; Sonnet 4.6 = $3/$15; Haiku 4.5 = $1/$5
-   * as of 2026-05). Absent when token usage is absent.
+   * Total estimated USD cost of the LLM calls. Computed from `tokenUsage`
+   * via the resolved model policy in `@warden/ai`. Absent when token usage
+   * is absent.
    */
   costUsd: z.number().nonnegative().optional(),
   /**
-   * Per-tier breakdown of `costUsd`. Same pricing table as `costUsd`;
-   * surfaced separately so the CLI render layer can print the
-   * "opus-4-6 $0.31 · sonnet-4-6 $0.08" suffix without duplicating
-   * the pricing table. Absent when `costUsd` is absent.
+   * Per-tier breakdown of `costUsd`. Same model policy as `costUsd`;
+   * surfaced separately so the CLI render layer can print the breakdown
+   * without duplicating the pricing table. Absent when `costUsd` is absent.
    */
   costByTier: CostByTierSchema.optional(),
+  /**
+   * Display labels for the cost tiers above. The JSON keys remain the legacy
+   * logical tiers for compatibility; labels carry the resolved provider model
+   * (`claude-opus-4-8`, `gpt-5.4-mini`, etc.).
+   */
+  costLabels: CostLabelsByTierSchema.optional(),
 });
 export type CommentSetMetadata = z.infer<typeof CommentSetMetadataSchema>;
 
