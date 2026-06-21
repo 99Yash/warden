@@ -5,6 +5,7 @@ import {
   SqliteMerkleStore,
   readLockedModel,
 } from "../indexing/index.js";
+import { assertNever } from "../assert-never.js";
 import type { ChunkStore, EmbeddingStore, MerkleStore } from "../indexing/index.js";
 import type { DegradedEntry } from "../schema.js";
 
@@ -175,6 +176,8 @@ export function bannerStateToDegraded(state: BannerState): DegradedEntry[] {
           message: `context: locked model ${state.indexedModel} deprecated as of ${state.deprecatedAfter} — \`warden init --rebuild\` to switch`,
         },
       ];
+    default:
+      return assertNever(state, "BannerState");
   }
 }
 

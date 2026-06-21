@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { db, importGraph } from "@warden/db";
+import { assertNever } from "../assert-never.js";
 import type { ChangedFile } from "../diff/index.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, formatErr, parseChangedSourceFile } from "./_shared.js";
@@ -67,6 +68,7 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
       degraded.push(parseResult.entry);
       continue;
     }
+    if (parseResult.kind !== "ok") assertNever(parseResult, "ParseChangedFileResult");
     const { abs, sf, addedLines } = parseResult.parsed;
     const candidates = collectOptionalParamCandidates(sf, addedLines);
     if (candidates.length === 0) continue;

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
+import { assertNever } from "../assert-never.js";
 import type { Runner, RunnerInput, RunnerOutput } from "../orchestration/runner.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, parseChangedSourceFile } from "./_shared.js";
@@ -69,6 +70,7 @@ export async function runScalability(
       degraded.push(result.entry);
       continue;
     }
+    if (result.kind !== "ok") assertNever(result, "ParseChangedFileResult");
     const { sf, addedLines } = result.parsed;
     findLoadThenNarrow(sf, cf.path, addedLines, findings);
     findSequentialAwait(sf, cf.path, addedLines, findings);
