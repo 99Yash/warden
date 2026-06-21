@@ -2,6 +2,6 @@
   "ecosystem": "javascript",
   "alwaysNoise": {
     "directories": ["node_modules", ".next", "build", "out", ".turbo", "coverage"],
-    "extensions": [".min.js", ".min.css", ".d.ts.map", ".js.map", ".css.map"]
+    "extensions": [".min.js", ".min.css", ".d.ts.map", ".js.map", ".css.map", "_snapshot.json", "_journal.json"]
   }
 }

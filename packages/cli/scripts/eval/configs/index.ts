@@ -135,6 +135,32 @@ export const reasonedAssertions: EvalConfig = {
   },
 };
 
+/**
+ * Diligent-investigation arm (post-PR#235 head-to-head). Same harness shape
+ * as `programmaticDispatchMulti` (the production default) but with
+ * `workerPromptVariant: 'diligent'` — the loader prepends a concern-agnostic
+ * investigation protocol (read whole file → trace changed symbols to callers
+ * → follow called fns into their defs → check order/window/scope + units →
+ * verify library behavior) that overrides the baseline "use tools sparingly"
+ * framing. Probes whether the recall gap on the cross-file archetypes
+ * (unwired params, order/window contracts, cross-file N+1) closes by driving
+ * the existing readFile/grepRepo agency harder, without loosening citation or
+ * lane discipline. Compare against `programmatic-dispatch-multi` (off) and
+ * `sentry-borrow` (the prompt-rewrite control). Score primarily against the
+ * `alfred-pr235-misses` and `alfred-pr14-misses` real-PR fixtures; watch the
+ * clean-fixture precision gate for new false positives from harder looking.
+ */
+export const diligent: EvalConfig = {
+  name: "diligent",
+  description:
+    "PD-multi + workerPromptVariant='diligent' — composes an investigation-protocol preamble onto every worker. Probes the cross-file recall gap (PR#235).",
+  bossLoop: {
+    programmaticDispatch: true,
+    roundZeroExtraConcerns: ["correctness"],
+    workerPromptVariant: "diligent",
+  },
+};
+
 export const ALL_CONFIGS: EvalConfig[] = [
   baseline,
   programmaticDispatch,
@@ -142,4 +168,5 @@ export const ALL_CONFIGS: EvalConfig[] = [
   programmaticDispatchMulti,
   sentryBorrow,
   reasonedAssertions,
+  diligent,
 ];

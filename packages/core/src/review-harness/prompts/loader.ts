@@ -39,8 +39,24 @@ export type BossPromptVariant = "rules" | "examples";
  * prompt-craft borrows actually fit (correctness + scalability fully;
  * consistency + security partially; committability + leverage not at all)
  * without requiring all 6 variant files to exist.
+ *
+ * `'diligent'` is a *compose* variant rather than a per-concern rewrite: it
+ * prepends the concern-agnostic investigation protocol in
+ * `diligent-preamble.md` to each worker's baseline prompt. One file applies
+ * to every concern and automatically inherits baseline edits (no drift), so
+ * it targets the cross-file recall gap (PR#235 head-to-head: unwired params,
+ * order/window contracts, cross-file N+1) without duplicating each catalog.
  */
-export type WorkerPromptVariant = "baseline" | "sentry-borrow";
+export type WorkerPromptVariant = "baseline" | "sentry-borrow" | "diligent";
+
+const DILIGENT_PREAMBLE_PATH = resolve(WORKERS_DIR, "diligent-preamble.md");
+let diligentPreambleCache: string | undefined;
+
+function loadDiligentPreamble(): string {
+  if (diligentPreambleCache !== undefined) return diligentPreambleCache;
+  diligentPreambleCache = readFileSync(DILIGENT_PREAMBLE_PATH, "utf8");
+  return diligentPreambleCache;
+}
 
 const BOSS_PROMPT_PATHS: Record<BossPromptVariant, string> = {
   rules: resolve(DIR, "boss-system.md"),
@@ -83,7 +99,17 @@ export function loadWorkerSystemPrompt(
     }
   }
 
-  const raw = readFileSync(resolve(WORKERS_DIR, `${concern}-system.md`), "utf8");
-  workerCache.set(key, raw);
-  return raw;
+  const baseline = readFileSync(resolve(WORKERS_DIR, `${concern}-system.md`), "utf8");
+
+  // `diligent` composes: investigation-protocol preamble + the concern's
+  // baseline prompt. No per-concern variant files; the preamble overrides the
+  // baseline's "use tools sparingly" framing from the top.
+  if (variant === "diligent") {
+    const composed = `${loadDiligentPreamble()}\n${baseline}`;
+    workerCache.set(key, composed);
+    return composed;
+  }
+
+  workerCache.set(key, baseline);
+  return baseline;
 }
