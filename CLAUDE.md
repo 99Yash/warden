@@ -39,4 +39,3 @@ Warden is **plain TypeScript** — it does not depend on `effect` and is not ado
 - Real implementations live at `~/.local/share/effect-solutions/effect` (shallow clone of Effect-TS/effect-smol) — search it when a guide isn't enough.
 - **Do not** add `effect`/`@effect/*` deps, install the language-service tsconfig plugin, or rewrite existing code into Effect style without an ADR in [`decisions.md`](./decisions.md). Borrow the *idea*, write plain TS.
 <!-- effect-solutions:end -->
-

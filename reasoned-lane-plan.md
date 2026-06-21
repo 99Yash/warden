@@ -40,12 +40,21 @@ precision traps, split along their actual fault lines:
    verify. Refuting context is **fed deterministically**, and self-refutation is
    **mandatory and structured** in the prompt.
 
-3. **Off-hunk anchoring is deterministic and separable.** A comment is dropped
-   in `applyHardRules()` when its `[lineStart, lineEnd]` does **not** overlap ≥1
-   added line in its target file's diff hunks. Anchor = overlap ≥1 added line;
-   zero overlap → drop (not degrade — a mis-anchored comment is noise, not an
-   uncertain finding). This kills the 4 off-hunk traps with no LLM and no schema
-   change.
+3. **Off-hunk anchoring is deterministic — and already enforced.** A comment is
+   dropped when its `[lineStart, lineEnd]` does **not** overlap ≥1 added line in
+   its target file's diff hunks. Anchor = overlap ≥1 added line; zero overlap →
+   drop (not degrade — a mis-anchored comment is noise, not an uncertain
+   finding). **This already exists**: `scopeCommentsToDiff()` in
+   `review-harness/harness.ts` runs unconditionally over every boss comment
+   using the *pruned* `ChangedFile[]`, before the harness returns. The keyed
+   Step-0 baseline reproduces 0/8 traps precisely because the 4 off-hunk traps
+   are already killed there. A second drop in `applyHardRules()` over the *raw*
+   diff was implemented (commit 62a584c) and reverted: pruning is a subset
+   filter, so the raw-diff pass can only keep a superset of what the harness
+   already kept — a no-op on the m14-review path, and an actively wrong re-scope
+   if it ever reached check / m18-security comments (deterministic + vuln
+   summaries legitimately anchored at `package.json:1`). Step 1 is therefore a
+   no-build: the off-hunk class is closed by the existing harness scope.
 
 4. **Reasoned-soundness precision = 1-hop deterministic context + mandatory
    self-refute + deterministic degrade.** All within one worker call:
@@ -99,18 +108,25 @@ precision traps, split along their actual fault lines:
 - Loci: `packages/cli/scripts/eval/{run.mts,score.mts,configs/index.ts}`,
   `fixtures/real-prs/alfred-pr131-falsepos-9349d565/`.
 
-### Step 1 — Deterministic off-hunk anchoring drop *(kills 4 off-hunk traps)*
+### Step 1 — Deterministic off-hunk anchoring drop *(already closed — no build)*
 
-- New rule in `applyHardRules()` (`packages/core/src/index.ts:428`): drop any
-  comment whose `[lineStart, lineEnd]` overlaps zero added lines in its target
-  file. Added lines are already parsed per `ChangedFile.addedLines` (used by the
-  boss-loop substantive-file heuristic).
-- Context lines just outside a hunk are legitimate → require overlap with ≥1
-  added line, not that *every* cited line be added.
-- Surface drops as one info `degradedWorkers` entry per review (count only),
-  consistent with existing hard-rule drop reporting.
-- No LLM, no schema change, no eval $ to verify the unit behavior. Re-run Step 0
-  after: residual trap reproduction is now a *pure soundness* signal.
+- **Resolved by consolidation, not a new rule.** The off-hunk class is already
+  killed by `scopeCommentsToDiff()` in `review-harness/harness.ts:181`, which
+  drops any boss comment overlapping zero added lines in the *pruned*
+  `ChangedFile[]` before the harness returns. Context lines just outside a hunk
+  stay legitimate (overlap with ≥1 added line is the test, not that *every*
+  cited line be added) — that policy already lives in `overlapsAddedLine()`.
+- A duplicate drop in `applyHardRules()` over the *raw* diff was shipped in
+  commit 62a584c and reverted: it was a no-op on the m14-review path (pruned ⊆
+  raw, so it kept everything the harness already kept) and would have wrongly
+  re-scoped check / m18-security comments had it ever applied. Coverage for the
+  anchoring behavior is `smoke:m14-diff-scope`; the redundant
+  `smoke:reasoned-anchoring` was removed with the module.
+- Net effect on the plan: re-running Step 0 already isolates a *pure soundness*
+  signal — the off-hunk traps were never in the residual. Proceed to Step 2.
+- The eval-env bootstrap (`loadWardenRuntime` in `run.mts`) shipped in the same
+  commit is unrelated and **kept** — without it the eval self-skips on a missing
+  key when run from `packages/cli`.
 
 ### Step 2 — Reasoned-claim soundness *(targets the 4 soundness traps)*
 

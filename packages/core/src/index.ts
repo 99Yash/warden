@@ -1,6 +1,5 @@
 import { stableCommentId } from "./comment-id.js";
 import { applyConfidenceFloor, dropsToDegraded } from "./confidence.js";
-import { buildAddedLineMap, dropUnanchoredComments } from "./review-harness/anchoring.js";
 import type { ContextSelector } from "./context/index.js";
 import type { Lockfile } from "./ecosystem/index.js";
 import type { FormatterListener } from "./llm/index.js";
@@ -27,11 +26,6 @@ import type {
 export * from "./schema.js";
 export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosystem/index.js";
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
-export {
-  buildAddedLineMap,
-  anchorsToAddedLine,
-  dropUnanchoredComments,
-} from "./review-harness/anchoring.js";
 export { pruneDiff, type PruneResult } from "./diff/prune.js";
 export { buildDiffTree, MAX_DEPTH as DIFF_TREE_MAX_DEPTH, type DiffTreeNode } from "./diff/tree.js";
 export { resolveDiff, type DiffMode, type ResolveDiffOptions, type ResolvedDiff } from "./diff/source.js";
@@ -268,7 +262,6 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     mode: "review",
     ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}),
     harness: "m14-review",
-    addedLinesByFile: buildAddedLineMap(input.diff),
   });
   const security =
     input.config.deep === true
@@ -434,44 +427,17 @@ type HarnessHardRulesContext = "m14-review" | "m18-security";
 
 type HardRulesConfig = Pick<ReviewConfig, "mode" | "verbose"> & {
   harness?: HarnessHardRulesContext;
-  /**
-   * Reasoned-lane Step 1 (reasoned-lane-plan.md). Map of repo-relative path →
-   * the set of added (new-side) line numbers from the diff. When present, the
-   * off-hunk anchoring drop runs: a comment is dropped unless its
-   * `[lineStart, lineEnd]` overlaps ≥1 added line in its target file. Only the
-   * `m14-review` path passes this — `check` mode (deterministic findings,
-   * vuln-summary anchored to `package.json:1`) and the m18-security path do
-   * not, so their comments are never anchoring-dropped.
-   */
-  addedLinesByFile?: ReadonlyMap<string, ReadonlySet<number>>;
 };
 
 function applyHardRules(comments: Comment[], config: HardRulesConfig): HardRulesOutput {
-  // Reasoned-lane Step 1 (ADR-0044 precision; reasoned-lane-plan.md §Step 1):
-  // off-hunk anchoring drop. In `review` mode every comment is boss-emitted
-  // (sourced det-priors + the vuln summary surface only in `check` — see
-  // runCheck), so dropping comments that anchor outside the diff's added lines
-  // is safe here and kills the "comment on an unchanged line" false-positive
-  // class. Gated on a provided `addedLinesByFile` (only the m14-review path
-  // passes it) so `check` and m18-security are untouched. Runs first — an
-  // unanchored comment is not a valid review target regardless of confidence.
-  let working = comments;
-  let anchorDropped = 0;
-  if (config.addedLinesByFile !== undefined && config.harness !== "m18-security") {
-    const result = dropUnanchoredComments(comments, config.addedLinesByFile);
-    working = result.kept;
-    anchorDropped = result.dropped;
-  }
-  const anchorDegraded: DegradedEntry[] =
-    anchorDropped > 0
-      ? [
-          {
-            kind: "info",
-            topic: "anchoring",
-            message: `dropped ${anchorDropped} comment(s) anchored outside the diff's added lines`,
-          },
-        ]
-      : [];
+  // Off-hunk anchoring is enforced upstream by `scopeCommentsToDiff()` in the
+  // review harness (`review-harness/harness.ts`), which drops any boss comment
+  // whose `[lineStart, lineEnd]` overlaps zero added lines in the *pruned*
+  // `ChangedFile[]`. No added-line rule is duplicated here: a second pass over
+  // the raw diff could only ever keep a superset of what the harness already
+  // kept (pruning is a subset filter), so it would be a no-op for the
+  // m14-review path and would silently re-scope check / m18-security comments
+  // (deterministic / vuln summaries anchored at `package.json:1`) if it ran.
 
   // M13 (ADR-0028 §5): confidence-floor filter runs first. Per-category
   // numeric floor; Tier-1 findings bypass unconditionally (critical-finding
@@ -480,8 +446,8 @@ function applyHardRules(comments: Comment[], config: HardRulesConfig): HardRules
   // category — never per dropped Comment.
   const shouldApplyConfidenceFloor = config.harness !== "m18-security";
   const { kept, drops } = shouldApplyConfidenceFloor
-    ? applyConfidenceFloor(working)
-    : { kept: working, drops: new Map<Category, { count: number; floor: number }>() };
+    ? applyConfidenceFloor(comments)
+    : { kept: comments, drops: new Map<Category, { count: number; floor: number }>() };
   const floorDegraded = shouldApplyConfidenceFloor ? dropsToDegraded(drops) : [];
 
   // Tier-3 verbose-gate applies only in `review` mode — the LLM has had its
@@ -497,7 +463,7 @@ function applyHardRules(comments: Comment[], config: HardRulesConfig): HardRules
     if (a.tier !== b.tier) return a.tier - b.tier;
     return b.confidence - a.confidence;
   });
-  return { comments: sorted, degraded: [...anchorDegraded, ...floorDegraded] };
+  return { comments: sorted, degraded: floorDegraded };
 }
 
 const MANIFEST_BASENAMES: ReadonlySet<string> = new Set([

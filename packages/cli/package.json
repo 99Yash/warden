@@ -12,7 +12,6 @@
     "build": "tsdown",
     "check-types": "tsc -b",
     "warden": "node --import tsx/esm src/index.ts",
-    "smoke:reasoned-anchoring": "node --import tsx/esm scripts/smoke-reasoned-anchoring.mts",
     "smoke:m7": "node --import tsx/esm scripts/smoke-m7-init.mts",
     "smoke:m7-detectors": "node --import tsx/esm scripts/smoke-m7-detectors.mts",
     "smoke:m9-catastrophic": "node --import tsx/esm scripts/smoke-m9-catastrophic.mts",
