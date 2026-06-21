@@ -29,3 +29,14 @@ pnpm warden <cmd>    # run the CLI from the workspace
 ```
 
 Workspace packages export TS source directly (`./src/index.ts`), so `pnpm check-types` works on a fresh tree without a prior build. **Never `db:push` outside local exploration** — always `db:generate` → `db:migrate`. See [`docs/conventions.md`](./docs/conventions.md) for the full schema-change workflow.
+
+<!-- effect-solutions:start -->
+## Effect as a reference (not a dependency)
+
+Warden is **plain TypeScript** — it does not depend on `effect` and is not adopting Effect-style pipelines. We keep the Effect ecosystem around only as a source of well-tested patterns (error modeling, data modeling, service/DI shapes) that we adapt into idiomatic plain TS without a heavy refactor.
+
+- `effect-solutions list` — browse pattern guides; `effect-solutions show <topic>...` for details (e.g. `error-handling`, `data-modeling`, `services-and-layers`).
+- Real implementations live at `~/.local/share/effect-solutions/effect` (shallow clone of Effect-TS/effect-smol) — search it when a guide isn't enough.
+- **Do not** add `effect`/`@effect/*` deps, install the language-service tsconfig plugin, or rewrite existing code into Effect style without an ADR in [`decisions.md`](./decisions.md). Borrow the *idea*, write plain TS.
+<!-- effect-solutions:end -->
+
