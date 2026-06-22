@@ -53,7 +53,8 @@ export interface ReviewHarnessConfig {
  *   - Phase 2 — `runBossLoop()`: Opus 4.6 boss runs a `streamText` tool-use
  *     loop with `stopWhen: stepCountIs(env.WARDEN_REVIEW_BOSS_ROUNDS ?? 5)`;
  *     dispatches Sonnet/Haiku workers per concern via the `dispatch_worker`
- *     tool; final round emits `Output.object({ comments: Comment[] })`.
+ *     tool; final round calls the terminal `submit_review` tool with
+ *     `{ comments: Comment[] }`.
  *   - Phase 3 — `verifyCitations()`: substring-verifies every `{path, line,
  *     snippet}` citation against the cited file; drops Comments left
  *     without a verified source.

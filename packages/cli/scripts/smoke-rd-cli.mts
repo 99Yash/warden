@@ -91,7 +91,9 @@ const report = {
       filePath: "src/db.ts",
       plugin: "react-doctor",
       rule: "prefer-named-export",
-      severity: "warning",
+      // Parser robustness: react-doctor may add non-error/warning buckets.
+      // Warden routes by category, so the whole report must not disappear.
+      severity: "info",
       message: "Prefer a named export here",
       help: "Rename the default export",
       line: 1,
@@ -149,6 +151,9 @@ const maint = parsed.findings.find((f) => f.rdCategory === "Maintainability");
 const maintMap = mapSeverity(maint!);
 if (maintMap.tier !== 3 || maintMap.category !== "clarity") {
   fail(`Maintainability → expected {tier:3, clarity}, got ${JSON.stringify(maintMap)}`);
+}
+if (maint!.severity !== "info") {
+  fail(`non-error/warning severity should normalize to info, got ${maint!.severity}`);
 }
 console.log("✓ parse + category→{tier,category} mapping + evidence snippet");
 

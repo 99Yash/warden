@@ -46,7 +46,7 @@ lookupTypeDef({ package, symbol })   // .d.ts signature for an installed npm pac
 
 **Every finding must cite at least one source from the dispatched file with a `{path, line, snippet}` triple.** The substring-verifier post-pass will read the file at `line ± 5`, normalize whitespace, and substring-match the snippet. If the snippet doesn't match, the finding is dropped silently. Do not paraphrase. Quote the line.
 
-When a finding hinges on a library API claim (e.g. "this `bcrypt.compare()` is not constant-time" or "Drizzle's `sql\`\${x}\``interpolates raw"), call`lookupTypeDef({ package, symbol })`and copy`result.suggestedSource` verbatim as one of the source entries. Add it alongside the file-local source — the file source pins _where_ in the diff, the api_def source pins _what_ the library actually does.
+When a finding hinges on a library API claim (e.g. "this `bcrypt.compare()` is not constant-time" or "Drizzle's `sql\`\${x}\`` interpolates raw"), call `lookupTypeDef({ package, symbol })` and copy `result.suggestedSource` verbatim as one of the source entries. Add it alongside the file-local source — the file source pins _where_ in the diff, the api_def source pins _what_ the library actually does.
 
 # Worked examples
 

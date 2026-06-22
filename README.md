@@ -12,7 +12,7 @@ Architecture decisions are documented exhaustively in [`decisions.md`](./decisio
 | CLI             | `@warden/cli` (commander)                                                                                 |
 | Engine          | `@warden/core` — I/O-pure: `review({ diff, repoRoot, config }) → CommentSet`                              |
 | Database        | Drizzle on better-sqlite3 (`.warden/cache.sqlite`, gitignored)                                            |
-| AI              | Vercel AI SDK — Anthropic; Sonnet 4 (boss/grader/correctness/security), Haiku 4 (contract/best-practices) |
+| AI              | Vercel AI SDK — Anthropic / OpenAI review models, Voyage embeddings                                         |
 | Static analysis | TSC + ESLint (TS only in v0; multi-ecosystem deferred)                                                    |
 | Vulnerabilities | `npm audit` + OSV.dev verification (every CVE cited before posting)                                       |
 | Lint / format   | oxlint + oxfmt                                                                                            |
@@ -35,7 +35,7 @@ pnpm build
 pnpm db:generate
 pnpm db:migrate
 
-# 5. Add ANTHROPIC_API_KEY / VOYAGE_API_KEY to ~/.config/warden/env,
+# 5. Add review + embedding provider keys to ~/.config/warden/env,
 #    export them in your shell, or use a secret manager wrapper such as:
 #    infisical run -- pnpm warden review
 
@@ -51,7 +51,8 @@ pnpm warden review      # full pipeline including LLM triage and formatter
 
 | Var                            | Purpose                                                                                                                                            |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`            | Needed by `warden review`. Primary LLM provider for the review formatter (ADR-0006). `warden check` does not need it.                              |
+| `ANTHROPIC_API_KEY`            | Recommended for `warden review` boss planning. `warden check` does not need it.                                                                    |
+| `OPENAI_API_KEY`               | Optional for `warden review`, but preferred for worker dispatch when set. OpenAI-only review can also run without Anthropic configured.             |
 | `VOYAGE_API_KEY`               | Needed by `warden init`. Enables the semantic context selector in `warden review` (ADR-0019); when unset, review falls back to cheap signals only. |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Optional. Enables the Anthropic → retry → Google fallback (ADR-0017). When unset, Anthropic failure is hard-fail.                                  |
 | `WARDEN_LOG_LEVEL`             | Optional. `silent` / `error` / `warn` / `info` (default) / `debug`.                                                                                |

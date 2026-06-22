@@ -134,7 +134,7 @@ const envSchema = z.object({
   // capture on) lands in spans, so it must not leave the box. Defaults to
   // the local Docker stack's web port. Pointing this at Langfuse Cloud is
   // explicitly out of scope for v0 (ADR-0048 §6).
-  LANGFUSE_HOST: z.string().url().optional().default("http://localhost:3200"),
+  LANGFUSE_HOST: z.url().optional().default("http://localhost:3200"),
   // Future I/O capture toggle: full prompt/completion bodies (incl. boss
   // reasoning prose) on spans once ADR-0048 telemetry wiring ships. Defaults
   // ON when keys are present; flip off (`0` / `false`) for any future CI/cloud

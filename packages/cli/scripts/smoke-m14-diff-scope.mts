@@ -1,7 +1,8 @@
 /**
  * Smoke for the review harness's LLM comment diff-scope post-pass. No LLM
  * call — exercises the pure filter that keeps comments anchored to added
- * lines and drops comments on unchanged lines.
+ * lines, keeps sanctioned file-level comments on changed files, and drops
+ * comments on unchanged lines.
  *
  * Usage:
  *   pnpm --filter @warden/cli smoke:m14-diff-scope
@@ -64,12 +65,20 @@ const result = scopeCommentsToDiff(
   changed,
 );
 
-assert(result.comments.length === 2, `2 comments survive (got ${result.comments.length})`);
+assert(result.comments.length === 3, `3 comments survive (got ${result.comments.length})`);
+const lineLevelSurvivorIds = result.comments
+  .filter((c) => c.lineStart > 0)
+  .map((c) => c.id)
+  .join(",");
 assert(
-  result.comments.map((c) => c.id).join(",") === "on-added,range-overlaps",
-  `survivors are the comments overlapping added lines (${result.comments.map((c) => c.id).join(",")})`,
+  lineLevelSurvivorIds === "on-added,range-overlaps",
+  `line-level survivors are the comments overlapping added lines (${lineLevelSurvivorIds})`,
 );
-assert(result.droppedCount === 3, `3 comments dropped (got ${result.droppedCount})`);
+assert(
+  result.comments.some((c) => c.id === "file-level"),
+  "file-level comment on a changed file survives",
+);
+assert(result.droppedCount === 2, `2 comments dropped (got ${result.droppedCount})`);
 
 if (failed > 0) {
   process.stdout.write(`\n${failed} assertion(s) failed\n`);

@@ -46,7 +46,7 @@ export interface ConsistencyRunnerOutput {
 }
 
 const ENV_CLAIM_RE =
-  /\b(WARDEN_[A-Z_]+|ANTHROPIC_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|VOYAGE_API_KEY|NODE_ENV)\b[^.\n]{0,80}?\b(required|optional|defaults?\s+to\s+`?([A-Za-z0-9_./-]+)`?|default\s+`?([A-Za-z0-9_./-]+)`?)\b/gi;
+  /\b(WARDEN_[A-Z_]+|ANTHROPIC_API_KEY|OPENAI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|VOYAGE_API_KEY|LANGFUSE_[A-Z_]+|NODE_ENV)\b[^.\n]{0,80}?\b(required|optional|defaults?\s+to\s+`?([A-Za-z0-9_./:-]+)`?|default\s+`?([A-Za-z0-9_./:-]+)`?)\b/gi;
 
 const CLI_CLAIM_RE = /\bwarden\s+([a-z][a-z0-9-]*)\b((?:\s+--[a-z][a-z0-9-]*(?:\s+\S+)?)*)/g;
 

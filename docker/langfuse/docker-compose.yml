@@ -100,7 +100,7 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: warden-local-dev
 
   clickhouse:
-    image: docker.io/clickhouse/clickhouse-server
+    image: docker.io/clickhouse/clickhouse-server@sha256:07afc18d8a9706eb9d85c5c5d2752e5270f91bbc2894caeaecb73e4d0f603bf5
     restart: always
     user: "101:101"
     environment:
@@ -121,7 +121,7 @@ services:
       start_period: 1s
 
   minio:
-    image: cgr.dev/chainguard/minio
+    image: cgr.dev/chainguard/minio@sha256:1fa1317f8a14251743c131d556aadb17efb85e82bcd95b6564044935c8301ae7
     restart: always
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'

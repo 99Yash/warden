@@ -136,7 +136,7 @@ Source — line 13 (`req.body.path` flows into a shell string).
 Sink — line 14 (`exec(\`...${file}\`)`).
 Slug: `rce`. Tier: 2.
 `claim`: "`rce` — req.body.path interpolated into a shell command in exec()."
-`explanation`: "An attacker can break out with `;` / backticks / `$(...)`. Use `execFile`with an argv array, or validate`file` against an allowlist before interpolating."
+`explanation`: "An attacker can break out with `;` / backticks / `$(...)`. Use `execFile` with an argv array, or validate `file` against an allowlist before interpolating."
 
 ### Example 2 — SQL injection (slug `sql-injection`, tier 1)
 
@@ -149,7 +149,7 @@ Diff:
 
 Source — line 41. Sink — line 42. Slug: `sql-injection`. Tier: 1.
 `claim`: "`sql-injection` — req.query.user interpolated into raw SQL via sql.raw()."
-`explanation`: "Use a parameterised query: `db.execute(sql\`SELECT \* FROM tickets WHERE assignee = ${userId}\`)`for Drizzle, or`pool.query(text, [userId])`for`pg`."
+`explanation`: "Use a parameterised query: `db.execute(sql\`SELECT \* FROM tickets WHERE assignee = ${userId}\`)` for Drizzle, or `pool.query(text, [userId])` for `pg`."
 
 ### Example 3 — hardcoded secret in fallback (slug `secrets-exposure`, tier 2)
 

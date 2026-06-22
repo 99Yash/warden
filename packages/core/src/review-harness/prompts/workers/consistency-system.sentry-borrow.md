@@ -129,7 +129,7 @@ Cross-check `packages/env/src/index.ts`:
 
 Finding:
 
-- emit on the README path with `line: 67` and snippet `"`VOYAGE_API_KEY`(required) — embedding provider key for`warden review`."`
+- emit on the README path with `line: 67` and snippet "`VOYAGE_API_KEY` (required) — embedding provider key for `warden review`."
 - `claim`: "README marks `VOYAGE_API_KEY` as required for `warden review`, but `wardenEnv()` marks it optional and the code degrades gracefully when unset."
 - `explanation`: "`packages/env/src/index.ts:18` calls `.optional()` on the var; `runDetPriors()` falls back to cheap-signals selection when the key is absent. Readers of README will think they need a Voyage key to use review."
 - `suggestedAction`: "Soften to 'optional — enables embedding-backed context selection; review degrades to cheap signals when unset'."
