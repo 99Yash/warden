@@ -17,8 +17,12 @@ import { buildDiffTree, type DiffTreeNode } from "./tree.js";
  *   3. JS profile `alwaysNoise.extensions` — ecosystem-specific exts.
  *
  * Steps 1+2 emit one `DegradedEntry` per pruned subtree (loud about
- * directories). Step 3 is silent (per-file extension drops are implied by
- * the surrounding directory structure being unchanged — m9-plan §4).
+ * directories). Step 3 (extension drops) is *quiet about individual small
+ * files* — m9-plan §4 — but **loud about large ones**: a single pruned file
+ * whose changed-line count exceeds `LARGE_FILE_LINE_THRESHOLD` emits one
+ * `info` entry so a big generated drop (e.g. a 6,618-line Drizzle
+ * `_snapshot.json`) is never invisible the way it was when it silently drove
+ * a review to $11 (issue #34). Small extension drops stay silent.
  */
 
 interface NoiseProfile {
@@ -30,6 +34,15 @@ interface NoiseProfile {
 }
 
 const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "ecosystem", "profiles");
+
+/**
+ * A pruned-by-extension file whose changed-line count exceeds this emits one
+ * loud `info` degraded entry (issue #34). The threshold is a proxy: a
+ * wholesale-regenerated artifact (lockfile, Drizzle snapshot, minified
+ * bundle) carries its entire body in `addedLines`, so `addedLines.length`
+ * tracks its diff weight — the thing that actually costs tokens.
+ */
+const LARGE_FILE_LINE_THRESHOLD = 500;
 
 let cachedJsProfile: NoiseProfile | undefined;
 
@@ -74,16 +87,17 @@ export function pruneDiff(changed: ChangedFile[]): PruneResult {
   const baselineFileNames = new Set<string>(BASELINE_NOISE.fileNames);
   pruneFileNames(tree, baselineFileNames);
   const baselineExts = new Set<string>(BASELINE_NOISE.extensions);
-  pruneExtensions(tree, baselineExts);
+  pruneExtensions(tree, baselineExts, "baseline noise", degraded);
 
   // 2. Apply JS profile alwaysNoise.directories.
   const profile = loadJsProfile();
   const profileDirs = new Set<string>(profile.alwaysNoise.directories);
   pruneDirectories(tree, profileDirs, "JS ecosystem profile", degraded);
 
-  // 3. Apply JS profile alwaysNoise.extensions (silent).
+  // 3. Apply JS profile alwaysNoise.extensions. Silent for small files,
+  // loud for any single drop over LARGE_FILE_LINE_THRESHOLD.
   const profileExts = new Set<string>(profile.alwaysNoise.extensions);
-  pruneExtensions(tree, profileExts);
+  pruneExtensions(tree, profileExts, "JS ecosystem profile", degraded);
 
   return { pruned: collect(tree), degraded };
 }
@@ -158,14 +172,31 @@ function pruneFileNames(tree: DiffTreeNode, fileNames: Set<string>): void {
   }
 }
 
-function pruneExtensions(tree: DiffTreeNode, exts: Set<string>): void {
+function pruneExtensions(
+  tree: DiffTreeNode,
+  exts: Set<string>,
+  reasonSuffix: string,
+  degraded: DegradedEntry[],
+): void {
   walk(tree);
 
   function walk(node: DiffTreeNode): void {
     if (node.files.length > 0) {
       const remaining: ChangedFile[] = [];
       for (const file of node.files) {
-        if (matchesExtension(file.path, exts)) {
+        const matched = matchedExtension(file.path, exts);
+        if (matched !== undefined) {
+          // Loud about large drops, quiet about small ones (m9-plan §4 +
+          // issue #34): a big regenerated artifact disappearing with no log
+          // line is what hid the original cost problem.
+          const changedLines = file.addedLines.length;
+          if (changedLines > LARGE_FILE_LINE_THRESHOLD) {
+            degraded.push({
+              kind: "info",
+              topic: "noise-filter",
+              message: `noise-filter: skipped ${changedLines}-line generated ${file.path} (${matched} — ${reasonSuffix})`,
+            });
+          }
           decrementAncestors(tree, file.path);
         } else {
           remaining.push(file);
@@ -177,12 +208,13 @@ function pruneExtensions(tree: DiffTreeNode, exts: Set<string>): void {
   }
 }
 
-function matchesExtension(path: string, exts: Set<string>): boolean {
+/** Returns the matched suffix (for the log message) or `undefined`. */
+function matchedExtension(path: string, exts: Set<string>): string | undefined {
   const base = basename(path);
   for (const ext of exts) {
-    if (base.endsWith(ext)) return true;
+    if (base.endsWith(ext)) return ext;
   }
-  return false;
+  return undefined;
 }
 
 function basename(path: string): string {

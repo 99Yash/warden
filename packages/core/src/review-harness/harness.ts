@@ -203,6 +203,34 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     });
   }
 
+  // Issue #29: never let a review built entirely from errored workers render
+  // as a clean result. A worker LLM call that 400s / times out returns no
+  // findings and marks `failed`; if *every* dispatched worker failed, an empty
+  // `comments` array is a false negative, not a clean diff. Surface it as an
+  // `actionable` entry (visible in default mode, not just `--verbose`) so the
+  // CLI can flag a non-zero signal and the user does not trust the silence.
+  // A partial failure (some workers errored) gets a `warning` summary — the
+  // review is still useful but incomplete.
+  const dispatched = scratchpad.workerOutputs();
+  const failedCount = dispatched.filter((w) => w.failed === true).length;
+  if (dispatched.length > 0 && failedCount === dispatched.length) {
+    aggregatedDegraded.push({
+      kind: "actionable",
+      topic: "worker-health",
+      message:
+        `all ${dispatched.length} review worker${dispatched.length === 1 ? "" : "s"} failed — ` +
+        "this is NOT a clean result; findings are unreliable. Check provider keys/quota and rerun.",
+    });
+  } else if (failedCount > 0) {
+    aggregatedDegraded.push({
+      kind: "warning",
+      topic: "worker-health",
+      message:
+        `${failedCount} of ${dispatched.length} review workers failed — ` +
+        "results may be incomplete.",
+    });
+  }
+
   // ADR-0033: emit a single info entry when the dispatch concurrency cap
   // actually engaged. Silent on the happy path — `concurrencyAggregate()`
   // returns null when no dispatch had to queue.

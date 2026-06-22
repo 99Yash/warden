@@ -131,6 +131,15 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
     diffBase: { ...(baseRef !== undefined ? { baseRef } : {}), description },
   });
 
+  // Issue #29: if the harness flagged that every review worker errored, the
+  // empty result is a false-clean, not a passing review. Signal non-zero so
+  // CI / scripts don't treat the silent failure as success. Applies to both
+  // the JSON and pretty output paths.
+  const allWorkersFailed = result.metadata.degradedWorkers.some(
+    (e) => e.kind === "actionable" && e.topic === "worker-health",
+  );
+  if (allWorkersFailed) process.exitCode = 1;
+
   if (writeJsonResult(result, opts)) return;
 
   if (mode === "review") {

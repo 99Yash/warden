@@ -163,6 +163,14 @@ export interface WorkerInvocationResult {
   durationMs: number;
   tokenUsage?: TokenUsage;
   /**
+   * True when the worker's LLM call errored (provider 400/timeout, model
+   * unavailable) and produced *no* output — distinct from a worker that ran
+   * cleanly and found nothing. The harness counts these to detect the
+   * all-workers-failed false-clean (issue #29): an empty review built from
+   * uniformly-errored workers must not render as a clean result.
+   */
+  failed?: boolean;
+  /**
    * Actual model tier the worker ran on. Computed by the route function
    * via the per-concern default + any boss-supplied override. Surfaced
    * here (rather than re-derived in `recordWorker`) so the harness can
@@ -289,6 +297,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
           degraded: [entry],
           phase: args.phase,
           durationMs: 0,
+          failed: true,
         });
         return { findings: [], toolCalls: 0, degraded: [entry] };
       }
@@ -332,6 +341,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       durationMs: result.durationMs,
       ...(result.tokenUsage !== undefined ? { tokenUsage: result.tokenUsage } : {}),
       ...(result.tier !== undefined ? { tier: result.tier } : {}),
+      ...(result.failed === true ? { failed: true } : {}),
     });
 
     return {
