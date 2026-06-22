@@ -29,14 +29,14 @@ precision traps, split along their actual fault lines:
 ## Decisions
 
 1. **Honor ADR-0044 §6: no second LLM.** The reasoned-precision control is
-   deterministic (confidence → degrade-to-question) plus a rigorous *single*
+   deterministic (confidence → degrade-to-question) plus a rigorous _single_
    worker pass. A second adjudicating LLM is the DeepSec two-agent pattern both
    ADR-0044 §6 and ADR-0015 reject. The older `reasoned_fp_root_cause` memory's
    "reopen ADR-0015 for a refutation pass" is **demoted to an eval-gated
    contingency** (Decision 7), not a planned step.
 
 2. **The single pass must carry the weight a second pass would have.** Because
-   we forgo a refutation LLM, the worker cannot be left to *choose* whether to
+   we forgo a refutation LLM, the worker cannot be left to _choose_ whether to
    verify. Refuting context is **fed deterministically**, and self-refutation is
    **mandatory and structured** in the prompt.
 
@@ -46,9 +46,9 @@ precision traps, split along their actual fault lines:
    drop (not degrade — a mis-anchored comment is noise, not an uncertain
    finding). **This already exists**: `scopeCommentsToDiff()` in
    `review-harness/harness.ts` runs unconditionally over every boss comment
-   using the *pruned* `ChangedFile[]`, before the harness returns. The keyed
+   using the _pruned_ `ChangedFile[]`, before the harness returns. The keyed
    Step-0 baseline reproduces 0/8 traps precisely because the 4 off-hunk traps
-   are already killed there. A second drop in `applyHardRules()` over the *raw*
+   are already killed there. A second drop in `applyHardRules()` over the _raw_
    diff was implemented (commit 62a584c) and reverted: pruning is a subset
    filter, so the raw-diff pass can only keep a superset of what the harness
    already kept — a no-op on the m14-review path, and an actively wrong re-scope
@@ -80,22 +80,22 @@ precision traps, split along their actual fault lines:
    reproducing** and ~1 comment total — until traps reproduce, there is nothing
    to drive down.
 
-6. **The flip is the flag *and* the honest schema, together.** Flipping
+6. **The flip is the flag _and_ the honest schema, together.** Flipping
    `reasonedFindingMode` default-on while leaving worker self-quotes wearing
    `type: "tool"` ships the exact lie ADR-0044 exists to kill. Step 3 lands the
-   flag default *and* the `evidence`/`sources[]` split, per-claim-type gate,
+   flag default _and_ the `evidence`/`sources[]` split, per-claim-type gate,
    `sourced`/`reasoned` derived adjective, Tier-1 redefinition ("never drops"),
    and the review trace — one concentrated change, eval-gated.
 
 7. **Second-LLM refutation is a contingency, not a step.** If the eval after
    Steps 1–2 still shows confident-wrong FPs (the `reasoning-section` class — a
    boolean misread with the code already visible, which neither context
-   injection nor confidence-degrade catches), *that evidence* opens a fresh ADR
+   injection nor confidence-degrade catches), _that evidence_ opens a fresh ADR
    to reopen ADR-0015. It is not built speculatively.
 
 ## Steps (ordered)
 
-### Step 0 — Establish a reproducing precision baseline *(measurement gate)*
+### Step 0 — Establish a reproducing precision baseline _(measurement gate)_
 
 - Run `baseline` (shipped `legacy-sources-required` default — what produced the
   dogfood FPs) **and** `reasoned-assertions` against `alfred-pr131` at **N≥5**.
@@ -103,32 +103,32 @@ precision traps, split along their actual fault lines:
   `path` + `line±5` + `claim_includes`; it can miss reproduced FPs).
 - **Gate:** promote `alfred-pr131` to load-bearing only when **≥3 of the 8 traps
   reproduce** on at least one config. If fewer reproduce, the first work is
-  *fixture fidelity* — widen the trap matcher and/or re-capture the dogfood diff
+  _fixture fidelity_ — widen the trap matcher and/or re-capture the dogfood diff
   context — **not** worker precision. There is no measurable problem otherwise.
 - Loci: `packages/cli/scripts/eval/{run.mts,score.mts,configs/index.ts}`,
   `fixtures/real-prs/alfred-pr131-falsepos-9349d565/`.
 
-### Step 1 — Deterministic off-hunk anchoring drop *(already closed — no build)*
+### Step 1 — Deterministic off-hunk anchoring drop _(already closed — no build)_
 
 - **Resolved by consolidation, not a new rule.** The off-hunk class is already
   killed by `scopeCommentsToDiff()` in `review-harness/harness.ts:181`, which
-  drops any boss comment overlapping zero added lines in the *pruned*
+  drops any boss comment overlapping zero added lines in the _pruned_
   `ChangedFile[]` before the harness returns. Context lines just outside a hunk
-  stay legitimate (overlap with ≥1 added line is the test, not that *every*
+  stay legitimate (overlap with ≥1 added line is the test, not that _every_
   cited line be added) — that policy already lives in `overlapsAddedLine()`.
-- A duplicate drop in `applyHardRules()` over the *raw* diff was shipped in
+- A duplicate drop in `applyHardRules()` over the _raw_ diff was shipped in
   commit 62a584c and reverted: it was a no-op on the m14-review path (pruned ⊆
   raw, so it kept everything the harness already kept) and would have wrongly
   re-scoped check / m18-security comments had it ever applied. Coverage for the
   anchoring behavior is `smoke:m14-diff-scope`; the redundant
   `smoke:reasoned-anchoring` was removed with the module.
-- Net effect on the plan: re-running Step 0 already isolates a *pure soundness*
+- Net effect on the plan: re-running Step 0 already isolates a _pure soundness_
   signal — the off-hunk traps were never in the residual. Proceed to Step 2.
 - The eval-env bootstrap (`loadWardenRuntime` in `run.mts`) shipped in the same
   commit is unrelated and **kept** — without it the eval self-skips on a missing
   key when run from `packages/cli`.
 
-### Step 2 — Reasoned-claim soundness *(targets the 4 soundness traps)*
+### Step 2 — Reasoned-claim soundness _(targets the 4 soundness traps)_
 
 - **2.1 — 1-hop callee/caller injection** in `workers/run-worker.ts` +
   `workers/file-snippet.ts`. Resolve via M5 `import_graph` / `TsCompilerParser`;
@@ -147,7 +147,7 @@ precision traps, split along their actual fault lines:
   `*-misses-*` recall does **not** regress; clean-control stays 0; FP-trap-hits
   stays 0. Escalate to Decision 7 only if confident-wrong FPs survive.
 
-### Step 3 — ADR-0044 flip: default-on + honest schema *(one concentrated change)*
+### Step 3 — ADR-0044 flip: default-on + honest schema _(one concentrated change)_
 
 - Flip `BOSS_LOOP_DEFAULTS.reasonedFindingMode` →
   `allow-empty-sources` in `boss-loop.ts`.
@@ -167,7 +167,7 @@ precision traps, split along their actual fault lines:
 ## Eval framing (per ADR-0044 §Caveats + tutorial `06-evals`)
 
 - The split mirrors the tutorial's **deterministic-eval** (Steps 0–1, exact
-  scoring) vs **llm-as-a-judge** (deliberately *not* used — the rejected
+  scoring) vs **llm-as-a-judge** (deliberately _not_ used — the rejected
   second-LLM pattern).
 - Recall arm = `*-misses-*` fixtures (`m6-misses`, `alfred-pr14-misses`).
   Precision arm = `alfred-pr131-falsepos` traps + clean-controls.
@@ -197,4 +197,4 @@ precision traps, split along their actual fault lines:
   clean 0, FP-traps 0.
 - Step 3: `--compare` scorecard clears recall-↑/precision-not-worse; public
   schema migration green across `pnpm check-types` + the M14 smokes; `CONTEXT.md`
-  + ADR sweep landed in the same change.
+  - ADR sweep landed in the same change.

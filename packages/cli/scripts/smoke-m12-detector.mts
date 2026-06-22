@@ -56,10 +56,7 @@ assert(
   cloneFindings.length === 1,
   `exactly one structured-clone finding (got ${cloneFindings.length})`,
 );
-assert(
-  cloneFindings[0]?.message.includes("structuredClone"),
-  "message mentions structuredClone",
-);
+assert(cloneFindings[0]?.message.includes("structuredClone"), "message mentions structuredClone");
 assert(
   cloneFindings[0]?.evidence?.snippet.includes("JSON.parse(JSON.stringify(payload))"),
   "evidence snippet quotes the call site",
@@ -89,10 +86,7 @@ const includesResult = await runLeverage({
   changed: [{ path: includesPath, addedLines: [1, 2, 3, 4, 5, 6, 7, 8] }],
 });
 const includesFindings = includesResult.findings.filter((f) => f.ruleId === "includes");
-assert(
-  includesFindings.length === 4,
-  `four includes findings (got ${includesFindings.length})`,
-);
+assert(includesFindings.length === 4, `four includes findings (got ${includesFindings.length})`);
 assert(
   includesFindings.every((f) => f.message.toLowerCase().includes("includes")),
   "every finding mentions includes",
@@ -103,12 +97,7 @@ process.stdout.write(`\n[2b] leverage — indexOf >= 5 negative control\n`);
 const includesNegPath = "src/includes-neg.ts";
 writeFileSync(
   resolve(TMP_ROOT, includesNegPath),
-  [
-    `export function check(xs: number[]) {`,
-    `  return xs.indexOf(7) >= 5;`,
-    `}`,
-    ``,
-  ].join("\n"),
+  [`export function check(xs: number[]) {`, `  return xs.indexOf(7) >= 5;`, `}`, ``].join("\n"),
 );
 const includesNegResult = await runLeverage({
   repoRoot: TMP_ROOT,
@@ -144,10 +133,7 @@ const someResult = await runLeverage({
   changed: [{ path: somePath, addedLines: [1, 2, 3, 4, 5, 6, 7, 8, 9] }],
 });
 const someFindings = someResult.findings.filter((f) => f.ruleId === "some");
-assert(
-  someFindings.length === 5,
-  `five some findings (got ${someFindings.length})`,
-);
+assert(someFindings.length === 5, `five some findings (got ${someFindings.length})`);
 
 // ---------------------------------------------------------------------------
 // 4. Diff-localness — pattern in source but outside addedLines must not fire.
@@ -207,10 +193,7 @@ const mlResult = await runLeverage({
   changed: [{ path: mlPath, addedLines: [1, 2, 3, 4, 5, 6, 7, 8] }],
 });
 const mlFindings = mlResult.findings.filter((f) => f.ruleId === "some");
-assert(
-  mlFindings.length === 1,
-  `multi-line some finding still fires (got ${mlFindings.length})`,
-);
+assert(mlFindings.length === 1, `multi-line some finding still fires (got ${mlFindings.length})`);
 assert(
   mlFindings[0]?.evidence === undefined,
   "multi-line finding leaves evidence undefined (verifier would drop a collapsed snippet otherwise)",

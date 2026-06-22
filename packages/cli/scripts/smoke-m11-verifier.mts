@@ -159,10 +159,7 @@ assert(
   "single-line source kept intact",
 );
 assert(sawMulti !== undefined, "multi-line api_def Comment survives the concat-match path");
-assert(
-  sawMulti?.sources[0]?.snippet === multilineSnippet,
-  "multi-line source kept intact",
-);
+assert(sawMulti?.sources[0]?.snippet === multilineSnippet, "multi-line source kept intact");
 assert(sawBogus === undefined, "bogus-only api_def Comment dropped entirely (M10 drop semantics)");
 
 const infoEntries = result.degraded.filter((d) => d.kind === "info" && d.topic === "llm");

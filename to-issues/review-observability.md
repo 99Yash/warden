@@ -3,7 +3,7 @@
 > **Superseded by ADR-0048 (2026-06-21).** This issue is now a locked decision,
 > not an open follow-up. The recommendation below ("local trace first, defer
 > hosted") was **overridden**: we go straight to a live OTEL→self-hosted-Langfuse
-> surface that *complements* ADR-0044 §7's persisted prose-free review trace
+> surface that _complements_ ADR-0044 §7's persisted prose-free review trace
 > (two surfaces, one run-id), captures the dropped-candidate events ourselves,
 > and operationalizes the `reviewRuns` table. See `decisions.md` ADR-0048 for the
 > grilled design and `CONTEXT.md §9` for the vocabulary. Original notes kept below
@@ -15,7 +15,7 @@
 
 Iterating on recall (the `diligent` variant, lever B/C, prompt tweaks) is
 blind right now. The CLI surfaces only the final `Comment[]` + cost + degraded
-entries. To know *why* recall moved, we need to see, per worker: which files it
+entries. To know _why_ recall moved, we need to see, per worker: which files it
 `readFile`'d, what it `grepRepo`'d, which symbols it traced, how many steps it
 spent, and which candidate findings it dropped pre-citation. Today none of that
 is observable — a worker that never grepped a caller and a worker that grepped

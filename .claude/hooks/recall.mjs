@@ -7,19 +7,20 @@
 // Reads hook JSON from stdin (prompt/pre-edit), prints hookSpecificOutput JSON to
 // stdout, and exits 0. Prints nothing when there is no match (no injection).
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
-const mode = process.argv[2] || 'session-start';
+const mode = process.argv[2] || "session-start";
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-const LESSONS_DIR = join(ROOT, '.lessons');
-const INDEX = join(LESSONS_DIR, 'INDEX.md');
+const LESSONS_DIR = join(ROOT, ".lessons");
+const INDEX = join(LESSONS_DIR, "INDEX.md");
 
-const EVENT = {
-  'session-start': 'SessionStart',
-  prompt: 'UserPromptSubmit',
-  'pre-edit': 'PreToolUse',
-}[mode] || 'SessionStart';
+const EVENT =
+  {
+    "session-start": "SessionStart",
+    prompt: "UserPromptSubmit",
+    "pre-edit": "PreToolUse",
+  }[mode] || "SessionStart";
 
 function emit(text) {
   if (!text || !text.trim()) process.exit(0);
@@ -31,9 +32,9 @@ function emit(text) {
 
 function readStdin() {
   try {
-    return readFileSync(0, 'utf8');
+    return readFileSync(0, "utf8");
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -41,13 +42,13 @@ function toArr(v) {
   return Array.isArray(v) ? v : v ? [v] : [];
 }
 function basename(p) {
-  return p.split('/').pop();
+  return p.split("/").pop();
 }
 function splitWords(s) {
   return s
     ? String(s)
         .toLowerCase()
-        .replace(/[^a-z0-9.\-_]+/g, ' ')
+        .replace(/[^a-z0-9.\-_]+/g, " ")
         .split(/\s+/)
         .filter((w) => w.length >= 3)
     : [];
@@ -56,25 +57,25 @@ function splitWords(s) {
 function globMatch(glob, path) {
   if (!glob) return false;
   glob = String(glob);
-  let re = '';
+  let re = "";
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        re += '.*';
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        re += ".*";
         i++;
-        if (glob[i + 1] === '/') i++;
+        if (glob[i + 1] === "/") i++;
       } else {
-        re += '[^/]*';
+        re += "[^/]*";
       }
-    } else if ('.+?^${}()|[]\\'.includes(c)) {
-      re += '\\' + c;
+    } else if (".+?^${}()|[]\\".includes(c)) {
+      re += "\\" + c;
     } else {
       re += c;
     }
   }
   try {
-    return new RegExp('^' + re + '$').test(path);
+    return new RegExp("^" + re + "$").test(path);
   } catch {
     return false;
   }
@@ -83,28 +84,28 @@ function globMatch(glob, path) {
 function listLessonFiles() {
   if (!existsSync(LESSONS_DIR)) return [];
   return readdirSync(LESSONS_DIR)
-    .filter((f) => f.endsWith('.md') && f !== 'INDEX.md' && f !== 'README.md')
+    .filter((f) => f.endsWith(".md") && f !== "INDEX.md" && f !== "README.md")
     .map((f) => join(LESSONS_DIR, f));
 }
 
 function parseLesson(path) {
-  const raw = readFileSync(path, 'utf8');
+  const raw = readFileSync(path, "utf8");
   const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  const fmText = m ? m[1] : '';
+  const fmText = m ? m[1] : "";
   const body = (m ? m[2] : raw).trim();
   const fm = {};
-  for (const line of fmText.split('\n')) {
+  for (const line of fmText.split("\n")) {
     const mm = line.match(/^(\w+):\s*(.*)$/);
     if (!mm) continue;
     let v = mm[2].trim();
-    if (v.startsWith('[') && v.endsWith(']')) {
+    if (v.startsWith("[") && v.endsWith("]")) {
       v = v
         .slice(1, -1)
-        .split(',')
-        .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
         .filter(Boolean);
     } else {
-      v = v.replace(/^["']|["']$/g, '');
+      v = v.replace(/^["']|["']$/g, "");
     }
     fm[mm[1]] = v;
   }
@@ -116,9 +117,9 @@ function renderLesson({ path, fm, body }) {
 }
 
 // ---- session-start: inject the index -------------------------------------
-if (mode === 'session-start') {
+if (mode === "session-start") {
   if (!existsSync(INDEX)) process.exit(0);
-  const idx = readFileSync(INDEX, 'utf8');
+  const idx = readFileSync(INDEX, "utf8");
   if (!/^\s*-\s+\[/m.test(idx)) process.exit(0); // no lessons yet
   emit(
     `# Repo lessons (.lessons/)\n` +
@@ -128,16 +129,16 @@ if (mode === 'session-start') {
 }
 
 // ---- prompt: keyword match against the user's request ---------------------
-if (mode === 'prompt') {
+if (mode === "prompt") {
   let input = {};
   try {
-    input = JSON.parse(readStdin() || '{}');
+    input = JSON.parse(readStdin() || "{}");
   } catch {}
-  const prompt = (input.prompt || '').toLowerCase();
+  const prompt = (input.prompt || "").toLowerCase();
   if (!prompt) process.exit(0);
   const words = new Set(
     prompt
-      .replace(/[^a-z0-9.\-_/]+/g, ' ')
+      .replace(/[^a-z0-9.\-_/]+/g, " ")
       .split(/\s+/)
       .filter((w) => w.length >= 4),
   );
@@ -165,17 +166,17 @@ if (mode === 'prompt') {
   if (!top.length) process.exit(0);
   emit(
     `# Possibly relevant repo lessons\nPast lessons that may apply to this request — check before proceeding:\n\n` +
-      top.map(({ lesson }) => renderLesson(lesson)).join('\n\n---\n\n'),
+      top.map(({ lesson }) => renderLesson(lesson)).join("\n\n---\n\n"),
   );
 }
 
 // ---- pre-edit: glob match against the file being edited -------------------
-if (mode === 'pre-edit') {
+if (mode === "pre-edit") {
   let input = {};
   try {
-    input = JSON.parse(readStdin() || '{}');
+    input = JSON.parse(readStdin() || "{}");
   } catch {}
-  const fp = (input.tool_input && input.tool_input.file_path) || '';
+  const fp = (input.tool_input && input.tool_input.file_path) || "";
   if (!fp) process.exit(0);
   const rel = fp.startsWith(ROOT) ? fp.slice(ROOT.length + 1) : fp;
   const base = basename(rel);
@@ -188,6 +189,6 @@ if (mode === 'pre-edit') {
   if (!matches.length) process.exit(0);
   emit(
     `# Repo lesson for ${rel}\nA past lesson covers files like this — apply it:\n\n` +
-      matches.slice(0, 3).map(renderLesson).join('\n\n---\n\n'),
+      matches.slice(0, 3).map(renderLesson).join("\n\n---\n\n"),
   );
 }

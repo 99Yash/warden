@@ -19,11 +19,8 @@ const TMP_DB = resolve(tmpdir(), `warden-m18-triage-gate-${process.pid}.sqlite`)
 process.env["WARDEN_CACHE_PATH"] = TMP_DB;
 if (existsSync(TMP_DB)) unlinkSync(TMP_DB);
 
-const {
-  evaluateTriageGate,
-  isSecuritySensitivePath,
-  runSecurityHarness,
-} = await import("@warden/core");
+const { evaluateTriageGate, isSecuritySensitivePath, runSecurityHarness } =
+  await import("@warden/core");
 const { db, securityRuns } = await import("@warden/db");
 
 let failed = 0;
@@ -48,10 +45,7 @@ const baseDet = {
   findings: [],
   vulnComments: [],
 };
-assert(
-  evaluateTriageGate({ detPriors: baseDet }).proceed === false,
-  "empty changed set skips",
-);
+assert(evaluateTriageGate({ detPriors: baseDet }).proceed === false, "empty changed set skips");
 assert(
   evaluateTriageGate({
     detPriors: {

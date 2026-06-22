@@ -19,16 +19,10 @@ import { META_KEYS } from "./meta.js";
  * test seam.
  */
 export class SqliteFileChunksStore implements FileChunksStore {
-  async replaceForFile(
-    filePath: string,
-    fileSha: string,
-    chunkHashes: string[],
-  ): Promise<void> {
+  async replaceForFile(filePath: string, fileSha: string, chunkHashes: string[]): Promise<void> {
     const conn = db();
     conn.transaction((tx) => {
-      tx.delete(fileChunksTable)
-        .where(eq(fileChunksTable.filePath, filePath))
-        .run();
+      tx.delete(fileChunksTable).where(eq(fileChunksTable.filePath, filePath)).run();
       if (chunkHashes.length === 0) return;
       const now = new Date();
       // SQLite's compiled-statement parameter cap is ~999. With 4 columns per
@@ -50,24 +44,16 @@ export class SqliteFileChunksStore implements FileChunksStore {
           });
         }
         if (rows.length === 0) continue;
-        tx.insert(fileChunksTable)
-          .values(rows)
-          .onConflictDoNothing()
-          .run();
+        tx.insert(fileChunksTable).values(rows).onConflictDoNothing().run();
       }
     });
   }
 
   async deleteForFile(filePath: string): Promise<void> {
-    db()
-      .delete(fileChunksTable)
-      .where(eq(fileChunksTable.filePath, filePath))
-      .run();
+    db().delete(fileChunksTable).where(eq(fileChunksTable.filePath, filePath)).run();
   }
 
-  async getFilesForHashes(
-    chunkHashes: string[],
-  ): Promise<Map<string, string[]>> {
+  async getFilesForHashes(chunkHashes: string[]): Promise<Map<string, string[]>> {
     const out = new Map<string, string[]>();
     if (chunkHashes.length === 0) return out;
     const BATCH = 500;
@@ -160,18 +146,20 @@ export class SqliteFileChunksStore implements FileChunksStore {
     }
     let inserted = 0;
     conn.transaction((tx) => {
-      const before = tx
-        .select({ c: sql<number>`count(*)` })
-        .from(fileChunksTable)
-        .get()?.c ?? 0;
+      const before =
+        tx
+          .select({ c: sql<number>`count(*)` })
+          .from(fileChunksTable)
+          .get()?.c ?? 0;
       tx.run(
         sql`INSERT OR IGNORE INTO file_chunks (file_path, chunk_hash, file_sha, indexed_at)
             SELECT file_path, chunk_hash, file_sha, created_at FROM chunks`,
       );
-      const after = tx
-        .select({ c: sql<number>`count(*)` })
-        .from(fileChunksTable)
-        .get()?.c ?? 0;
+      const after =
+        tx
+          .select({ c: sql<number>`count(*)` })
+          .from(fileChunksTable)
+          .get()?.c ?? 0;
       inserted = Math.max(0, after - before);
       tx.insert(indexMeta)
         .values({

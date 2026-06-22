@@ -233,14 +233,14 @@ packages/cli/package.json                         # MODIFIED — add `smoke:m18`
 
 ## Package boundaries (M18 additions)
 
-| Package          | M18 additions                                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `@warden/cli`    | `warden security` verb; `--deep` flag on `warden review`; render extensions; smoke harness.                               |
-| `@warden/core`   | `packages/core/src/security/` module; `applyHardRules()` discriminator; review-harness composition for `--deep`.           |
-| `@warden/ai`     | `getApexModel()` + `getApexFallbackModel()`.                                                                              |
-| `@warden/db`     | `securityRuns` table + schema + migration.                                                                                |
-| `@warden/env`    | `WARDEN_SECURITY_WORKER_BUDGET`.                                                                                          |
-| `@warden/config` | No changes.                                                                                                               |
+| Package          | M18 additions                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `@warden/cli`    | `warden security` verb; `--deep` flag on `warden review`; render extensions; smoke harness.                      |
+| `@warden/core`   | `packages/core/src/security/` module; `applyHardRules()` discriminator; review-harness composition for `--deep`. |
+| `@warden/ai`     | `getApexModel()` + `getApexFallbackModel()`.                                                                     |
+| `@warden/db`     | `securityRuns` table + schema + migration.                                                                       |
+| `@warden/env`    | `WARDEN_SECURITY_WORKER_BUDGET`.                                                                                 |
+| `@warden/config` | No changes.                                                                                                      |
 
 `@warden/core/src/security/` may import `@warden/ai` (for models + tools) and `@warden/db` (for `securityRuns`); it must not import `commander`, `picocolors`, or `ora` (ADR-0013 invariant). Worker tools (`read-file.ts`, `grep-repo.ts`) read files via Node's `node:fs` directly — they're I/O-impure tools but the impurity is bounded to the tool implementation; the surrounding harness remains pure relative to the LLM context (no `console.log`, no `process.stdout`).
 
@@ -289,16 +289,18 @@ packages/cli/package.json                         # MODIFIED — add `smoke:m18`
 - `PlanSchema` (Zod):
   ```ts
   z.object({
-    subtasks: z.array(z.object({
-      kind: z.enum(['investigate', 'classify']),
-      worker: z.enum(['sonnet', 'haiku']),
-      files: z.array(z.string()).min(1),    // repo-relative
-      slugs: z.array(SecuritySlugEnum).min(1),
-      retrievedContext: z.string().optional(),
-      // classify-only:
-      line: z.number().int().positive().optional(),
-      candidates: z.array(SecuritySlugEnum).min(2).optional(),
-    })),
+    subtasks: z.array(
+      z.object({
+        kind: z.enum(["investigate", "classify"]),
+        worker: z.enum(["sonnet", "haiku"]),
+        files: z.array(z.string()).min(1), // repo-relative
+        slugs: z.array(SecuritySlugEnum).min(1),
+        retrievedContext: z.string().optional(),
+        // classify-only:
+        line: z.number().int().positive().optional(),
+        candidates: z.array(SecuritySlugEnum).min(2).optional(),
+      }),
+    ),
     skipped_files: z.array(z.string()),
     rationale: z.string(),
   });

@@ -17,10 +17,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-const TMP_ROOT = resolve(
-  tmpdir(),
-  `warden-bugfloor-verify-${process.pid}-${Date.now()}`,
-);
+const TMP_ROOT = resolve(tmpdir(), `warden-bugfloor-verify-${process.pid}-${Date.now()}`);
 
 if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
 mkdirSync(resolve(TMP_ROOT, "src"), { recursive: true });
@@ -107,24 +104,20 @@ const singleResult = await verifyCitations({
 });
 
 for (const ln of MARKER_LINES) {
-  const survived = singleResult.comments.find((c) =>
-    c.id === `W-single${String(ln).padStart(7, "0")}`,
+  const survived = singleResult.comments.find(
+    (c) => c.id === `W-single${String(ln).padStart(7, "0")}`,
   );
   assert(survived !== undefined, `single-line snippet at line ${ln} verifies`);
 }
 
-assert(
-  singleResult.degraded.length === 0,
-  "no degraded entries when every snippet verified",
-);
+assert(singleResult.degraded.length === 0, "no degraded entries when every snippet verified");
 
 process.stdout.write(`\n[2] multi-line snippet for non-api_def source types\n`);
 
 // Collapsed (single-token-sequence) form of `MULTILINE_CONTENT` lines 3-8.
 // The line `if (x) {` cited starts at line 3; the collapsed snippet spans
 // to line 8. M10 per-line: fails. M14 concat: matches within LINE_DRIFT=5.
-const collapsedMultiSnippet =
-  "if (x) { doThing( x, ); return true; }";
+const collapsedMultiSnippet = "if (x) { doThing( x, ); return true; }";
 
 const multiToolComment: Comment = {
   id: "W-multi-tool0001",

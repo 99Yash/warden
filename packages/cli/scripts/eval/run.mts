@@ -653,7 +653,9 @@ async function main(): Promise<void> {
         const score = scoreOne(fixture, result, i + 1, config.name);
         if (error !== null) score.error = error;
         samples.push(score);
-        const presentLabelCount = fixture.labels.filter((l) => labelExpectation(l) === "present").length;
+        const presentLabelCount = fixture.labels.filter(
+          (l) => labelExpectation(l) === "present",
+        ).length;
         process.stdout.write(
           `      sample ${i + 1}/${args.samples}: ` +
             `caught ${score.caughtLabels.length}/${presentLabelCount}, ` +

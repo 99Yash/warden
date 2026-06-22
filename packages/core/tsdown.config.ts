@@ -14,7 +14,5 @@ export default defineConfig({
   // path runs tsx against src/ and was unaffected, which is why the bug
   // stayed latent through M4–M13 (the M4 era's `src/llm/prompts/` had the
   // same problem; M14 retired those prompts alongside the formatter).
-  copy: [
-    { from: "src/review-harness/prompts", to: "dist/review-harness/prompts" },
-  ],
+  copy: [{ from: "src/review-harness/prompts", to: "dist/review-harness/prompts" }],
 });

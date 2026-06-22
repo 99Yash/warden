@@ -15,6 +15,7 @@ code. Root cause is recall/depth, not cost — see memories
 `project_warden_pr235_openai_headhead` and `project_warden_recall_is_agency_gap`.
 
 Each label is tagged with the lever expected to close it:
+
 - **[prompt]** — closeable by a diligent worker-prompt variant (investigation
   protocol + N+1 / data-dependency checklist). Workers already have
   readFile/grepRepo/lookupTypeDef + multi-step; the prompt under-drives them.

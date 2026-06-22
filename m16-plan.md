@@ -2,7 +2,7 @@
 
 This is the milestone brief for the agent (or future-me) implementing M16. Self-contained: read this plus `decisions.md` ADR-0032 and you have everything.
 
-M16 lines up the two main agents — `warden review` (M14/M15) and `warden init` (M6) — across document updates. The user's framing: "let's make sure that the review and init are completely lined up, and then we can think about deep security later on." The production-RAG ideas read by the user (Arpit Bhayani's *Production RAG: Document Management & Indexing Strategies*) name the failure modes M16 fixes — chunk identity, content-hash-gated re-embed, delete semantics, doc registry, alias swap. M6 got *some* of that right (content-addressing on `chunk_hash`, locked-model isolation on embeddings) and *some* of it wrong (edits leak old chunks; deletes never prune; review surfaces stale state but refuses to refresh; `chunks.file_path` is first-writer-wins, not authoritative). M16 ships the four-fix bundle without touching the public `CommentSet` API or the worker tier. Deep-security (now M17, preserved at `m17-plan.md`) ships after M16 dogfood validates the alignment.
+M16 lines up the two main agents — `warden review` (M14/M15) and `warden init` (M6) — across document updates. The user's framing: "let's make sure that the review and init are completely lined up, and then we can think about deep security later on." The production-RAG ideas read by the user (Arpit Bhayani's _Production RAG: Document Management & Indexing Strategies_) name the failure modes M16 fixes — chunk identity, content-hash-gated re-embed, delete semantics, doc registry, alias swap. M6 got _some_ of that right (content-addressing on `chunk_hash`, locked-model isolation on embeddings) and _some_ of it wrong (edits leak old chunks; deletes never prune; review surfaces stale state but refuses to refresh; `chunks.file_path` is first-writer-wins, not authoritative). M16 ships the four-fix bundle without touching the public `CommentSet` API or the worker tier. Deep-security (now M17, preserved at `m17-plan.md`) ships after M16 dogfood validates the alignment.
 
 ## Read first (in this order)
 
@@ -17,7 +17,7 @@ M16 lines up the two main agents — `warden review` (M14/M15) and `warden init`
 9. **`./packages/core/src/init/estimate.ts`** — `estimateInit()` heuristic. M16 reuses the LOC-based USD math for the per-file pre-flight cost gate inside `reconcileFiles()`.
 10. **`./packages/core/src/context/signals/semantic.ts`** — current chunk → file attribution via `record.filePath`. M16 reroutes through the new `FileChunksStore` join; the `SemanticHit` shape stays unchanged, but a single chunk shared across files now emits one max-aggregated hit per file.
 11. **`./packages/core/src/review-harness/det-priors.ts`** — the entry point for implicit refresh. After `walkRepo()` + `computeBannerState()` + `merkleStore.diff()`, when `mode === "review"` and the diff is non-empty, call `reconcileFiles({ files: stale, removed, maxUsdBudget: env.WARDEN_REVIEW_REFRESH_MAX_USD ?? 0.25 })`. Banner state recomputation after refresh stays valid (the new file_sha entries reflect the just-reconciled tree).
-12. **`./packages/core/src/banner/index.ts`** — `computeBannerState()` reads merkle.diff() for stale detection. M16 doesn't change banner logic; the implicit refresh just *changes* what the next banner read returns (stale → no-banner after a successful refresh).
+12. **`./packages/core/src/banner/index.ts`** — `computeBannerState()` reads merkle.diff() for stale detection. M16 doesn't change banner logic; the implicit refresh just _changes_ what the next banner read returns (stale → no-banner after a successful refresh).
 13. **`./packages/env/src/index.ts`** + **`./.env.example`** — `wardenEnv()` adds optional `WARDEN_REVIEW_REFRESH_MAX_USD` (numeric string `0.0+`, default `0.25` at the consumer), and `.env.example` documents the knob per the env-var rule in CLAUDE.md.
 14. **`./packages/cli/scripts/smoke-m6-*.mts`** + **`./packages/cli/scripts/smoke-m14-*.mts`** — pattern reference for `smoke-m16-*.mts`. Real-token assertions where feasible; deterministic-facet assertions for the schema migration + backfill path; tmp-repo fixtures for the reconcile-on-edit and reconcile-on-delete paths.
 15. **`./CLAUDE.md` "Database" section** — `pnpm db:generate` → `pnpm db:migrate` workflow. M16 ships one migration. **Never `db:push`** (CLAUDE.md rule).
@@ -268,7 +268,10 @@ export class SqliteFileChunksStore implements FileChunksStore {
   }
 
   async count(): Promise<number> {
-    const row = db().select({ c: sql<number>`count(*)` }).from(fileChunks).get();
+    const row = db()
+      .select({ c: sql<number>`count(*)` })
+      .from(fileChunks)
+      .get();
     return row?.c ?? 0;
   }
 
@@ -278,12 +281,14 @@ export class SqliteFileChunksStore implements FileChunksStore {
     let embeddingsPruned = 0;
     conn.transaction(() => {
       // Orphan chunks: not present in any file_chunks row.
-      const chunkRes = conn
-        .run(sql`DELETE FROM chunks WHERE chunk_hash NOT IN (SELECT chunk_hash FROM file_chunks)`);
+      const chunkRes = conn.run(
+        sql`DELETE FROM chunks WHERE chunk_hash NOT IN (SELECT chunk_hash FROM file_chunks)`,
+      );
       chunksPruned = chunkRes.changes;
       // Orphan embeddings: not present in chunks (cascade follows naturally).
-      const embRes = conn
-        .run(sql`DELETE FROM embeddings WHERE chunk_hash NOT IN (SELECT chunk_hash FROM chunks)`);
+      const embRes = conn.run(
+        sql`DELETE FROM embeddings WHERE chunk_hash NOT IN (SELECT chunk_hash FROM chunks)`,
+      );
       embeddingsPruned = embRes.changes;
     })();
     return { chunksPruned, embeddingsPruned };
@@ -298,7 +303,11 @@ export class SqliteFileChunksStore implements FileChunksStore {
       .where(eq(indexMeta.key, META_KEYS.FILE_CHUNKS_BACKFILLED_AT))
       .get();
     if (existing) return 0;
-    const chunkCount = conn.select({ c: sql<number>`count(*)` }).from(chunks).get()?.c ?? 0;
+    const chunkCount =
+      conn
+        .select({ c: sql<number>`count(*)` })
+        .from(chunks)
+        .get()?.c ?? 0;
     const fileChunkCount = await this.count();
     if (chunkCount === 0 || fileChunkCount > 0) {
       // Either nothing to backfill or someone already populated by other means;
@@ -688,7 +697,11 @@ if (input.mode === "review" && bannerState.kind === "stale") {
         });
         environmentalDegraded.push(...reconcile.degraded);
         // Recompute banner — if we refreshed everything, banner clears.
-        bannerState = await computeBannerState({ repoRoot: input.repoRoot, currentDefault: CURRENT_DEFAULT, currentHashes });
+        bannerState = await computeBannerState({
+          repoRoot: input.repoRoot,
+          currentDefault: CURRENT_DEFAULT,
+          currentHashes,
+        });
       }
     }
   } catch (err) {
@@ -706,18 +719,25 @@ Wrap in a try/catch so refresh failures degrade cleanly to "review continues aga
 ### 6. `semantic.ts` re-attribution
 
 Current:
+
 ```ts
 const records = await input.chunkStore.getManyByHash(aboveThreshold.map((r) => r.chunkHash));
 for (const r of aboveThreshold) {
   const record = records.get(r.chunkHash);
   if (!record) continue;
-  const hit: SemanticHit = { chunkHash: r.chunkHash, similarity: r.similarity, startLine: record.startLine, endLine: record.endLine };
+  const hit: SemanticHit = {
+    chunkHash: r.chunkHash,
+    similarity: r.similarity,
+    startLine: record.startLine,
+    endLine: record.endLine,
+  };
   const existing = hitsByFile.get(record.filePath);
   if (!existing || existing.similarity < hit.similarity) hitsByFile.set(record.filePath, hit);
 }
 ```
 
 New:
+
 ```ts
 const hashes = aboveThreshold.map((r) => r.chunkHash);
 const records = await input.chunkStore.getManyByHash(hashes);
@@ -727,7 +747,12 @@ for (const r of aboveThreshold) {
   if (!record) continue;
   const files = attributions.get(r.chunkHash) ?? (record ? [record.filePath] : []); // fallback to chunks.file_path for the backfill window
   for (const filePath of files) {
-    const hit: SemanticHit = { chunkHash: r.chunkHash, similarity: r.similarity, startLine: record.startLine, endLine: record.endLine };
+    const hit: SemanticHit = {
+      chunkHash: r.chunkHash,
+      similarity: r.similarity,
+      startLine: record.startLine,
+      endLine: record.endLine,
+    };
     const existing = hitsByFile.get(filePath);
     if (!existing || existing.similarity < hit.similarity) hitsByFile.set(filePath, hit);
   }
@@ -739,6 +764,7 @@ for (const r of aboveThreshold) {
 ### 7. `@warden/env` adds `WARDEN_REVIEW_REFRESH_MAX_USD`
 
 In `packages/env/src/index.ts`:
+
 ```ts
 WARDEN_REVIEW_REFRESH_MAX_USD: z
   .string()
@@ -767,6 +793,7 @@ WARDEN_REVIEW_REFRESH_MAX_USD=
 - `smoke-m16-backfill.mts` — pre-populate `chunks` only (no `file_chunks`) → run reconcile → assert backfill query ran + `index_meta.file_chunks_backfilled_at` row exists + second invocation does NOT re-run (idempotent gate).
 
 Wire `smoke:m16` in `packages/cli/package.json`:
+
 ```json
 "smoke:m16": "tsx scripts/smoke-m16-junction.mts && tsx scripts/smoke-m16-reconcile.mts && tsx scripts/smoke-m16-incremental-refresh.mts && tsx scripts/smoke-m16-backfill.mts"
 ```
@@ -778,29 +805,35 @@ Env table: add row for `WARDEN_REVIEW_REFRESH_MAX_USD` between `WARDEN_REVIEW_WO
 > Optional. Numeric `0.0+`. Default `0.25`. USD cap applied by `det-priors.ts` when `warden review` triggers `reconcileFiles()` over stale files. Pre-flight estimate via `estimate.ts` LOC heuristic; over-budget files are skipped and surfaced as one actionable `degradedWorkers` entry pointing at `warden init`. Set to `0` to opt out of implicit refresh entirely (review runs against possibly-stale embeddings). Deletes are unconditional and free of Voyage cost. → ADR-0032.
 
 Milestone status list:
+
 - Insert new `M16 — init/review alignment` entry between M15 and M17.
 - Relabel the existing deep-security entry M16 → M17.
 
 ### 10. CONTEXT.md updates
 
 §4 Indexing — add new entries:
+
 - **`file_chunks`** — Authoritative file→chunks junction table introduced in M16 (ADR-0032). PK `(file_path, chunk_hash)`; carries `file_sha` + `indexed_at`. Indexes on both PK columns support the two hot queries: "which chunks belong to file X?" (`reconcileFiles()`) and "which files use this chunk?" (`semantic.ts` attribution). Replaces `chunks.file_path` as the source of truth — the latter survives as a backfill annotation only. → ADR-0032.
 - **`document registry`** — Conceptual name (from the production-RAG framing) for what `file_chunks` implements. Used in M16 docs only; not a code symbol.
 
 §4 Indexing — modify existing entries:
+
 - `chunk` / `ChunkRecord` — note the `chunks.file_path` field is no longer authoritative; `file_chunks` is.
 - `Merkle tree` / `merkle store` — note that `removed[]` from `diff()` is now read by `reconcileFiles()`; deletions previously leaked.
 
 §4 Indexing — add reconciliation entries:
+
 - **`reconcileFiles`** — Shared orchestration primitive at `packages/core/src/init/reconcile.ts` (ADR-0032). Input: `{ files, removed, maxUsdBudget?, ... stores }`. Embeds outside the SQLite transaction; per-file atomic writes; batched orphan prune at the call boundary. Both `runInit()` (full repo) and `det-priors.ts` (stale subset) call it with different scopes. → ADR-0032.
 - **`incremental refresh`** — The implicit refresh triggered by `warden review`'s det-priors phase when `merkleStore.diff()` reports changes (within `WARDEN_REVIEW_REFRESH_MAX_USD` budget). Distinct from `warden init` which runs the full reconcile. Both invoke `reconcileFiles()`. → ADR-0032.
 - **`refresh budget`** — Numeric USD cap on `reconcileFiles()` invocations from the review path. `WARDEN_REVIEW_REFRESH_MAX_USD` env knob, default `0.25`. Over-budget files are skipped and surfaced as one actionable `degradedWorkers` entry. Deletes are unconditional + free. → ADR-0032.
 - **`orphan prune`** — Reference-counted cleanup pass at the end of every `reconcileFiles()` invocation. Drops `chunks` rows with no remaining `file_chunks` reference + cascades to drop their embeddings. Single transaction; one full-table scan. → ADR-0032.
 
 §8 Deferred concepts — flip these from "deferred, listed in M15+" to "shipped in M16":
+
 - (Move the "incremental refresh at review time" / "stale chunks on edit + delete" surface from the M15+ deferred list to the milestone status as M16.)
 
 §8 Deferred concepts — keep deferred:
+
 - **`alias-swap index`** — `[deferred, ADR-0032 §8 NOT-in]` The blog's "build new index overnight, validate, atomically swap alias" pattern. Real value when SKU bumps cascade; defer until the second SKU bump surfaces a concrete pain.
 - **`retrieval observability`** — `[deferred, ADR-0032 §8 NOT-in]` Per-review chunk-hashes + similarities + signal provenance log table. Solves "retrieval problems disguising as LLM problems." Defer until dogfood surfaces a concrete debug case.
 - **`warden patrol`** — Already deferred per ADR-0011; M16 explicitly defers the background daemon shape too.
@@ -813,7 +846,7 @@ Milestone status list:
 4. `reconcileFiles()` with `removed: [X]`: file X's `file_chunks` rows are deleted; orphan chunks of file X are pruned (unless some other file references them); orphan embeddings cascade.
 5. `reconcileFiles()` with edits to file Y: old `file_chunks` rows for Y are deleted; new ones inserted; orphan chunks from Y's old `file_sha` are pruned (when they're not still in some other file).
 6. A simulated process error during the per-file DB commit rolls back `chunks` + `file_chunks` + `embeddings` + `merkle` together; no torn cross-table state remains.
-7. `warden review` against a working tree with 5 files changed since last init: implicit refresh runs; degraded entries are quiet (no over-cap message); semantic signal returns hits attributed to the *current* file content.
+7. `warden review` against a working tree with 5 files changed since last init: implicit refresh runs; degraded entries are quiet (no over-cap message); semantic signal returns hits attributed to the _current_ file content.
 8. `warden review` against a working tree with 200 files changed: over-cap path triggers; degraded entry surfaces with the actionable wording; review continues to completion.
 9. `WARDEN_REVIEW_REFRESH_MAX_USD=0 warden review`: implicit refresh skipped entirely; banner state remains "stale" with the existing M6 message; no new M16 degraded entry and no Voyage provider is required.
 10. `semantic.ts` attribution for chunks present in two files: emits two `SemanticHit`s, one per file_path.
@@ -843,14 +876,14 @@ Milestone status list:
 
 These are non-obvious refinements from the Q1 → Q9 grilling. Worth knowing before code, not after.
 
-- **The user's "embedding closes midway" concern.** Orphan chunks lingering after a mid-flight Voyage failure are *not* a footgun under the embed-first-then-transaction ordering. If embed fails: no DB writes → file stays at pre-call state. If transaction fails: rollback → file stays at pre-call state. There is no scenario where the file ends up in a *worse* state than before the call. The plan's per-file ordering is load-bearing for this guarantee — do not invert it.
-- **`chunks.file_path` is *intentionally* kept after M16.** Vestigial column. Pre-M16 indexes rely on it for the one-shot backfill; post-backfill, it's unused. Future cleanup ADR may drop the column when the backfill source-of-truth window expires (e.g., after two milestones with no observed pre-M16 indexes in the dogfood loop). Don't preemptively drop it in M16.
+- **The user's "embedding closes midway" concern.** Orphan chunks lingering after a mid-flight Voyage failure are _not_ a footgun under the embed-first-then-transaction ordering. If embed fails: no DB writes → file stays at pre-call state. If transaction fails: rollback → file stays at pre-call state. There is no scenario where the file ends up in a _worse_ state than before the call. The plan's per-file ordering is load-bearing for this guarantee — do not invert it.
+- **`chunks.file_path` is _intentionally_ kept after M16.** Vestigial column. Pre-M16 indexes rely on it for the one-shot backfill; post-backfill, it's unused. Future cleanup ADR may drop the column when the backfill source-of-truth window expires (e.g., after two milestones with no observed pre-M16 indexes in the dogfood loop). Don't preemptively drop it in M16.
 - **Per-file cross-table transaction wrapping is required.** The user's "embedding closes midway" concern is only fully answered if the post-embed DB commit is one atomic unit across `chunks`, `file_chunks`, `embeddings`, and `merkle`. Store methods can keep their own transactions for standalone calls, but `reconcileFiles()` must use a private `db().transaction(() => {...})()` commit helper for the cross-table write. Do not regress this back to four independent writes.
-- **`maxUsdBudget` is per-call, not per-file.** A single file's pre-flight estimate alone can exceed the budget; that file is skipped and the *full* remaining budget is available for subsequent files. The cumulative remaining-budget accountant uses *actual* Voyage cost (from `resp.promptTokens`), not the estimate, for the running total.
-- **Backfill is approximate by design.** `chunks.file_path` is first-writer-wins; the backfill copies that approximation into `file_chunks`. The first subsequent `warden init` overwrites approximations as it walks. Within one full init cycle, the index is authoritative. The transient approximation period is acceptable per the dogfood-quality v0 bar — *flag this in the close-out narrative* so future readers don't read more rigor into the backfill than is there.
+- **`maxUsdBudget` is per-call, not per-file.** A single file's pre-flight estimate alone can exceed the budget; that file is skipped and the _full_ remaining budget is available for subsequent files. The cumulative remaining-budget accountant uses _actual_ Voyage cost (from `resp.promptTokens`), not the estimate, for the running total.
+- **Backfill is approximate by design.** `chunks.file_path` is first-writer-wins; the backfill copies that approximation into `file_chunks`. The first subsequent `warden init` overwrites approximations as it walks. Within one full init cycle, the index is authoritative. The transient approximation period is acceptable per the dogfood-quality v0 bar — _flag this in the close-out narrative_ so future readers don't read more rigor into the backfill than is there.
 - **The four-config eval suite (M15) is the dogfood baseline for M16.** Run `pnpm eval --config pd-multi` before and after M16 lands to confirm review-mode behavior is unchanged on the synthetic-plant fixture set. Implicit refresh on the synthetic fixtures triggers nothing (no merkle delta), so the suite is robust to M16 changes — but verify, don't assume.
 - **`merkleStore.diff()` is the canonical stale signal.** `det-priors.ts` already computes it for banner state. M16 reuses the same call site; do not introduce a sibling "what's stale" computation. The merkle diff's `added` array is the "newly tracked file" case (e.g., user creates a new TS file mid-feature); reconcile handles it identically to `changed`.
 - **Lockfile changes don't trigger refresh.** `merkle` tracks file shas at the working-tree level; lockfile edits cause merkle deltas, but lockfiles aren't chunked or embedded (the chunker skips them via the existing `code-chunk` filters). Reconcile sees them in `staleFiles` but the chunker returns 0 chunks → 0 missing → 0 cost. Quietly handled.
-- **The "soft-skip when over-cap" message is actionable, not warning.** ADR-0032 §4 chose `kind: "actionable"` because the user *can* run `warden init` to fix it. If a future surface shows users ignore actionable entries, downgrade to "info" but flag the change in a follow-up ADR.
+- **The "soft-skip when over-cap" message is actionable, not warning.** ADR-0032 §4 chose `kind: "actionable"` because the user _can_ run `warden init` to fix it. If a future surface shows users ignore actionable entries, downgrade to "info" but flag the change in a follow-up ADR.
 - **Implicit refresh is review-only, not check-only.** `warden check` is deterministic-only per ADR-0011 — no LLM, no embeddings, no Voyage cost. M16 explicitly does NOT wire reconcile into `runCheck()`. If a future surface (e.g., pre-commit hook on check) demands fresh embeddings, that's a separate ADR.
-- **The semantic.ts fallback to `record.filePath` covers the backfill window.** Between schema migration and first reconcile, `file_chunks` has approximate rows (from the backfill); semantic queries hit a chunk that *might* not have a junction row yet (e.g., a never-written-to chunk). Fall back to `record.filePath` in that case — equivalent to pre-M16 behavior. Once first reconcile completes, the fallback path stops firing.
+- **The semantic.ts fallback to `record.filePath` covers the backfill window.** Between schema migration and first reconcile, `file_chunks` has approximate rows (from the backfill); semantic queries hit a chunk that _might_ not have a junction row yet (e.g., a never-written-to chunk). Fall back to `record.filePath` in that case — equivalent to pre-M16 behavior. Once first reconcile completes, the fallback path stops firing.

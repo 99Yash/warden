@@ -17,7 +17,6 @@ The handoff is **raw ore** (verbose, chronological, ephemeral). The lessons are 
 1. Get the timestamp: run `date -u +%Y-%m-%dT%H%M%SZ`.
 
 2. Write `.handoff/<timestamp>.md` capturing the **chronological progression** of this session, with these sections:
-
    - **Goal** — what we set out to do.
    - **Progression** — what was tried, in order, with the evidence: commands run, errors hit, what worked and what didn't. This is the part that prevents the next window from re-walking dead ends — keep the evidence (stack traces, key output, file:line refs).
    - **Current state** — what's true right now: what's done, what's in flight, what's broken, branch/uncommitted changes.

@@ -146,9 +146,7 @@ const r3 = await runDeadcode({
 assert(
   r3.findings.some(
     (f) =>
-      f.ruleId === "unreachable-optional-param" &&
-      f.message.includes("opts") &&
-      f.file === dcPath,
+      f.ruleId === "unreachable-optional-param" && f.message.includes("opts") && f.file === dcPath,
   ),
   `unreachable-optional-param finding emitted (got ${r3.findings.length} findings)`,
 );

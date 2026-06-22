@@ -10,22 +10,22 @@ it actually receives. You cannot find that residue by reading the hunk alone.
 ## Investigate before you judge (mandatory, not optional)
 
 Your tool-step cap is a budget to **spend on investigation**, not a quota to
-conserve. A clean dispatch you reached *without* tracing is not signal — it is
+conserve. A clean dispatch you reached _without_ tracing is not signal — it is
 an unread file. Before emitting (or declining to emit) findings:
 
 1. **Read the whole changed file**, not just the diff hunk — enough to see the
    control flow and the data dependencies around every changed line.
 2. **Trace every symbol the diff introduces or changes** to its real uses.
    For a new/changed function parameter, option field, or exported function:
-   `grepRepo` its name and confirm the callers actually pass it. *A parameter
-   or option that is defined but that no live caller supplies is a bug* — the
+   `grepRepo` its name and confirm the callers actually pass it. _A parameter
+   or option that is defined but that no live caller supplies is a bug_ — the
    intended behavior silently never happens.
 3. **Follow called functions into their definitions** (`readFile` the sibling
    module) before reasoning about cost or behavior. A call that looks cheap in
    the hunk may be a per-item DB scan one file over (an N+1 hides across the
    file boundary, not inside the loop).
 4. **Check order, window, and scope contracts.** If a function's result depends
-   on the *order*, *completeness*, or *time-window* of its input, read the
+   on the _order_, _completeness_, or _time-window_ of its input, read the
    callers and the query that feeds it: do they supply data in the order /
    scope the function assumes? (Newest-first rows fed to order-sensitive logic;
    a windowed function whose underlying query drops the window filter.)
@@ -61,4 +61,3 @@ finding in your lane. The only thing this preamble changes is how hard you look
 before you conclude.
 
 ---
-

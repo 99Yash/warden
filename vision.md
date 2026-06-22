@@ -9,7 +9,6 @@ Preserved verbatim from the original design gist (`gist.github.com/yashgkr/605dd
 
 ---
 
-
 # Designing a Generalized AI Code Review Agent
 
 A design document for building an AI-powered code review agent that works across ecosystems, auto-derives codebase knowledge, cites external sources, and adapts to codebase-specific conventions.
@@ -59,17 +58,17 @@ The form factor determines everything — feedback loop speed, persistence model
 
 ### Option A: GitHub App / Bot
 
-| Aspect | Detail |
-|---|---|
-| **Trigger** | PR webhook (automatic) |
-| **Scope** | Full PR diff, all commits |
-| **Context** | Can clone repo, read full codebase, query APIs |
-| **Persistence** | Bot owns its own storage (DB, Redis, S3) |
-| **Feedback** | Inline PR comments, reactions, resolve/unresolve |
-| **UI** | GitHub's existing review UI — rich, familiar |
-| **Adoption** | Install once per org, works for all repos |
-| **Cost model** | You host, you pay for LLM calls |
-| **Cross-repo** | Possible — bot can have access to multiple repos |
+| Aspect          | Detail                                           |
+| --------------- | ------------------------------------------------ |
+| **Trigger**     | PR webhook (automatic)                           |
+| **Scope**       | Full PR diff, all commits                        |
+| **Context**     | Can clone repo, read full codebase, query APIs   |
+| **Persistence** | Bot owns its own storage (DB, Redis, S3)         |
+| **Feedback**    | Inline PR comments, reactions, resolve/unresolve |
+| **UI**          | GitHub's existing review UI — rich, familiar     |
+| **Adoption**    | Install once per org, works for all repos        |
+| **Cost model**  | You host, you pay for LLM calls                  |
+| **Cross-repo**  | Possible — bot can have access to multiple repos |
 
 **Best for**: Teams using GitHub as their primary review platform. This is where reviews already happen — no behavior change required. Persistent memory is natural. Cross-repo awareness is architecturally possible since the bot can access sibling repos.
 
@@ -77,17 +76,17 @@ The form factor determines everything — feedback loop speed, persistence model
 
 ### Option B: CI Step (GitHub Action / GitLab CI Job)
 
-| Aspect | Detail |
-|---|---|
-| **Trigger** | CI pipeline (automatic on push/MR) |
-| **Scope** | Full diff available in CI env |
-| **Context** | Repo is already checked out, can run tools |
-| **Persistence** | None native — needs external storage or cache action |
-| **Feedback** | Post comments via API, but not truly inline on all platforms |
-| **UI** | CI log output + API-posted comments |
-| **Adoption** | Add a YAML block to CI config |
-| **Cost model** | Runs in customer's CI — their compute, their LLM keys |
-| **Cross-repo** | Hard — CI job scoped to one repo |
+| Aspect          | Detail                                                       |
+| --------------- | ------------------------------------------------------------ |
+| **Trigger**     | CI pipeline (automatic on push/MR)                           |
+| **Scope**       | Full diff available in CI env                                |
+| **Context**     | Repo is already checked out, can run tools                   |
+| **Persistence** | None native — needs external storage or cache action         |
+| **Feedback**    | Post comments via API, but not truly inline on all platforms |
+| **UI**          | CI log output + API-posted comments                          |
+| **Adoption**    | Add a YAML block to CI config                                |
+| **Cost model**  | Runs in customer's CI — their compute, their LLM keys        |
+| **Cross-repo**  | Hard — CI job scoped to one repo                             |
 
 **Best for**: Enterprise teams with data sensitivity concerns (code never leaves their infra). Open-source projects wanting zero-dependency installs. Trivially installable. Customer brings their own LLM API keys — your cost is zero.
 
@@ -95,17 +94,17 @@ The form factor determines everything — feedback loop speed, persistence model
 
 ### Option C: IDE Extension (VS Code, JetBrains)
 
-| Aspect | Detail |
-|---|---|
-| **Trigger** | On save, on file open, or manual invocation |
-| **Scope** | Current file or staged changes |
-| **Context** | Full workspace via LSP, open files, git diff |
-| **Persistence** | Local storage (extension state, SQLite in workspace) |
-| **Feedback** | Inline diagnostics, code lenses, quick fixes |
-| **UI** | Native IDE integration — squiggles, hover cards, fix suggestions |
-| **Adoption** | Install from marketplace |
-| **Cost model** | User's own LLM keys or your proxy service |
-| **Cross-repo** | If both repos are in workspace, yes. Otherwise no |
+| Aspect          | Detail                                                           |
+| --------------- | ---------------------------------------------------------------- |
+| **Trigger**     | On save, on file open, or manual invocation                      |
+| **Scope**       | Current file or staged changes                                   |
+| **Context**     | Full workspace via LSP, open files, git diff                     |
+| **Persistence** | Local storage (extension state, SQLite in workspace)             |
+| **Feedback**    | Inline diagnostics, code lenses, quick fixes                     |
+| **UI**          | Native IDE integration — squiggles, hover cards, fix suggestions |
+| **Adoption**    | Install from marketplace                                         |
+| **Cost model**  | User's own LLM keys or your proxy service                        |
+| **Cross-repo**  | If both repos are in workspace, yes. Otherwise no                |
 
 **Best for**: Fastest feedback loop — issues caught as you type, before code reaches review. Native IDE affordances (diagnostics, code actions) are richer than any PR comment.
 
@@ -113,17 +112,17 @@ The form factor determines everything — feedback loop speed, persistence model
 
 ### Option D: Pre-commit Hook / CLI
 
-| Aspect | Detail |
-|---|---|
-| **Trigger** | Manual (`reviewbot check`) or git hook (pre-commit/pre-push) |
-| **Scope** | Staged changes or specified files |
-| **Context** | Full repo on disk, can run any local tool |
-| **Persistence** | None unless you build a local daemon or use a DB file |
-| **Feedback** | Terminal output, exit codes |
-| **UI** | Plain text |
-| **Adoption** | `npm install -g` / `pip install` / `brew install` |
-| **Cost model** | User brings own LLM keys (BYOLLM) |
-| **Cross-repo** | Only if user points it at multiple repos |
+| Aspect          | Detail                                                       |
+| --------------- | ------------------------------------------------------------ |
+| **Trigger**     | Manual (`reviewbot check`) or git hook (pre-commit/pre-push) |
+| **Scope**       | Staged changes or specified files                            |
+| **Context**     | Full repo on disk, can run any local tool                    |
+| **Persistence** | None unless you build a local daemon or use a DB file        |
+| **Feedback**    | Terminal output, exit codes                                  |
+| **UI**          | Plain text                                                   |
+| **Adoption**    | `npm install -g` / `pip install` / `brew install`            |
+| **Cost model**  | User brings own LLM keys (BYOLLM)                            |
+| **Cross-repo**  | Only if user points it at multiple repos                     |
 
 **Best for**: Power users, CLI-native developers. BYOLLM — zero vendor lock-in. Pre-commit catches issues before they become commits.
 
@@ -160,7 +159,7 @@ Build the CLI as the core engine. It does the heavy lifting. The wrappers handle
 model:
   default_provider: anthropic
   default_model: claude-sonnet-4-20250514
-  api_key_env: REVIEWBOT_API_KEY   # single key, single provider
+  api_key_env: REVIEWBOT_API_KEY # single key, single provider
 
 # Advanced override — for power users who want control
 # Most users should never touch this
@@ -175,7 +174,7 @@ advanced:
     api_key_env: OPENAI_API_KEY
   worker:
     provider: anthropic
-    model: claude-haiku-4       # cheaper model for parallel sub-agents
+    model: claude-haiku-4 # cheaper model for parallel sub-agents
     api_key_env: ANTHROPIC_API_KEY
 ```
 
@@ -282,6 +281,7 @@ Triage says: needs correctness + contract review
 ```
 
 Each worker gets:
+
 - Only the files relevant to its concern (not the entire diff)
 - A focused system prompt for its specialty
 - No access to other workers' findings
@@ -290,21 +290,21 @@ Each worker gets:
 
 Not all workers are equal. UReview uses Sonnet for generation — and for good reason. Subtle bugs (race conditions, type narrowing edge cases, auth flow correctness) degrade noticeably on small models. The cost savings of Haiku aren't worth it if the security worker misses an auth bypass.
 
-| Worker type | Model tier | Why |
-|---|---|---|
-| **Correctness** | Sonnet-class | Subtle bugs require strong reasoning — off-by-one, null narrowing, async race conditions |
-| **Security** | Sonnet-class | Auth bypass, injection, secrets — too important to skimp on |
-| **Contract** | Haiku-class | Focused comparison task: "does this change match the integration map?" — doesn't need deep reasoning |
-| **Dependency** | No LLM | Deterministic tool output (npm audit, pip-audit). LLM only formats the comment. |
-| **Best practices** | Haiku-class | Pattern matching against known conventions — Haiku is sufficient |
+| Worker type        | Model tier   | Why                                                                                                  |
+| ------------------ | ------------ | ---------------------------------------------------------------------------------------------------- |
+| **Correctness**    | Sonnet-class | Subtle bugs require strong reasoning — off-by-one, null narrowing, async race conditions             |
+| **Security**       | Sonnet-class | Auth bypass, injection, secrets — too important to skimp on                                          |
+| **Contract**       | Haiku-class  | Focused comparison task: "does this change match the integration map?" — doesn't need deep reasoning |
+| **Dependency**     | No LLM       | Deterministic tool output (npm audit, pip-audit). LLM only formats the comment.                      |
+| **Best practices** | Haiku-class  | Pattern matching against known conventions — Haiku is sufficient                                     |
 
 This means the per-provider model mapping matters:
 
-| Provider | Boss / Grader | Sonnet-tier worker | Haiku-tier worker |
-|---|---|---|---|
-| Anthropic | claude-sonnet-4 | claude-sonnet-4 | claude-haiku-4 |
-| OpenAI | gpt-4.1 | gpt-4.1 | gpt-4.1-mini |
-| Google | gemini-2.5-pro | gemini-2.5-pro | gemini-2.5-flash |
+| Provider  | Boss / Grader   | Sonnet-tier worker | Haiku-tier worker |
+| --------- | --------------- | ------------------ | ----------------- |
+| Anthropic | claude-sonnet-4 | claude-sonnet-4    | claude-haiku-4    |
+| OpenAI    | gpt-4.1         | gpt-4.1            | gpt-4.1-mini      |
+| Google    | gemini-2.5-pro  | gemini-2.5-pro     | gemini-2.5-flash  |
 
 When `REVIEWBOT_API_KEY` points to a provider, the agent selects the appropriate model per role from that provider's lineup. Each supported provider must offer both a strong and a cheap SKU.
 
@@ -315,6 +315,7 @@ A null-deref in a webhook handler that touches an integration boundary is both a
 **Ownership rule**: When two workers flag the same file+line range, the finding belongs to whichever worker's concern is more specific. Contract > Correctness > Security > Best Practices. (Security overrides this if the finding is a vulnerability, not a code quality issue.)
 
 **Dedup tiebreak**: The boss (Step 3) sees all findings grouped by file+line. For overlapping findings:
+
 1. If findings are semantically identical (same claim, different framing): keep the higher-confidence one, merge citations from both.
 2. If findings are complementary (different claims about the same code): keep both, but the boss rewrites them as a single compound comment ("This webhook handler has a null-deref risk AND touches a cross-repo integration point").
 3. If findings contradict: the grader (Step 4) decides. If the grader can't resolve the contradiction, drop both — a contradictory comment is worse than no comment.
@@ -326,9 +327,9 @@ This is not a hallucination-free process. The boss's dedup is an LLM call and ca
 ```yaml
 orchestration:
   max_workers: 4
-  worker_timeout: 30        # seconds per worker
-  boss_timeout: 45           # seconds for synthesis + grading
-  on_worker_timeout: continue  # "continue" or "fail"
+  worker_timeout: 30 # seconds per worker
+  boss_timeout: 45 # seconds for synthesis + grading
+  on_worker_timeout: continue # "continue" or "fail"
 ```
 
 **Default behavior: continue with degraded coverage.**
@@ -351,12 +352,12 @@ Remaining checks (correctness, contract, dependency) completed normally.
 
 **Silently dropping the security worker is unacceptable.** If a critical worker fails, the developer must know. If a non-critical worker (best practices) fails, mention it but don't alarm.
 
-| Worker type | On timeout |
-|---|---|
-| Security | Loud warning. Suggest re-running. |
-| Correctness | Loud warning. Suggest re-running. |
-| Contract | Quiet mention. Review is still useful. |
-| Best practices | Silent. Nobody misses it. |
+| Worker type    | On timeout                             |
+| -------------- | -------------------------------------- |
+| Security       | Loud warning. Suggest re-running.      |
+| Correctness    | Loud warning. Suggest re-running.      |
+| Contract       | Quiet mention. Review is still useful. |
+| Best practices | Silent. Nobody misses it.              |
 
 ### Sibling-repo integration map: built offline, consumed per-PR
 
@@ -377,6 +378,7 @@ Per-PR review:
 The per-PR run reads a pre-built artifact. It never clones or scans the sibling repo in real time. This keeps per-PR latency low and avoids the cost of scanning a 1M-LOC sibling on every push.
 
 The integration map is rebuilt when:
+
 - The sibling repo's main branch changes (post-merge hook)
 - A nightly cron fires (catch-all)
 - A developer manually triggers `reviewbot rescan-siblings`
@@ -385,15 +387,15 @@ The integration map is rebuilt when:
 
 Not every review needs every tool. Triage (Step 0) activates tools based on what the diff touches:
 
-| Diff touches... | Tools activated |
-|---|---|
-| `.ts` / `.tsx` files | TypeScript compiler, ESLint |
-| `package.json` / lockfile | npm audit, dependency diff |
-| `.py` files | Ruff, Pyright (if configured) |
-| `requirements.txt` | pip-audit |
-| Files in integration map | Cross-repo contract checker |
-| Webhook handlers | Sync loop pattern matcher |
-| SQL files or SQL strings | SQL injection scanner (Bandit for Python, custom for others) |
+| Diff touches...           | Tools activated                                              |
+| ------------------------- | ------------------------------------------------------------ |
+| `.ts` / `.tsx` files      | TypeScript compiler, ESLint                                  |
+| `package.json` / lockfile | npm audit, dependency diff                                   |
+| `.py` files               | Ruff, Pyright (if configured)                                |
+| `requirements.txt`        | pip-audit                                                    |
+| Files in integration map  | Cross-repo contract checker                                  |
+| Webhook handlers          | Sync loop pattern matcher                                    |
+| SQL files or SQL strings  | SQL injection scanner (Bandit for Python, custom for others) |
 
 Tools not needed for this diff are never loaded. This keeps context tight and avoids wasting time on irrelevant scans.
 
@@ -401,13 +403,13 @@ Tools not needed for this diff are never loaded. This keeps context tight and av
 
 Phase 8 (Feedback Loop) feeds back into orchestration over time:
 
-| Feedback signal | Orchestration adaptation |
-|---|---|
-| Security worker findings consistently rated "Useful" | Lower confidence threshold for security → post more |
-| Best practices worker findings consistently rated "Not Useful" | Stop spawning best practices worker entirely |
-| Correctness worker on Python files has high false-positive rate | Switch Python correctness worker to Sonnet-class (if currently Haiku) |
-| Contract worker findings never addressed | Investigate: are the integration map entries stale, or is the worker producing noise? |
-| A specific deterministic pattern generates false positives | Remove or refine the pattern in `patterns.yaml` |
+| Feedback signal                                                 | Orchestration adaptation                                                              |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Security worker findings consistently rated "Useful"            | Lower confidence threshold for security → post more                                   |
+| Best practices worker findings consistently rated "Not Useful"  | Stop spawning best practices worker entirely                                          |
+| Correctness worker on Python files has high false-positive rate | Switch Python correctness worker to Sonnet-class (if currently Haiku)                 |
+| Contract worker findings never addressed                        | Investigate: are the integration map entries stale, or is the worker producing noise? |
+| A specific deterministic pattern generates false positives      | Remove or refine the pattern in `patterns.yaml`                                       |
 
 Worker selection isn't static. The set of workers spawned, and their model tiers, should drift over time based on which workers produce value for this specific codebase. This is the long-term payoff of the feedback loop — not just threshold tuning, but structural adaptation of the orchestration itself.
 
@@ -421,17 +423,17 @@ Before the agent can review anything, it needs to understand what it's looking a
 
 On every run, scan the repo root for ecosystem markers:
 
-| Marker File(s) | Ecosystem | Package Manager |
-|---|---|---|
-| `package.json`, `tsconfig.json` | JavaScript / TypeScript | npm / yarn / pnpm / bun |
-| `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Python | pip / pipenv / poetry / uv |
-| `go.mod` | Go | go modules |
-| `deps.edn`, `project.clj` | Clojure | deps / leiningen |
-| `Cargo.toml` | Rust | cargo |
-| `pom.xml`, `build.gradle`, `build.gradle.kts` | Java / Kotlin | maven / gradle |
-| `Gemfile` | Ruby | bundler |
-| `composer.json` | PHP | composer |
-| `Package.swift` | Swift | SPM |
+| Marker File(s)                                              | Ecosystem               | Package Manager            |
+| ----------------------------------------------------------- | ----------------------- | -------------------------- |
+| `package.json`, `tsconfig.json`                             | JavaScript / TypeScript | npm / yarn / pnpm / bun    |
+| `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Python                  | pip / pipenv / poetry / uv |
+| `go.mod`                                                    | Go                      | go modules                 |
+| `deps.edn`, `project.clj`                                   | Clojure                 | deps / leiningen           |
+| `Cargo.toml`                                                | Rust                    | cargo                      |
+| `pom.xml`, `build.gradle`, `build.gradle.kts`               | Java / Kotlin           | maven / gradle             |
+| `Gemfile`                                                   | Ruby                    | bundler                    |
+| `composer.json`                                             | PHP                     | composer                   |
+| `Package.swift`                                             | Swift                   | SPM                        |
 
 ### What to auto-derive (not manually write)
 
@@ -467,62 +469,63 @@ The agent should activate the appropriate language tooling per ecosystem. These 
 
 ### JavaScript / TypeScript
 
-| Tool | Purpose | Activation |
-|---|---|---|
-| **TypeScript Language Server** (`tsserver` / `typescript-language-server`) | Type errors, unreachable code, missing imports | Run `tsc --noEmit` on changed files |
-| **ESLint** | Linting rules, best practices, plugin-specific checks | Run on changed files with repo's config |
-| **Biome** (if configured) | Combined lint + format | Alternative to ESLint |
-| **Knip** | Dead code, unused exports, unused dependencies | Run on full project (cached) |
-| **Madge** | Circular dependency detection | Run on changed module graphs |
+| Tool                                                                       | Purpose                                               | Activation                              |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------- |
+| **TypeScript Language Server** (`tsserver` / `typescript-language-server`) | Type errors, unreachable code, missing imports        | Run `tsc --noEmit` on changed files     |
+| **ESLint**                                                                 | Linting rules, best practices, plugin-specific checks | Run on changed files with repo's config |
+| **Biome** (if configured)                                                  | Combined lint + format                                | Alternative to ESLint                   |
+| **Knip**                                                                   | Dead code, unused exports, unused dependencies        | Run on full project (cached)            |
+| **Madge**                                                                  | Circular dependency detection                         | Run on changed module graphs            |
 
 **Key nuance for TS**: The LSP can give you type-level insights the LLM can't — like "this function returns `Promise<string | undefined>` but you're not handling the `undefined` case." The agent should consume TSC diagnostics as structured data and pass them to the LLM only for formatting into human-readable comments.
 
 ### Python
 
-| Tool | Purpose |
-|---|---|
-| **Pyright** / **Pylsp** | Type checking, missing imports |
-| **Ruff** | Fast linting (replaces flake8 + isort + pyupgrade + many others) |
-| **mypy** | Strict type checking (if configured) |
-| **Bandit** | Security-focused static analysis |
+| Tool                    | Purpose                                                          |
+| ----------------------- | ---------------------------------------------------------------- |
+| **Pyright** / **Pylsp** | Type checking, missing imports                                   |
+| **Ruff**                | Fast linting (replaces flake8 + isort + pyupgrade + many others) |
+| **mypy**                | Strict type checking (if configured)                             |
+| **Bandit**              | Security-focused static analysis                                 |
 
 ### Go
 
-| Tool | Purpose |
-|---|---|
-| **gopls** | Type errors, unused variables |
-| **staticcheck** | Bug detection, simplifications, performance |
-| **golangci-lint** | Meta-linter aggregating 50+ linters |
-| **govulncheck** | Vulnerability scanning for Go modules |
+| Tool              | Purpose                                     |
+| ----------------- | ------------------------------------------- |
+| **gopls**         | Type errors, unused variables               |
+| **staticcheck**   | Bug detection, simplifications, performance |
+| **golangci-lint** | Meta-linter aggregating 50+ linters         |
+| **govulncheck**   | Vulnerability scanning for Go modules       |
 
 ### Clojure
 
-| Tool | Purpose |
-|---|---|
+| Tool            | Purpose                                           |
+| --------------- | ------------------------------------------------- |
 | **clojure-lsp** | Namespace resolution, unused imports, refactoring |
-| **clj-kondo** | Linting, type hints, arity checks |
-| **Eastwood** | Additional lint rules |
+| **clj-kondo**   | Linting, type hints, arity checks                 |
+| **Eastwood**    | Additional lint rules                             |
 
 ### Rust
 
-| Tool | Purpose |
-|---|---|
-| **rust-analyzer** | Type errors, borrow checker insights |
-| **clippy** | Idiomatic Rust lints, performance, correctness |
-| **cargo audit** | Dependency vulnerabilities |
+| Tool              | Purpose                                        |
+| ----------------- | ---------------------------------------------- |
+| **rust-analyzer** | Type errors, borrow checker insights           |
+| **clippy**        | Idiomatic Rust lints, performance, correctness |
+| **cargo audit**   | Dependency vulnerabilities                     |
 
 ### Java / Kotlin
 
-| Tool | Purpose |
-|---|---|
-| **Eclipse JDT LS** / **kotlin-language-server** | Type errors, missing imports |
-| **ErrorProne** (Java) | Bug pattern detection at compile time |
-| **Detekt** (Kotlin) | Code smell detection |
-| **SpotBugs** | Bytecode-level bug detection |
+| Tool                                            | Purpose                               |
+| ----------------------------------------------- | ------------------------------------- |
+| **Eclipse JDT LS** / **kotlin-language-server** | Type errors, missing imports          |
+| **ErrorProne** (Java)                           | Bug pattern detection at compile time |
+| **Detekt** (Kotlin)                             | Code smell detection                  |
+| **SpotBugs**                                    | Bytecode-level bug detection          |
 
 ### How the agent uses tool output
 
 The agent does NOT run an LSP interactively. It runs the CLI equivalents (`tsc --noEmit`, `eslint --format json`, `ruff check --output-format json`, etc.) and consumes their structured output. This is:
+
 - Faster than starting an LSP server
 - Cacheable (same input → same output)
 - CI-friendly (no persistent process needed)
@@ -535,14 +538,14 @@ The tool findings become **pre-verified facts** the LLM can reference. The LLM's
 
 ### Per-ecosystem vulnerability scanning
 
-| Ecosystem | Scanner | Data Source |
-|---|---|---|
-| JS/TS | `npm audit --json` / `yarn audit --json` | GitHub Advisory Database |
-| Python | `pip-audit --format json` | OSV.dev, PyPI |
-| Go | `govulncheck ./...` | Go Vulnerability Database |
-| Rust | `cargo audit --json` | RustSec Advisory Database |
-| Java | OWASP `dependency-check` | NVD, various |
-| Clojure | `nvd-clojure` | NVD |
+| Ecosystem | Scanner                                  | Data Source               |
+| --------- | ---------------------------------------- | ------------------------- |
+| JS/TS     | `npm audit --json` / `yarn audit --json` | GitHub Advisory Database  |
+| Python    | `pip-audit --format json`                | OSV.dev, PyPI             |
+| Go        | `govulncheck ./...`                      | Go Vulnerability Database |
+| Rust      | `cargo audit --json`                     | RustSec Advisory Database |
+| Java      | OWASP `dependency-check`                 | NVD, various              |
+| Clojure   | `nvd-clojure`                            | NVD                       |
 
 ### Universal fallback: OSV.dev API
 
@@ -567,6 +570,7 @@ This returns structured CVE data with severity scores, affected version ranges, 
 ### Dependency diff analysis
 
 When a PR modifies a lockfile, diff the before/after to identify:
+
 - Newly added dependencies → scan each for known vulnerabilities
 - Version changes → check if the new version resolves or introduces CVEs
 - Removed dependencies → no action needed (but note if a transitive dep now brings in something flagged)
@@ -592,14 +596,14 @@ This is where the actual AI review happens. The LLM receives:
 
 Following UReview's approach, use separate prompt chains for different concern types:
 
-| Assistant | Focus | When to activate |
-|---|---|---|
-| **Correctness** | Logic bugs, null safety, race conditions, off-by-one, incorrect return types | Always |
-| **Error Handling** | Missing try/catch, unhandled promise rejections, error propagation gaps | Always |
-| **Security** | Injection, auth bypass, secrets in code, unsafe deserialization | Always |
-| **Best Practices** | Ecosystem-specific conventions (React hooks rules, Go error idioms, etc.) | Always, but category-filtered |
-| **Dependency** | CVE findings, deprecated APIs, breaking changes in upgraded deps | Only when dependency files change |
-| **Contract** | Cross-module or cross-repo API contract violations | When touching API boundaries |
+| Assistant          | Focus                                                                        | When to activate                  |
+| ------------------ | ---------------------------------------------------------------------------- | --------------------------------- |
+| **Correctness**    | Logic bugs, null safety, race conditions, off-by-one, incorrect return types | Always                            |
+| **Error Handling** | Missing try/catch, unhandled promise rejections, error propagation gaps      | Always                            |
+| **Security**       | Injection, auth bypass, secrets in code, unsafe deserialization              | Always                            |
+| **Best Practices** | Ecosystem-specific conventions (React hooks rules, Go error idioms, etc.)    | Always, but category-filtered     |
+| **Dependency**     | CVE findings, deprecated APIs, breaking changes in upgraded deps             | Only when dependency files change |
+| **Contract**       | Cross-module or cross-repo API contract violations                           | When touching API boundaries      |
 
 ### The orchestrated pipeline
 
@@ -650,15 +654,15 @@ Every comment that references external knowledge MUST include structured source 
 
 ### Source types
 
-| Type | Example | Verification method |
-|---|---|---|
-| `cve` | NVD entry | OSV.dev API or `npm audit` output |
-| `advisory` | GitHub Advisory | GitHub Advisory Database API |
-| `changelog` | Package release notes | Registry API (npmjs.com, pypi.org) |
-| `documentation` | Official docs page | Web fetch + content verification |
-| `web` | Blog post, Stack Overflow | Web search + LLM verification that content supports the claim |
-| `tool` | TypeScript compiler diagnostic | TSC output (deterministic, no URL needed) |
-| `repo_convention` | Project's own style guide or docs | File path within the repo |
+| Type              | Example                           | Verification method                                           |
+| ----------------- | --------------------------------- | ------------------------------------------------------------- |
+| `cve`             | NVD entry                         | OSV.dev API or `npm audit` output                             |
+| `advisory`        | GitHub Advisory                   | GitHub Advisory Database API                                  |
+| `changelog`       | Package release notes             | Registry API (npmjs.com, pypi.org)                            |
+| `documentation`   | Official docs page                | Web fetch + content verification                              |
+| `web`             | Blog post, Stack Overflow         | Web search + LLM verification that content supports the claim |
+| `tool`            | TypeScript compiler diagnostic    | TSC output (deterministic, no URL needed)                     |
+| `repo_convention` | Project's own style guide or docs | File path within the repo                                     |
 
 ### Verification pipeline
 
@@ -671,6 +675,7 @@ The agent MUST NOT post a comment citing a source it hasn't actually retrieved a
 5. Grader LLM reviews the final comment + sources for coherence
 
 For web-sourced claims (deprecation notices, best practice changes), the agent should:
+
 1. Fetch the cited URL
 2. Verify the page content actually supports the claim
 3. Include a relevant quote/snippet in the comment for the developer to scan without clicking through
@@ -694,6 +699,7 @@ The agent maintains four distinct caches. Three are fully automated. One has a s
 **Built by**: The agent itself, on every run (incrementally — only re-scan changed areas).
 
 **How it works**:
+
 - Scan for marker files → detect ecosystems (see Phase 0)
 - Parse dependency declarations → detect frameworks and versions
 - Scan for HTTP client calls → detect integration points (what URLs does this repo call?)
@@ -728,6 +734,7 @@ The agent maintains four distinct caches. Three are fully automated. One has a s
 **Invalidation**: Never. Append-only.
 
 **Used for**:
+
 - Auto-suppressing categories with <30% usefulness rate
 - Tuning confidence thresholds per category
 - Tracking comment-addressed rate over time
@@ -742,12 +749,12 @@ The agent maintains four distinct caches. Three are fully automated. One has a s
 
 **Invalidation**: TTL-based:
 
-| Query type | TTL |
-|---|---|
+| Query type                              | TTL      |
+| --------------------------------------- | -------- |
 | CVE lookup for specific package+version | 24 hours |
-| Package latest version | 6 hours |
-| Web search result | 48 hours |
-| Changelog/release notes | 7 days |
+| Package latest version                  | 6 hours  |
+| Web search result                       | 48 hours |
+| Changelog/release notes                 | 7 days   |
 
 ### The human overlay (optional, minimal)
 
@@ -762,7 +769,7 @@ known_debt:
 
 # Override auto-derived suppressions
 force_enable_categories:
-  - error-handling  # even if feedback says suppress, keep this on
+  - error-handling # even if feedback says suppress, keep this on
 ```
 
 This file is typically 5-20 lines. If it's missing, the agent works fine — it just doesn't suppress known debt.
@@ -784,6 +791,7 @@ Instead of "humans document contracts, agent checks them," the model is "agent d
 On first run (and incrementally thereafter), the agent scans the codebase for integration signals:
 
 **Outbound HTTP calls**:
+
 ```
 grep for: fetch(, axios., httpx., http/get, http/post, requests.get, etc.
 Extract: URL patterns, base URL variables, endpoint paths
@@ -791,6 +799,7 @@ Result: "This repo calls https://api.example.com/internal/users"
 ```
 
 **Inbound route handlers**:
+
 ```
 grep for: app.get(, app.post(, defroutes, @app.route, router.post, etc.
 Extract: Endpoint paths, expected request/response shapes
@@ -798,6 +807,7 @@ Result: "This repo exposes POST /internal/token-to-user"
 ```
 
 **Shared constants and magic values**:
+
 ```
 grep for: repeated string literals, enum values, status codes
 Cross-reference between repos
@@ -805,6 +815,7 @@ Result: "Both repos reference 'datomic' as an edit_source value"
 ```
 
 **Webhook handlers**:
+
 ```
 grep for: webhook, callback, hook, event handler patterns
 Extract: Expected payload shapes
@@ -817,18 +828,18 @@ A **draft integration map** — not a contract file, but a discovered fact sheet
 
 ```
 Integration points discovered:
-  
+
   [OUTBOUND] baserow-middleware → autosched
     - GET  /internal/token-to-user  (clients/oliv.py:45)
     - POST /internal/get-recording-url  (clients/oliv.py:112)
     - POST /internal/delete-datomic-entity  (clients/oliv.py:156)
-  
+
   [SHARED VALUES]
     - edit_source: "datomic" | "user" | "ai_extraction"
       Used in: autosched/baserow/data_sync.clj, middleware/utils/api.py
     - Table names: "Deals", "Contacts", "Meetings", "Companies"
       Used in: autosched/baserow/*, middleware/model/schema.py
-  
+
   [INBOUND WEBHOOKS]
     - POST /baserow/update  (autosched/baserow/app.clj)
       Payload includes: source_metadata.edit_source
@@ -898,14 +909,14 @@ The principle: **only interrupt the developer when you have something actionable
 
 When the agent detects staleness, it doesn't just report it — it fixes what it can:
 
-| Staleness | Auto-fix |
-|---|---|
-| Codebase snapshot outdated | Trigger incremental re-scan of changed files |
-| Full re-scan needed (>30% churn) | Trigger full re-scan, warn that review may take longer |
-| Dependency state stale | Re-run `npm audit` / `pip-audit` before reviewing |
-| Integration map has dead references | Remove stale entries, re-scan for new integration points |
-| CVE cache expired | Re-query OSV.dev for affected packages |
-| Human overlay file stale | Can't auto-fix — post a reminder: "overlay.yaml hasn't been updated in 94 days. If known debt has changed, consider updating it." |
+| Staleness                           | Auto-fix                                                                                                                          |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Codebase snapshot outdated          | Trigger incremental re-scan of changed files                                                                                      |
+| Full re-scan needed (>30% churn)    | Trigger full re-scan, warn that review may take longer                                                                            |
+| Dependency state stale              | Re-run `npm audit` / `pip-audit` before reviewing                                                                                 |
+| Integration map has dead references | Remove stale entries, re-scan for new integration points                                                                          |
+| CVE cache expired                   | Re-query OSV.dev for affected packages                                                                                            |
+| Human overlay file stale            | Can't auto-fix — post a reminder: "overlay.yaml hasn't been updated in 94 days. If known debt has changed, consider updating it." |
 
 The only thing that requires human action is the overlay file — and since it's optional and small, the blast radius of it being stale is limited to "the agent might comment on known debt that the team has already accepted."
 
@@ -920,6 +931,7 @@ Track the % of reviews run at HIGH vs. DEGRADED confidence over time. If DEGRADE
 ### Developer feedback collection
 
 Every posted comment includes:
+
 - A "Useful" / "Not Useful" action (button, emoji reaction, or CLI command depending on form factor)
 - An optional free-text note for "Not Useful" comments explaining why
 
@@ -929,25 +941,25 @@ Following UReview's approach: after a PR is merged, re-run the agent on the fina
 
 ### What feedback drives
 
-| Signal | Action |
-|---|---|
-| Category usefulness drops below 30% | Auto-suppress that category |
-| Specific file paths consistently get "Not Useful" | Add to auto-derived suppression list |
-| A comment type gets high "Useful" rate | Lower confidence threshold → post more of these |
-| False citation reported | Flag source as unreliable, increase verification requirements |
+| Signal                                            | Action                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| Category usefulness drops below 30%               | Auto-suppress that category                                   |
+| Specific file paths consistently get "Not Useful" | Add to auto-derived suppression list                          |
+| A comment type gets high "Useful" rate            | Lower confidence threshold → post more of these               |
+| False citation reported                           | Flag source as unreliable, increase verification requirements |
 
 ### Metrics to track
 
 **Important caveat**: The targets below are aspirational numbers for a mature, tuned system (6+ months of operation with feedback data). They are NOT baselines for a prototype. A freshly deployed agent will have lower usefulness rates and higher false positive rates. That's expected. Don't measure a v0.1 prototype against Uber's production numbers and panic — iterate on the feedback loop instead.
 
-| Metric | What it measures | Aspirational target (mature) | Prototype expectation |
-|---|---|---|---|
-| **Usefulness rate** | % of comments marked "Useful" | >70% | 40-60% is fine initially |
-| **Address rate** | % of comments resolved in final commit | >60% | 30-50% |
-| **False positive rate** | % of comments marked "Not Useful" | <25% | <35% — developers tune out around 30-35% noise. Higher than this and your pilot won't survive the first two weeks. |
-| **Coverage** | % of PRs that receive at least one comment | Track, no target | Track, no target |
-| **Latency** | Time from PR creation to comments posted | <5 minutes | <10 minutes |
-| **Cost per review** | LLM API cost per PR | Track to avoid surprises | Track to avoid surprises |
+| Metric                  | What it measures                           | Aspirational target (mature) | Prototype expectation                                                                                              |
+| ----------------------- | ------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Usefulness rate**     | % of comments marked "Useful"              | >70%                         | 40-60% is fine initially                                                                                           |
+| **Address rate**        | % of comments resolved in final commit     | >60%                         | 30-50%                                                                                                             |
+| **False positive rate** | % of comments marked "Not Useful"          | <25%                         | <35% — developers tune out around 30-35% noise. Higher than this and your pilot won't survive the first two weeks. |
+| **Coverage**            | % of PRs that receive at least one comment | Track, no target             | Track, no target                                                                                                   |
+| **Latency**             | Time from PR creation to comments posted   | <5 minutes                   | <10 minutes                                                                                                        |
+| **Cost per review**     | LLM API cost per PR                        | Track to avoid surprises     | Track to avoid surprises                                                                                           |
 
 Track all of these from day one, but set expectations with the team that early numbers will be rough. The feedback loop (Phase 8) is what drives improvement — the metrics just measure the rate of improvement.
 
@@ -987,14 +999,14 @@ The agent should flag when its cached knowledge might be stale:
 
 ### Manual overrides
 
-| Mechanism | Effect |
-|---|---|
-| PR label: `skip-ai-review` | Agent does not post any comments |
-| PR label: `full-ai-review` | Agent ignores known-debt suppressions (review everything) |
-| File: `.reviewbot/pause` | Agent is globally paused until file is removed |
-| Comment: `@reviewbot ignore` | Agent suppresses the specific comment thread |
-| Comment: `@reviewbot explain` | Agent elaborates on a specific finding with more context |
-| Comment: `@reviewbot rescan` | Force full codebase re-scan |
+| Mechanism                     | Effect                                                    |
+| ----------------------------- | --------------------------------------------------------- |
+| PR label: `skip-ai-review`    | Agent does not post any comments                          |
+| PR label: `full-ai-review`    | Agent ignores known-debt suppressions (review everything) |
+| File: `.reviewbot/pause`      | Agent is globally paused until file is removed            |
+| Comment: `@reviewbot ignore`  | Agent suppresses the specific comment thread              |
+| Comment: `@reviewbot explain` | Agent elaborates on a specific finding with more context  |
+| Comment: `@reviewbot rescan`  | Force full codebase re-scan                               |
 
 ---
 
@@ -1044,10 +1056,10 @@ The full schema for a review comment, covering all phases:
 
 ## 15. Triage Tiers
 
-| Tier | Label | Criteria | Agent behavior | Example |
-|---|---|---|---|---|
-| **1** | Must-fix | Production incident risk, security vulnerability, data corruption, contract violation | Always post. Never suppress. Block merge if integrated with CI. | Missing auth check, CVE in dependency, sync loop risk |
-| **2** | Should-fix | Valid bug or improvement, fixable within the PR scope | Post if confidence > threshold. Developer can dismiss. | Missing error handling, unhandled promise rejection, unused variable in hot path |
+| Tier  | Label         | Criteria                                                                                | Agent behavior                                                                  | Example                                                                                                   |
+| ----- | ------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **1** | Must-fix      | Production incident risk, security vulnerability, data corruption, contract violation   | Always post. Never suppress. Block merge if integrated with CI.                 | Missing auth check, CVE in dependency, sync loop risk                                                     |
+| **2** | Should-fix    | Valid bug or improvement, fixable within the PR scope                                   | Post if confidence > threshold. Developer can dismiss.                          | Missing error handling, unhandled promise rejection, unused variable in hot path                          |
 | **3** | Informational | Technically correct observation, but either requires a larger refactor or is low-impact | Post only if explicitly requested (`full-ai-review` label). Otherwise suppress. | "This module doesn't follow current naming conventions", "Consider extracting this into a shared utility" |
 
 ### Volume cap
@@ -1083,27 +1095,35 @@ Key takeaways from [Uber's UReview system](https://www.uber.com/en-IN/blog/urevi
 ## 17. Anti-Patterns to Avoid
 
 ### The hallucinated CVE
+
 The agent confidently claims a package has a vulnerability, but the CVE doesn't exist or doesn't apply to the installed version. **This is the single fastest way to destroy trust.** Every vulnerability claim must be tool-verified before posting.
 
 ### The drive-by refactor suggestion
+
 "You should restructure this module to use the repository pattern." Technically valid, completely useless in the context of a 10-line bug fix PR. The agent must assess whether a suggestion is actionable within the scope of the current change.
 
 ### The stale knowledge assertion
+
 "React.FC is deprecated" — it's not deprecated, it's discouraged by some style guides. The agent must distinguish between official deprecations (documented in changelogs) and community preferences (blog posts, tweets). Citation type matters.
 
 ### The noise flood
+
 Posting 20 comments on a single PR. Even if all 20 are valid, the developer will ignore all of them. Cap volume ruthlessly.
 
 ### The repeated nag
+
 Commenting on the same known-debt issue every time a file in that module is touched. If the team has acknowledged the debt and deferred it, the agent must stay silent. That's what the suppression list is for.
 
 ### The phantom context
+
 Making claims about code behavior based on training data rather than the actual code in the repo. "Typically, this library handles X by doing Y" — but the repo has a custom wrapper that changes the behavior. The agent must reason from the actual codebase, not from general knowledge about libraries.
 
 ### The unverified upgrade suggestion
+
 "Upgrade to v5.0.0 for the fix" — but v5.0.0 has a breaking change that affects the repo's usage. Upgrade suggestions must be verified against the repo's actual usage patterns, or at minimum flagged as "verify compatibility before upgrading."
 
 ### The rotting YAML
+
 Designing a system that depends on humans maintaining a detailed architecture description file. They won't. Auto-derive everything possible. Make staleness of the rest visible and painful.
 
 ---
@@ -1137,7 +1157,7 @@ version: 1
 # and a cheaper model from the same provider for workers.
 model:
   provider: anthropic
-  api_key_env: REVIEWBOT_API_KEY   # single env var, single provider
+  api_key_env: REVIEWBOT_API_KEY # single env var, single provider
 
 # Per-provider model mapping (auto-selected based on provider above)
 # Each provider must offer a strong SKU (boss/grader/critical workers)
@@ -1158,12 +1178,12 @@ model:
 # Comment thresholds
 confidence_threshold:
   default: 0.7
-  vulnerability: 0.5    # lower threshold — don't miss CVEs
-  readability: 0.95      # very high threshold — almost never post these
+  vulnerability: 0.5 # lower threshold — don't miss CVEs
+  readability: 0.95 # very high threshold — almost never post these
 
 # Volume limits
 max_comments_per_pr: 5
-max_tier3_comments: 0    # don't post informational comments by default
+max_tier3_comments: 0 # don't post informational comments by default
 
 # Category suppression (auto-updated from feedback, can be manually overridden)
 suppressed_categories:
@@ -1185,14 +1205,14 @@ tools:
   pip_audit: true
   govulncheck: true
   osv_api: true
-  license_check: false   # enable when needed
+  license_check: false # enable when needed
 
 # External knowledge cache TTLs (seconds)
 cache_ttl:
-  cve_lookup: 86400      # 24 hours
-  package_version: 21600  # 6 hours
-  web_search: 172800      # 48 hours
-  changelog: 604800       # 7 days
+  cve_lookup: 86400 # 24 hours
+  package_version: 21600 # 6 hours
+  web_search: 172800 # 48 hours
+  changelog: 604800 # 7 days
 
 # Deterministic pattern registry
 patterns_file: .reviewbot/patterns.yaml
@@ -1200,8 +1220,8 @@ patterns_file: .reviewbot/patterns.yaml
 # Orchestration
 orchestration:
   max_workers: 4
-  worker_timeout: 30          # seconds per worker
-  boss_timeout: 45            # seconds for synthesis + grading
+  worker_timeout: 30 # seconds per worker
+  boss_timeout: 45 # seconds for synthesis + grading
   on_worker_timeout: continue # "continue" (post with degraded_workers) or "fail"
 
 # Sibling repo integration map

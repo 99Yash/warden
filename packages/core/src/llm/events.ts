@@ -5,9 +5,20 @@
  */
 
 export type FormatterEvent =
-  | { type: "phase-start"; phase: "llm"; provider: "anthropic" | "openai" | "google"; modelId: string }
+  | {
+      type: "phase-start";
+      phase: "llm";
+      provider: "anthropic" | "openai" | "google";
+      modelId: string;
+    }
   | { type: "reasoning-delta"; text: string }
-  | { type: "phase-complete"; phase: "llm"; revisedCount: number; questionCount: number; durationMs: number }
+  | {
+      type: "phase-complete";
+      phase: "llm";
+      revisedCount: number;
+      questionCount: number;
+      durationMs: number;
+    }
   | { type: "phase-degraded"; phase: "llm"; reason: string }
   | { type: "fallback-engaged"; from: string; to: string; reason: string };
 

@@ -41,14 +41,14 @@ Each call routes to a per-concern worker that runs its own `streamText` session 
 
 ## Six concerns + default tiers
 
-| Concern         | Default tier | What the worker looks for |
-|-----------------|--------------|---------------------------|
-| `correctness`   | sonnet       | Subtle bugs the deterministic detectors miss: null-deref, off-by-one, async race, regression introduced *by this diff*, silent error swallowing, missing degraded entries that the surrounding code says should fire. |
-| `scalability`   | sonnet       | 10×-data patterns: load-all-then-filter, full-file reads when only a header was needed, parallelism regressions, in-memory blowup, O(n²) over diff-sized inputs. |
-| `consistency`   | sonnet       | Doc-vs-code drift: README claims that don't match `wardenEnv()`, comments that contradict implementation, ADR claims vs current behavior, public-doc surfaces vs schema, comment-vs-impl divergence inside a single function. |
-| `security`      | sonnet       | The residue the M13 ESLint-security detector cannot catch: auth bypasses, missing authorization, parameter manipulation, cross-tenant leaks, SSRF, path-traversal in non-canonical sinks, secret-in-log, OAuth callback manipulation. |
-| `committability`| haiku        | Files that shouldn't have been committed: dev-script names, hardcoded developer paths, `DO NOT MERGE` markers, debug leftovers, IDE scratch files, personal config. |
-| `leverage`      | haiku        | Library substitutions: hand-rolled code that an *installed* library primitive already provides cleanly. Bounded stdlib idiom misses are handled by the deterministic leverage detector — workers handle the library-substitution half. |
+| Concern          | Default tier | What the worker looks for                                                                                                                                                                                                              |
+| ---------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `correctness`    | sonnet       | Subtle bugs the deterministic detectors miss: null-deref, off-by-one, async race, regression introduced _by this diff_, silent error swallowing, missing degraded entries that the surrounding code says should fire.                  |
+| `scalability`    | sonnet       | 10×-data patterns: load-all-then-filter, full-file reads when only a header was needed, parallelism regressions, in-memory blowup, O(n²) over diff-sized inputs.                                                                       |
+| `consistency`    | sonnet       | Doc-vs-code drift: README claims that don't match `wardenEnv()`, comments that contradict implementation, ADR claims vs current behavior, public-doc surfaces vs schema, comment-vs-impl divergence inside a single function.          |
+| `security`       | sonnet       | The residue the M13 ESLint-security detector cannot catch: auth bypasses, missing authorization, parameter manipulation, cross-tenant leaks, SSRF, path-traversal in non-canonical sinks, secret-in-log, OAuth callback manipulation.  |
+| `committability` | haiku        | Files that shouldn't have been committed: dev-script names, hardcoded developer paths, `DO NOT MERGE` markers, debug leftovers, IDE scratch files, personal config.                                                                    |
+| `leverage`       | haiku        | Library substitutions: hand-rolled code that an _installed_ library primitive already provides cleanly. Bounded stdlib idiom misses are handled by the deterministic leverage detector — workers handle the library-substitution half. |
 
 Use `tier: "sonnet"` to promote committability/leverage when a finding hinges on cross-file reading or library API resolution. Use `tier: "haiku"` to demote correctness/scalability/consistency/security only when the file is small and the question is pattern-matchable. Default tiers are tuned to the median case — override only when the file demands it.
 
@@ -165,7 +165,7 @@ Empty findings is the right answer when the diff is clean. Do not pad. A 0-comme
 
 # Stay disciplined
 
-- **Plan first.** Don't dispatch workers blindly — read the diff and det priors, decide what the *interesting* questions are, then dispatch.
+- **Plan first.** Don't dispatch workers blindly — read the diff and det priors, decide what the _interesting_ questions are, then dispatch.
 - **Adjudicate, don't re-author.** Workers do the citing; you do the dedup, the priority sort, the dropping.
 - **Stop when the loop has nothing left to say.** The cap is a safety net, not a target. A 2-round review that ships a clean comment set beats a 5-round review with churn.
 - **Trust the verifier.** You don't need to second-guess worker citations — the verifier will drop bad ones automatically.

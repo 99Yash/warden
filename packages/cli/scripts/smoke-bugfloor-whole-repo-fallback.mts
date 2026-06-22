@@ -30,10 +30,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-const TMP_ROOT = resolve(
-  tmpdir(),
-  `warden-bugfloor-whole-repo-${process.pid}-${Date.now()}`,
-);
+const TMP_ROOT = resolve(tmpdir(), `warden-bugfloor-whole-repo-${process.pid}-${Date.now()}`);
 
 if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
 mkdirSync(TMP_ROOT, { recursive: true });
@@ -87,10 +84,7 @@ assert(
   wholeRepoDiff.diff.includes("alpha.ts") && wholeRepoDiff.diff.includes("bravo.ts"),
   "diff includes both seeded files",
 );
-assert(
-  wholeRepoDiff.degraded === undefined,
-  "no degraded entry surfaced on the happy path",
-);
+assert(wholeRepoDiff.degraded === undefined, "no degraded entry surfaced on the happy path");
 
 process.stdout.write(`\n[2] resolveDiff with --base = commit ref preserves three-dot semantic\n`);
 
@@ -125,10 +119,7 @@ assert(
   !featureDiff.diff.includes("main-advance.ts"),
   "diff does NOT include main's post-divergence commit (three-dot, not two-dot)",
 );
-assert(
-  featureDiff.degraded === undefined,
-  "no degraded entry for commit-ref --base happy path",
-);
+assert(featureDiff.degraded === undefined, "no degraded entry for commit-ref --base happy path");
 
 // Restore initial branch context for subsequent steps.
 git(["checkout", "-q", "main-branch"]);
@@ -200,16 +191,19 @@ const stubChunkStore = {
   upsertMany: async () => undefined,
   getByHash: async () => null,
   getManyByHash: async (hashes: string[]) => {
-    const out = new Map<string, {
-      chunkHash: string;
-      filePath: string;
-      fileSha: string;
-      language: "typescript";
-      symbolPath: string[];
-      startLine: number;
-      endLine: number;
-      content: string;
-    }>();
+    const out = new Map<
+      string,
+      {
+        chunkHash: string;
+        filePath: string;
+        fileSha: string;
+        language: "typescript";
+        symbolPath: string[];
+        startLine: number;
+        endLine: number;
+        content: string;
+      }
+    >();
     for (const h of hashes) {
       out.set(h, {
         chunkHash: h,
@@ -254,10 +248,7 @@ const filteredOut = await semanticSignal({
   lockedModelId: "voyage-code-3",
   lockedModelVersionForDocument: "dim=4;type=document",
 });
-assert(
-  filteredOut.hitsByFile.has(EXISTING_PATH),
-  `existing file '${EXISTING_PATH}' is retained`,
-);
+assert(filteredOut.hitsByFile.has(EXISTING_PATH), `existing file '${EXISTING_PATH}' is retained`);
 assert(
   !filteredOut.hitsByFile.has(DELETED_PATH),
   `deleted file '${DELETED_PATH}' is filtered out (no ENOENT path to jscpd)`,
@@ -275,8 +266,7 @@ const backcompatOut = await semanticSignal({
   lockedModelVersionForDocument: "dim=4;type=document",
 });
 assert(
-  backcompatOut.hitsByFile.has(EXISTING_PATH) &&
-    backcompatOut.hitsByFile.has(DELETED_PATH),
+  backcompatOut.hitsByFile.has(EXISTING_PATH) && backcompatOut.hitsByFile.has(DELETED_PATH),
   "without repoRoot, both hits pass through (filter is opt-in)",
 );
 

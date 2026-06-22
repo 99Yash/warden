@@ -131,7 +131,7 @@ No new workspace package. No new commander verb. No new env var.
 - `@warden/core` stays I/O-pure per ADR-0013: the resolver reads files under `repoRoot + '/node_modules/'` (already-allowed pattern — M6's chunker does the same); the tool descriptor calls the resolver. None write to stdout or read `process.argv`.
 - `@warden/ai` adds **one line** — re-export `tool` from `ai`. Mirror precedent: `streamText`, `generateText`, `Output` are already re-exported (`packages/ai/src/index.ts:8`).
 - `@warden/db` adds the new schema; the schema is content-addressed (compound primary key `(package, version, symbol)`); no FKs.
-- `@warden/core` may import `tool` from `@warden/ai` (allowed). `@warden/ai` does not import `@warden/core` (forbidden) — the tool descriptor in `@warden/core/src/llm/tools/` wraps the resolver in `@warden/core/src/api/`; the descriptor is constructed *inside* core using the re-exported `tool` factory.
+- `@warden/core` may import `tool` from `@warden/ai` (allowed). `@warden/ai` does not import `@warden/core` (forbidden) — the tool descriptor in `@warden/core/src/llm/tools/` wraps the resolver in `@warden/core/src/api/`; the descriptor is constructed _inside_ core using the re-exported `tool` factory.
 - The resolver uses `TsCompilerParser` (already in `@warden/core/src/context/parser.ts`) to parse `.d.ts` AST — same parser the M5 selector + M10 consistency detector use. No new parsing dependency.
 - The resolver reads `node_modules/<pkg>/package.json` via `node:fs/promises` (already-allowed I/O pattern). No `require('npm-package-arg')` or similar — the resolver is a direct file walker.
 
@@ -143,14 +143,14 @@ One-line change:
 
 ```ts
 export const SourceTypeEnum = z.enum([
-  'cve',
-  'advisory',
-  'changelog',
-  'documentation',
-  'web',
-  'tool',
-  'repo_convention',
-  'api_def',           // NEW — M11: type-definition citation from .d.ts lookup.
+  "cve",
+  "advisory",
+  "changelog",
+  "documentation",
+  "web",
+  "tool",
+  "repo_convention",
+  "api_def", // NEW — M11: type-definition citation from .d.ts lookup.
 ]);
 ```
 
@@ -161,36 +161,36 @@ export const SourceTypeEnum = z.enum([
 ### 2. `type_def_cache` table (`packages/db/src/schema/type-def-cache.ts`)
 
 ```ts
-import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
 export const typeDefCache = sqliteTable(
-  'type_def_cache',
+  "type_def_cache",
   {
     // The literal import path the LLM queried — e.g. 'drizzle-orm',
     // 'drizzle-orm/sqlite-core', '@radix-ui/react-dialog', or
     // '@radix-ui/react-dialog/internal'. Subpath-aware: 'drizzle-orm' and
     // 'drizzle-orm/sqlite-core' are independent cache rows even at the same
     // version, because they could expose overlapping symbol names.
-    package: text('package').notNull(),
+    package: text("package").notNull(),
     // The installed version of the *root* package (the part before the first
     // subpath segment). Read from `node_modules/<packageName>/package.json`.
-    version: text('version').notNull(),
-    symbol: text('symbol').notNull(),
+    version: text("version").notNull(),
+    symbol: text("symbol").notNull(),
 
     // `found: true` columns (populated on hit):
-    kind: text('kind'),               // TypeDefKind | null
-    signature: text('signature'),
-    jsdoc: text('jsdoc'),              // null = looked, none present
-    dts_file: text('dts_file'),        // relative to repoRoot
-    line_start: integer('line_start'),
-    line_end: integer('line_end'),
+    kind: text("kind"), // TypeDefKind | null
+    signature: text("signature"),
+    jsdoc: text("jsdoc"), // null = looked, none present
+    dts_file: text("dts_file"), // relative to repoRoot
+    line_start: integer("line_start"),
+    line_end: integer("line_end"),
 
     // `found: false` columns:
-    reason: text('reason'),            // NotFoundReason | null
+    reason: text("reason"), // NotFoundReason | null
 
     // Universal:
-    found: integer('found', { mode: 'boolean' }).notNull(),
-    retrievedAt: text('retrieved_at').notNull(),
+    found: integer("found", { mode: "boolean" }).notNull(),
+    retrievedAt: text("retrieved_at").notNull(),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.package, t.version, t.symbol] }),
@@ -210,14 +210,20 @@ Public types (export from `packages/core/src/api/index.ts` for re-use in the too
 
 ```ts
 export type TypeDefKind =
-  | 'function' | 'class' | 'interface' | 'type'
-  | 'variable' | 'namespace' | 'method' | 'property';
+  | "function"
+  | "class"
+  | "interface"
+  | "type"
+  | "variable"
+  | "namespace"
+  | "method"
+  | "property";
 
 export type NotFoundReason =
-  | 'package_not_installed'
-  | 'no_types'
-  | 'symbol_not_found'
-  | 'lookup_error';
+  | "package_not_installed"
+  | "no_types"
+  | "symbol_not_found"
+  | "lookup_error";
 
 /**
  * Pre-shaped `Source` object the LLM copies verbatim into `Comment.sources[]`.
@@ -228,25 +234,25 @@ export type NotFoundReason =
  * The resolver constructs this object; the LLM does not assemble fields.
  */
 export interface SuggestedApiDefSource {
-  type: 'api_def';
-  id: string;          // `${package}@${version}#${symbol}`
-  title: string;       // `${kind} ${symbol}`
-  path: string;        // = dts_file (repoRoot-relative)
-  line: number;        // = line_start
-  snippet: string;     // = signature, already whitespace-normalized to one line
+  type: "api_def";
+  id: string; // `${package}@${version}#${symbol}`
+  title: string; // `${kind} ${symbol}`
+  path: string; // = dts_file (repoRoot-relative)
+  line: number; // = line_start
+  snippet: string; // = signature, already whitespace-normalized to one line
   retrievedAt: string; // ISO 8601
 }
 
 export type LookupTypeDefResult =
   | {
       found: true;
-      package: string;     // The literal import path the LLM queried.
-      version: string;     // Root-package version from node_modules/<root>/package.json.
+      package: string; // The literal import path the LLM queried.
+      version: string; // Root-package version from node_modules/<root>/package.json.
       symbol: string;
-      signature: string;   // Whitespace-normalized to a single line.
+      signature: string; // Whitespace-normalized to a single line.
       kind: TypeDefKind;
       jsdoc: string | null;
-      dts_file: string;    // Relative to repoRoot.
+      dts_file: string; // Relative to repoRoot.
       line_start: number;
       line_end: number;
       suggestedSource: SuggestedApiDefSource;
@@ -260,7 +266,7 @@ export type LookupTypeDefResult =
 
 export async function lookupTypeDef(
   repoRoot: string,
-  pkg: string,      // Literal import path: 'drizzle-orm', 'drizzle-orm/sqlite-core', '@scope/pkg/sub'.
+  pkg: string, // Literal import path: 'drizzle-orm', 'drizzle-orm/sqlite-core', '@scope/pkg/sub'.
   symbol: string,
 ): Promise<LookupTypeDefResult>;
 ```
@@ -309,25 +315,23 @@ No new file, no abstraction.
 ### 5. Tool descriptor (`packages/core/src/llm/tools/lookup-type-def.ts`)
 
 ```ts
-import { z } from 'zod';
-import { tool } from '@warden/ai';
-import { lookupTypeDef, type LookupTypeDefResult } from '../../api/lookup-type-def.js';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import type { DegradedEntry } from '../../schema.js';
+import { z } from "zod";
+import { tool } from "@warden/ai";
+import { lookupTypeDef, type LookupTypeDefResult } from "../../api/lookup-type-def.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { DegradedEntry } from "../../schema.js";
 
 const InputSchema = z.object({
   package: z
     .string()
     .describe(
-      'The literal import path as it appears in source code. Supports subpaths: ' +
+      "The literal import path as it appears in source code. Supports subpaths: " +
         '"drizzle-orm", "drizzle-orm/sqlite-core", "@radix-ui/react-dialog", ' +
         '"next/server". Do not strip the subpath — `drizzle-orm/sqlite-core` and ' +
-        '`drizzle-orm` resolve to different .d.ts files.',
+        "`drizzle-orm` resolve to different .d.ts files.",
     ),
-  symbol: z
-    .string()
-    .describe('The symbol path (e.g., "with" or "Drizzle.with" or "User.method").'),
+  symbol: z.string().describe('The symbol path (e.g., "with" or "Drizzle.with" or "User.method").'),
 });
 
 export function makeLookupTypeDefTool(opts: {
@@ -339,21 +343,21 @@ export function makeLookupTypeDefTool(opts: {
 
   return tool({
     description: [
-      'Look up a type definition from an installed npm package. Use this',
+      "Look up a type definition from an installed npm package. Use this",
       'BEFORE asserting facts about a library API — see the "Verifying',
       'library API claims" section in the system prompt for triggers.',
-      'Returns a discriminated union; on found:false, do not assert.',
-    ].join(' '),
+      "Returns a discriminated union; on found:false, do not assert.",
+    ].join(" "),
     inputSchema: InputSchema,
     execute: async (args): Promise<LookupTypeDefResult> => {
-      const nmDir = path.join(opts.repoRoot, 'node_modules');
+      const nmDir = path.join(opts.repoRoot, "node_modules");
       if (!fs.existsSync(nmDir)) {
         if (!noNodeModulesEmitted) {
           opts.degraded.push({
-            kind: 'actionable',
-            topic: 'api-claim-verifier',
+            kind: "actionable",
+            topic: "api-claim-verifier",
             message:
-              'no node_modules/ directory — library API verification unavailable; run `npm install` to enable.',
+              "no node_modules/ directory — library API verification unavailable; run `npm install` to enable.",
           });
           noNodeModulesEmitted = true;
         }
@@ -361,7 +365,7 @@ export function makeLookupTypeDefTool(opts: {
           found: false,
           package: args.package,
           symbol: args.symbol,
-          reason: 'package_not_installed',
+          reason: "package_not_installed",
         };
       }
       return lookupTypeDef(opts.repoRoot, args.package, args.symbol);
@@ -379,7 +383,7 @@ Three changes:
 **(a) Accept `tools` in `CascadeOptions`:**
 
 ```ts
-import { tool, stepCountIs } from '@warden/ai';  // add `tool` to types if needed
+import { tool, stepCountIs } from "@warden/ai"; // add `tool` to types if needed
 // ...
 export interface CascadeOptions {
   // ... existing fields ...
@@ -397,11 +401,11 @@ const result = streamText({
   system: opts.systemPrompt,
   prompt: opts.userPrompt,
   output: Output.object({ schema: LlmOutputSchema }),
-  tools: opts.tools,                       // NEW
-  stopWhen: opts.tools ? [stepCountIs(8)] : undefined,  // NEW
+  tools: opts.tools, // NEW
+  stopWhen: opts.tools ? [stepCountIs(8)] : undefined, // NEW
   providerOptions: {
     anthropic: {
-      thinking: { type: 'enabled', budgetTokens: opts.thinkingBudget },
+      thinking: { type: "enabled", budgetTokens: opts.thinkingBudget },
     },
   },
 });
@@ -409,7 +413,7 @@ const result = streamText({
 
 **(c) Surface tool-call events (optional polish):** the `fullStream` reasoning-delta loop can also emit `tool-call` / `tool-result` events to the FormatterListener for live UI. v0 ships without — the existing reasoning-delta surface is sufficient. Re-visit if dogfood UX wants it.
 
-**Retry semantics with tool calls.** AI SDK v6's tool-use loop runs *inside* a single `streamText` call as multiple steps; ai-retry sees the whole call as one attempt. If a tool execution throws and isn't caught inside `execute()`, the whole step fails and ai-retry's `transientCondition` decides whether to retry. The resolver swallows its own errors and returns `lookup_error` instead of throwing — so the retry path is unaffected by tool internals.
+**Retry semantics with tool calls.** AI SDK v6's tool-use loop runs _inside_ a single `streamText` call as multiple steps; ai-retry sees the whole call as one attempt. If a tool execution throws and isn't caught inside `execute()`, the whole step fails and ai-retry's `transientCondition` decides whether to retry. The resolver swallows its own errors and returns `lookup_error` instead of throwing — so the retry path is unaffected by tool internals.
 
 ### 7. Cache key extension (`packages/core/src/llm/cache.ts` + `formatter.ts`)
 
@@ -417,15 +421,15 @@ Compute `dependenciesHash` at the top of `formatReview()`:
 
 ```ts
 function readDependenciesHash(repoRoot: string): string {
-  for (const file of ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock']) {
+  for (const file of ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"]) {
     try {
-      const content = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+      const content = fs.readFileSync(path.join(repoRoot, file), "utf8");
       return hashString(content);
     } catch {
       // try next
     }
   }
-  return '';  // no lockfile found
+  return ""; // no lockfile found
 }
 ```
 
@@ -433,12 +437,12 @@ Pass into `computeCacheKey`:
 
 ```ts
 const cacheKey = computeCacheKey({
-  modelId: 'anthropic-primary',
+  modelId: "anthropic-primary",
   systemPromptHash: hashString(systemPrompt),
   userTemplateHash: hashString(userPrompt),
   inputCommentIds: allInputComments.map((c) => c.id),
   diffHash: hashString(input.diff),
-  dependenciesHash: readDependenciesHash(input.repoRoot),   // NEW
+  dependenciesHash: readDependenciesHash(input.repoRoot), // NEW
 });
 ```
 
@@ -460,7 +464,7 @@ You have a tool `lookupTypeDef({ package, symbol })`. Use it sparingly, only whe
 3. **You are about to recommend refactoring toward a library primitive** (e.g., "replace this manual JOIN with Drizzle's `with:` clause").
 4. **You are about to contradict the user's library usage** (e.g., "you wrote `parameters:` but the AI SDK uses `inputSchema:`").
 
-Do **not** call the tool for every imported symbol or every library reference. Only when you are about to make a verifiable assertion *about* the library.
+Do **not** call the tool for every imported symbol or every library reference. Only when you are about to make a verifiable assertion _about_ the library.
 
 `package` accepts the **literal import path** as it appears in source code, including subpaths: `'drizzle-orm/sqlite-core'`, `'@radix-ui/react-dialog'`, `'next/server'`. Do not collapse subpaths to the root package name — `drizzle-orm/sqlite-core` and `drizzle-orm` are different `.d.ts` surfaces.
 
@@ -485,19 +489,21 @@ const API_DEF_DRIFT = 30;
 
 // inside the per-source verifier loop:
 const absolutePath = resolveWithinRoot(repoRoot, source.path!);
-if (absolutePath === null) { /* drop */ }
+if (absolutePath === null) {
+  /* drop */
+}
 
-if (source.type === 'api_def') {
+if (source.type === "api_def") {
   // Wider window + concat: signatures span multiple lines in .d.ts.
   // The resolver stores `signature` already whitespace-normalized to one line,
   // so we normalize the file window the same way and substring-match once.
   const start = Math.max(1, source.line! - API_DEF_DRIFT);
-  const end   = source.line! + API_DEF_DRIFT;
+  const end = source.line! + API_DEF_DRIFT;
   const entry = await ensureLinesUpTo(absolutePath, end, cache);
-  if (entry === null) { /* drop */ }
-  const window = entry.lines
-    .slice(start - 1, Math.min(entry.lines.length, end))
-    .join(' ');
+  if (entry === null) {
+    /* drop */
+  }
+  const window = entry.lines.slice(start - 1, Math.min(entry.lines.length, end)).join(" ");
   const ok = normalizeWhitespace(window).includes(normalizeWhitespace(source.snippet!));
   // keep / drop accordingly.
 } else {
@@ -543,7 +549,7 @@ After implementation, run `warden review` on the warden tree itself with the M11
 - At least one tool call fires (the formatter encounters a library API claim it wants to verify).
 - The resulting Comment carries an `api_def` source that the verifier accepts.
 - No regressions on M10 smoke scripts (`pnpm smoke:m10`).
-- The `node_modules/`-missing degraded entry does *not* fire (warden's own tree has `node_modules/`).
+- The `node_modules/`-missing degraded entry does _not_ fire (warden's own tree has `node_modules/`).
 
 Then test the degraded path: temporarily move `node_modules/` aside, run `warden review`, confirm the single `degradedWorkers` entry surfaces.
 
@@ -618,11 +624,11 @@ Update §8 (Deferred concepts) — narrow the existing **cross-repo retrieval** 
 
 1. **The M10 triple invariant pays its second dividend.** M10's `{path, line, snippet}` on `SourceSchema` was framed as "the architectural primitive future producers inherit verification through." M11's `api_def` source is the first such producer, and proves the design: zero new schema fields, zero new verifier algorithm, just one branch in the verifier's source walk + one enum value. If the M10 grilling had not extracted the triple, M11 would need to design schema + verifier from scratch.
 
-2. **The keystone framing required narrowing twice.** Q1 framed M11 as "the architectural keystone — cross-repo retrieval." Q2 narrowed to `.d.ts` only + verifier consumer. Q4 narrowed again — from "indexing" to "lookup-on-demand." Each narrowing was forced by the consumer: the verifier needs exact lookup, not retrieval; exact lookup doesn't need bulk indexing. The keystone *name* (cross-repo retrieval) misleads slightly — what M11 actually ships is *cross-repo lookup*, not retrieval in the M6 semantic-similarity sense. The naming inheritance from ADR-0019's deferral list is acknowledged; future ADRs can rename if the gap matters.
+2. **The keystone framing required narrowing twice.** Q1 framed M11 as "the architectural keystone — cross-repo retrieval." Q2 narrowed to `.d.ts` only + verifier consumer. Q4 narrowed again — from "indexing" to "lookup-on-demand." Each narrowing was forced by the consumer: the verifier needs exact lookup, not retrieval; exact lookup doesn't need bulk indexing. The keystone _name_ (cross-repo retrieval) misleads slightly — what M11 actually ships is _cross-repo lookup_, not retrieval in the M6 semantic-similarity sense. The naming inheritance from ADR-0019's deferral list is acknowledged; future ADRs can rename if the gap matters.
 
 3. **The discriminated union in the tool result is load-bearing.** Q5 grilling: the user explicitly pushed for a discriminated union over an all-optional bag. The win isn't just type cleanliness — `reason` on the miss variant gives the LLM enough information to act differently per failure mode. `package_not_installed` → silent degrade. `symbol_not_found` → defensible "no such API" claim. `lookup_error` → treat like `package_not_installed`. Without the discriminator, all misses would be indistinguishable and the LLM's response logic would have to be uniform.
 
-4. **The "four triggers" prompt addition is articulation, not bloat.** The user's Q6 pushback ("we can't look up every package; humans only check when something feels off") forced a real articulation of *when* the tool fires. Compressing to two triggers (Q7 alternative) loses signal — refactor-toward-primitive and TSC-refining are distinct scenarios with distinct prompt-time recognition. The 4-trigger explicit form costs ~400 bytes of prompt; the implicit alternative costs prompt clarity. Explicit wins.
+4. **The "four triggers" prompt addition is articulation, not bloat.** The user's Q6 pushback ("we can't look up every package; humans only check when something feels off") forced a real articulation of _when_ the tool fires. Compressing to two triggers (Q7 alternative) loses signal — refactor-toward-primitive and TSC-refining are distinct scenarios with distinct prompt-time recognition. The 4-trigger explicit form costs ~400 bytes of prompt; the implicit alternative costs prompt clarity. Explicit wins.
 
 5. **`stopWhen: stepCountIs(8)` is the only guardrail against tool-call spirals.** AI SDK v6's native tool-use loop will happily loop indefinitely if the LLM keeps requesting tool calls; `stopWhen` is the structural cap. 8 is a guess based on "a typical PR has at most ~5 library API claims worth verifying" — the cap is loose enough that real reviews don't hit it, tight enough that pathological loops terminate. Dogfood evidence in M12+ tunes.
 
@@ -630,21 +636,21 @@ Update §8 (Deferred concepts) — narrow the existing **cross-repo retrieval** 
 
 7. **The cap-8 trade-off lives in the prompt, not the code.** Two ways to enforce the cap: structural (`stopWhen`), and pedagogical (tell the LLM the cap exists so it self-rations). M11 does both. `stopWhen` is the hard backstop; the prompt's last line ("at most 8 tool calls per review") tells the LLM to budget. Without the prompt mention, the LLM may discover the cap by hitting it (the SDK terminates the tool-use loop) and then truncate mid-thought. With the mention, the LLM can plan within the budget.
 
-8. **The "no `node_modules/`" degraded entry is once-per-review, not once-per-call.** A review with 8 tool calls into an empty `node_modules/` would emit 8 entries if the detection were per-call. The collector pattern (`opts.degraded` with the `noNodeModulesEmitted` boolean) makes the first call emit + subsequent calls silently return `package_not_installed`. Mirrors M9's noise-filter pattern — surface system-level issues *once* per session, regardless of how many runners noticed.
+8. **The "no `node_modules/`" degraded entry is once-per-review, not once-per-call.** A review with 8 tool calls into an empty `node_modules/` would emit 8 entries if the detection were per-call. The collector pattern (`opts.degraded` with the `noNodeModulesEmitted` boolean) makes the first call emit + subsequent calls silently return `package_not_installed`. Mirrors M9's noise-filter pattern — surface system-level issues _once_ per session, regardless of how many runners noticed.
 
 9. **The resolver swallows its own errors.** Any exception thrown in steps 3–5 of the resolver becomes `{ found: false, reason: 'lookup_error' }`. This is intentional: the discriminated union is the contract; raw exceptions thrown into the AI SDK's tool-use loop would surface as model-side errors and trigger ai-retry's retry path, which doesn't help. The LLM treating `lookup_error` like `package_not_installed` is the correct fallback. The error itself can be logged via FormatterListener (info-level) for forensic purposes; it doesn't need to bubble.
 
-10. **The verifier's drop semantics are unchanged from M10.** A Comment with one `api_def` source that drops doesn't drop the Comment if other sources survive. A Comment whose *only* source is a dropped `api_def` drops the Comment entirely. Empty `sources[]` (no citation at all — e.g., the formatter made a claim without using the tool, in violation of the prompt) does *not* trigger the verifier — that's the accepted gap per ADR-0026 §7. Same posture as M10 for unverifiable triples.
+10. **The verifier's drop semantics are unchanged from M10.** A Comment with one `api_def` source that drops doesn't drop the Comment if other sources survive. A Comment whose _only_ source is a dropped `api_def` drops the Comment entirely. Empty `sources[]` (no citation at all — e.g., the formatter made a claim without using the tool, in violation of the prompt) does _not_ trigger the verifier — that's the accepted gap per ADR-0026 §7. Same posture as M10 for unverifiable triples.
 
-11. **`@types/<pkg>` fallback is non-trivial.** Many JS-only packages have separate `@types/<pkg>` packages providing the `.d.ts`. The resolver checks `package.json#types` / `#typings` / `#exports['.']['types']` on the primary package first; only on miss does it fall back to `node_modules/@types/<pkg>/index.d.ts`. Cache key uses the *primary* package's version (the `@types/*` package may have its own version, but the user calls `lookupTypeDef('lodash', 'merge')` — they don't know whether the types come from `lodash` or `@types/lodash`). If the `@types/*` package version diverges from the primary, the lookup result may include a signature that the runtime package doesn't expose — that's a real edge case for hand-written types, but rare enough to accept in v0.
+11. **`@types/<pkg>` fallback is non-trivial.** Many JS-only packages have separate `@types/<pkg>` packages providing the `.d.ts`. The resolver checks `package.json#types` / `#typings` / `#exports['.']['types']` on the primary package first; only on miss does it fall back to `node_modules/@types/<pkg>/index.d.ts`. Cache key uses the _primary_ package's version (the `@types/*` package may have its own version, but the user calls `lookupTypeDef('lodash', 'merge')` — they don't know whether the types come from `lodash` or `@types/lodash`). If the `@types/*` package version diverges from the primary, the lookup result may include a signature that the runtime package doesn't expose — that's a real edge case for hand-written types, but rare enough to accept in v0.
 
 12. **Re-export depth cap of 8 is the same shape as `stopWhen: 8`.** Coincidence in number, not in semantics — re-export depth caps the resolver's recursive walk through `export * from 'sub'` chains, which can loop pathologically on malformed types. 8 is "deep enough for real re-export trees (typically 1–3 levels)" and "shallow enough to terminate quickly." If a real package fails to resolve a symbol because of the cap, the test surface (smoke fixture or dogfood) will surface it and we bump.
 
 13. **Subpath imports are the dominant real-world shape.** Modern JS heavily uses subpath imports — `drizzle-orm/sqlite-core`, `next/server`, `react-dom/client`, `@radix-ui/react-dialog`. The root-only resolver would fail on the first dogfood review. M11 accepts the literal import path in the tool input (no separate `subpath` argument) because that matches the LLM's mental model: the LLM sees `import { sqliteTable } from 'drizzle-orm/sqlite-core'` and calls `lookupTypeDef('drizzle-orm/sqlite-core', 'sqliteTable')` — string equality with the import statement, no decomposition. The resolver internally splits `(packageName, subpath)` for `node_modules/` traversal but the cache key stays as the literal `pkg` so subpath rows stay independent. The version-extraction step always reads `node_modules/<packageName>/package.json` (the root package owns the version) — `drizzle-orm/sqlite-core` doesn't have its own `package.json`. Resolution order — `exports['./<subpath>']` → `typesVersions` → direct `.d.ts` fallback → `@types/*` fallback — matches Node's own ESM resolution closely enough that real packages resolve cleanly; the smoke fixtures pin the edge cases.
 
-14. **Multi-line signature verification: concat-the-window, not match-each-line.** M10's verifier per-line-matches single-line snippets (runner-emitted code excerpts). `.d.ts` signatures span lines routinely — generics, JSDoc, overload sets — so per-line match would never find a candidate. M11 takes option (a) of three considered: concatenate `lines[line - DRIFT .. line + DRIFT]`, normalize whitespace once, substring-match. Picked over option (c) "match prefix-only against any line" because (a) verifies the *full signature* is present (semantically stronger than "the symbol appears nearby") and avoids the "how many prefix chars" tuning knob (c) requires. False-positive risk in (a) is bounded by `API_DEF_DRIFT = 30` (61-line window max) and pinned by the symbol name being part of the signature — random matches across unrelated declarations require a token sequence real `.d.ts` files don't produce. The drift number is widened from M10's 5 to 30 *only* for the `api_def` branch — M10's narrower window stays correct for its consumer.
+14. **Multi-line signature verification: concat-the-window, not match-each-line.** M10's verifier per-line-matches single-line snippets (runner-emitted code excerpts). `.d.ts` signatures span lines routinely — generics, JSDoc, overload sets — so per-line match would never find a candidate. M11 takes option (a) of three considered: concatenate `lines[line - DRIFT .. line + DRIFT]`, normalize whitespace once, substring-match. Picked over option (c) "match prefix-only against any line" because (a) verifies the _full signature_ is present (semantically stronger than "the symbol appears nearby") and avoids the "how many prefix chars" tuning knob (c) requires. False-positive risk in (a) is bounded by `API_DEF_DRIFT = 30` (61-line window max) and pinned by the symbol name being part of the signature — random matches across unrelated declarations require a token sequence real `.d.ts` files don't produce. The drift number is widened from M10's 5 to 30 _only_ for the `api_def` branch — M10's narrower window stays correct for its consumer.
 
-15. **`suggestedSource` removes a class of LLM-reconstruction failure modes.** The all-or-nothing `SourceSchema.refine()` rejects partial `{path, line, snippet}` triples at parse time → the entire `LlmOutput` fails Zod validation → the cascade throws → ai-retry kicks → eventual hard fail. An LLM constructing the source field-by-field from tool-result fields will, under prompt pressure, occasionally rename `dts_file → path`, forget `snippet`, or mis-format `id`. Pre-shaping the entire Source inside the tool result and instructing the LLM to copy *verbatim* converts the failure mode from "parse-time hard fail" to "the LLM ignored the instruction and emits no source" — which the verifier-discipline floor already handles cleanly (uncited claim → accepted gap per ADR-0026 §7). The cost is one extra interface (`SuggestedApiDefSource`) and ~80 bytes per positive tool result; the benefit is removing a Zod-parse cliff that previously gated every M11 review.
+15. **`suggestedSource` removes a class of LLM-reconstruction failure modes.** The all-or-nothing `SourceSchema.refine()` rejects partial `{path, line, snippet}` triples at parse time → the entire `LlmOutput` fails Zod validation → the cascade throws → ai-retry kicks → eventual hard fail. An LLM constructing the source field-by-field from tool-result fields will, under prompt pressure, occasionally rename `dts_file → path`, forget `snippet`, or mis-format `id`. Pre-shaping the entire Source inside the tool result and instructing the LLM to copy _verbatim_ converts the failure mode from "parse-time hard fail" to "the LLM ignored the instruction and emits no source" — which the verifier-discipline floor already handles cleanly (uncited claim → accepted gap per ADR-0026 §7). The cost is one extra interface (`SuggestedApiDefSource`) and ~80 bytes per positive tool result; the benefit is removing a Zod-parse cliff that previously gated every M11 review.
 
 ## When you're done
 

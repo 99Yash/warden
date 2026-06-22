@@ -319,7 +319,10 @@ interface EnvFact {
   defaultLiteral?: string;
 }
 
-async function loadEnvFacts(repoRoot: string, degraded: DegradedEntry[]): Promise<EnvFacts | undefined> {
+async function loadEnvFacts(
+  repoRoot: string,
+  degraded: DegradedEntry[],
+): Promise<EnvFacts | undefined> {
   const abs = resolvePath(repoRoot, ENV_SOURCE_REL);
   let content: string;
   try {
@@ -483,7 +486,10 @@ interface CliFacts {
   flags: Set<string>;
 }
 
-async function loadCliFacts(repoRoot: string, degraded: DegradedEntry[]): Promise<CliFacts | undefined> {
+async function loadCliFacts(
+  repoRoot: string,
+  degraded: DegradedEntry[],
+): Promise<CliFacts | undefined> {
   const out: CliFacts = { verbs: new Set(), flags: new Set() };
   const indexAbs = resolvePath(repoRoot, CLI_INDEX_REL);
   try {
@@ -539,13 +545,19 @@ function parseCliFile(abs: string, content: string, out: CliFacts): void {
     ) {
       const methodName = node.expression.name.text;
       const firstArg = node.arguments[0]!;
-      if (methodName === "command" && (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))) {
+      if (
+        methodName === "command" &&
+        (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))
+      ) {
         // commander accepts "verb [args...]" — take the first token as the verb name.
         const verbToken = firstArg.text.split(/\s+/)[0];
         if (verbToken && /^[a-z][a-z0-9-]*$/.test(verbToken)) {
           out.verbs.add(verbToken);
         }
-      } else if (methodName === "option" && (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))) {
+      } else if (
+        methodName === "option" &&
+        (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))
+      ) {
         // Flag spec like "--rebuild" or "--max-cost <usd>" — extract the leading --name.
         const flagMatch = /--([a-z][a-z0-9-]*)/.exec(firstArg.text);
         if (flagMatch) out.flags.add(`--${flagMatch[1]!}`);
@@ -657,4 +669,3 @@ async function walkSourceForPathLiterals(
     }
   }
 }
-

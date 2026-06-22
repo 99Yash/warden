@@ -169,10 +169,7 @@ export function defaultWardenConfig(): WardenConfig {
 export function loadWardenRuntime(opts: { repoRoot?: string } = {}): WardenRuntime {
   const resolvedRepoRoot = opts.repoRoot ? path.resolve(opts.repoRoot) : undefined;
   const layers = loadConfigLayers(resolvedRepoRoot);
-  const merged = layers.reduce<WardenConfig>(
-    (acc, layer) => mergeConfig(acc, layer.config),
-    {},
-  );
+  const merged = layers.reduce<WardenConfig>((acc, layer) => mergeConfig(acc, layer.config), {});
   const envFiles = collectEnvFiles(layers, resolvedRepoRoot);
   const envSources = loadEnvFiles(envFiles);
   runtime = {
@@ -523,7 +520,9 @@ function parseEnv(text: string): Record<string, string> {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
-    const withoutExport = line.startsWith("export ") ? line.slice("export ".length).trimStart() : line;
+    const withoutExport = line.startsWith("export ")
+      ? line.slice("export ".length).trimStart()
+      : line;
     const eq = withoutExport.indexOf("=");
     if (eq <= 0) continue;
     const key = withoutExport.slice(0, eq).trim();

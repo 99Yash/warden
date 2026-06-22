@@ -3,13 +3,13 @@ packages:
   - packages/*
 
 catalog:
-  '@ai-sdk/anthropic': ^3.0.0
-  '@ai-sdk/google': ^3.0.0
-  '@ai-sdk/openai': ^3.0.0
+  "@ai-sdk/anthropic": ^3.0.0
+  "@ai-sdk/google": ^3.0.0
+  "@ai-sdk/openai": ^3.0.0
   ai-retry: ^1.7.3
   log-update: ^7.0.0
-  '@types/better-sqlite3': ^7.6.13
-  '@types/node': ^22.13.11
+  "@types/better-sqlite3": ^7.6.13
+  "@types/node": ^22.13.11
   ai: 6.0.77
   better-sqlite3: ^11.10.0
   commander: ^14.0.0

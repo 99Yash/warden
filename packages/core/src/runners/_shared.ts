@@ -71,11 +71,7 @@ export function formatErr(err: unknown): string {
   return String(err).slice(0, 120);
 }
 
-export function anyAddedInRange(
-  start: number,
-  end: number,
-  addedLines: Set<number>,
-): boolean {
+export function anyAddedInRange(start: number, end: number, addedLines: Set<number>): boolean {
   if (addedLines.size === 0) return false;
   for (let i = start; i <= end; i++) {
     if (addedLines.has(i)) return true;

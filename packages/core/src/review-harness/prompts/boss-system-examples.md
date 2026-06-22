@@ -62,14 +62,14 @@ Each call routes to a per-concern worker that runs its own `streamText` session 
 
 ## Default tiers
 
-| Concern         | Default tier | What the worker looks for |
-|-----------------|--------------|---------------------------|
-| `correctness`   | sonnet       | Subtle bugs det priors miss: null-deref, off-by-one, async race, silent error swallowing. |
-| `scalability`   | sonnet       | 10×-data patterns: load-all-then-filter, O(n²) over diff-sized inputs, parallelism regressions. |
-| `consistency`   | sonnet       | Doc-vs-code drift: README claims that don't match `wardenEnv()`, comments that contradict implementation. |
-| `security`      | sonnet       | What ESLint-security can't catch: auth bypass, missing authorization, SSRF, path traversal in non-canonical sinks. |
-| `committability`| haiku        | Files that shouldn't have been committed: dev scripts, hardcoded paths, debug leftovers, IDE scratch. |
-| `leverage`      | haiku        | Library substitutions: hand-rolled code an installed library primitive already provides. |
+| Concern          | Default tier | What the worker looks for                                                                                          |
+| ---------------- | ------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `correctness`    | sonnet       | Subtle bugs det priors miss: null-deref, off-by-one, async race, silent error swallowing.                          |
+| `scalability`    | sonnet       | 10×-data patterns: load-all-then-filter, O(n²) over diff-sized inputs, parallelism regressions.                    |
+| `consistency`    | sonnet       | Doc-vs-code drift: README claims that don't match `wardenEnv()`, comments that contradict implementation.          |
+| `security`       | sonnet       | What ESLint-security can't catch: auth bypass, missing authorization, SSRF, path traversal in non-canonical sinks. |
+| `committability` | haiku        | Files that shouldn't have been committed: dev scripts, hardcoded paths, debug leftovers, IDE scratch.              |
+| `leverage`       | haiku        | Library substitutions: hand-rolled code an installed library primitive already provides.                           |
 
 Use `tier: "sonnet"` to promote a haiku-default concern when it needs cross-file reading; use `tier: "haiku"` to demote when the question is pattern-matchable on small files. Default tiers are tuned to the median case.
 
@@ -82,9 +82,10 @@ Use `tier: "sonnet"` to promote a haiku-default concern when it needs cross-file
 Diff: 2 files. `src/handler.ts` introduces `eval(req.body.code)` inside an Express handler. `src/utils.ts` adds a `JSON.parse(JSON.stringify(x))` deep-clone helper.
 
 Det priors:
+
 - ESLint-security flagged `src/handler.ts:8` rule `security/detect-eval-with-expression`.
 - Leverage detector flagged `src/utils.ts:3` (clone idiom-miss).
-</situation>
+  </situation>
 
 <action>
 Round 1 (plan):
@@ -94,11 +95,13 @@ Round 1 (plan):
   — adjacent: missing auth check, unparsed body, error-handling.
 
 Round 2 (adjudicate):
+
 - Security worker returned a strong Tier-1 finding citing line 8 with snippet. Correctness worker added a missing-auth note on the same handler. No follow-up needed; the leverage detector finding already has snippet evidence and doesn't need a worker dispatch.
 
 Round 3 (synth):
+
 - Emit final Comment[].
-</action>
+  </action>
 
 <synth>
 3 comments:
@@ -115,9 +118,10 @@ Round 3 (synth):
 Diff: 1 file. `src/loader.ts` refactors a streaming read into `readFileSync()` + `JSON.parse` over what the comment calls "the daily snapshot file (~50MB)".
 
 Det priors:
+
 - Scalability detector flagged `src/loader.ts:14` (sync-fs in async context).
 - No other findings.
-</situation>
+  </situation>
 
 <action>
 Round 1 (plan):
@@ -126,9 +130,10 @@ Round 1 (plan):
   — sync-IO often introduces error-handling holes; check if errors propagate.
 
 Round 2 (synth):
+
 - Scalability worker confirmed: O(n) memory + main-thread blocking on the snapshot. Correctness found nothing additional.
 - Emit final Comment[].
-</action>
+  </action>
 
 <synth>
 1 comment:
@@ -143,9 +148,10 @@ Round 2 (synth):
 Diff: 1 file. `README.md` updated to claim "Warden requires ANTHROPIC_API_KEY and OPENAI_API_KEY". `packages/env/src/index.ts` is unchanged — it still only validates ANTHROPIC_API_KEY.
 
 Det priors:
+
 - Consistency detector flagged `README.md:42` (env-var claim mismatch).
 - No other findings.
-</situation>
+  </situation>
 
 <action>
 Round 1 (plan):
@@ -153,9 +159,10 @@ Round 1 (plan):
   — the detector already found the mismatch; the worker writes the narrative for the comment.
 
 Round 2 (synth):
+
 - Worker confirmed and produced citation triples for both files.
 - Emit final Comment[].
-</action>
+  </action>
 
 <synth>
 1 comment:
@@ -170,17 +177,19 @@ Round 2 (synth):
 Diff: 1 file. `scratch/debug-prod.sh` added — a 12-line shell script with hardcoded `/Users/jane/proj` paths and a comment "DO NOT COMMIT — local debugging only".
 
 Det priors:
+
 - No findings (the file is shell — no detector covers it).
-</situation>
+  </situation>
 
 <action>
 Round 1 (plan):
 - `dispatch_worker({ files: ["scratch/debug-prod.sh"], concern: "committability", phase: "plan" })`
 
 Round 2 (synth):
+
 - Worker emitted a Tier-1 committability finding citing the "DO NOT COMMIT" comment + the hardcoded path.
 - Emit final Comment[].
-</action>
+  </action>
 
 <synth>
 1 comment:
@@ -195,9 +204,10 @@ Round 2 (synth):
 Diff: 3 files, all in `docs/`. Pure markdown edits — typo fixes, link updates, no behavioral content.
 
 Det priors:
+
 - No findings.
 - One degraded entry from the noise filter: "docs/ subtree pruned to N files."
-</situation>
+  </situation>
 
 <action>
 Round 1 (synth):
@@ -226,9 +236,10 @@ Round 1 (adjudicate):
   `dispatch_worker({ files: ["packages/core/src/foo.ts", "packages/core/src/bar.ts", "packages/core/src/baz.ts", "packages/core/src/qux.ts"], concern: "leverage", phase: "adjudicate", focus: "are there places the new code re-implements something drizzle's helpers already do?" })`
 
 Round 2 (synth):
+
 - Leverage worker flagged a hand-rolled join on qux.ts that drizzle's `leftJoin()` could replace, citing the symbol via `lookupTypeDef`.
 - Emit final Comment[] combining the two correctness findings + the leverage finding.
-</action>
+  </action>
 
 <synth>
 3 comments:
@@ -267,6 +278,7 @@ Some configurations seed your initial user message with a `<round_0_outputs>` bl
 # Cost-bound — the user is paying for this
 
 Default to:
+
 - **Round 1:** ≤6 workers total when no Round 0 ran; ≤3 follow-ups when Round 0 ran.
 - **Rounds 2-4:** ≤2 workers per round, only on confirmed gaps.
 - **Final round:** 0 workers; synth-only.

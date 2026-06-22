@@ -81,12 +81,16 @@ const DIFF = [
   `--- /dev/null`,
   `+++ b/${HANDLER_PATH}`,
   `@@ -0,0 +1,11 @@`,
-  ...HANDLER_CONTENT.split("\n").slice(0, 11).map((l) => `+${l}`),
+  ...HANDLER_CONTENT.split("\n")
+    .slice(0, 11)
+    .map((l) => `+${l}`),
   `diff --git a/${DEDUP_PATH} b/${DEDUP_PATH}`,
   `--- /dev/null`,
   `+++ b/${DEDUP_PATH}`,
   `@@ -0,0 +1,7 @@`,
-  ...DEDUP_CONTENT.split("\n").slice(0, 7).map((l) => `+${l}`),
+  ...DEDUP_CONTENT.split("\n")
+    .slice(0, 7)
+    .map((l) => `+${l}`),
   ``,
 ].join("\n");
 
@@ -128,7 +132,10 @@ const detPriors = await runDetPriors({
 process.stdout.write(
   `  → ${detPriors.changed.length} changed file(s), ${detPriors.findings.length} det-prior finding(s)\n`,
 );
-assert(detPriors.changed.length === 2, `det priors picked up both files (got ${detPriors.changed.length})`);
+assert(
+  detPriors.changed.length === 2,
+  `det priors picked up both files (got ${detPriors.changed.length})`,
+);
 
 // ---------------------------------------------------------------------------
 // Helper — fresh scratchpad + route per scenario.
@@ -181,21 +188,21 @@ delete process.env["WARDEN_REVIEW_BOSS_ROUNDS"];
 delete process.env["WARDEN_REVIEW_WORKER_BUDGET"];
 
 const baseline = await runScenario("1] baseline");
-assert(baseline.comments.length >= 0, `baseline emitted ≥0 comments (got ${baseline.comments.length})`);
-// Boss must have at least one streamText call → bossTokens is populated.
 assert(
-  baseline.scratchpad.bossTokens() !== undefined,
-  `baseline boss tokens are recorded`,
+  baseline.comments.length >= 0,
+  `baseline emitted ≥0 comments (got ${baseline.comments.length})`,
 );
+// Boss must have at least one streamText call → bossTokens is populated.
+assert(baseline.scratchpad.bossTokens() !== undefined, `baseline boss tokens are recorded`);
 // No "boss-loop crashed" warning.
-const bossErrors = baseline.degraded.filter(
-  (d) => d.topic === "llm" && d.kind === "warning",
-);
+const bossErrors = baseline.degraded.filter((d) => d.topic === "llm" && d.kind === "warning");
 process.stdout.write(`  · baseline boss-llm warnings: ${bossErrors.length}\n`);
 
 for (const c of baseline.comments.slice(0, 4)) {
   const summary = c.claim.length > 100 ? c.claim.slice(0, 100) + "…" : c.claim;
-  process.stdout.write(`    [${c.category}/${c.kind}/T${c.tier}] ${c.file}:${c.lineStart} — ${summary}\n`);
+  process.stdout.write(
+    `    [${c.category}/${c.kind}/T${c.tier}] ${c.file}:${c.lineStart} — ${summary}\n`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -206,10 +213,7 @@ process.env["WARDEN_REVIEW_BOSS_ROUNDS"] = "1";
 delete process.env["WARDEN_REVIEW_WORKER_BUDGET"];
 
 const rounds1 = await runScenario("2] BOSS_ROUNDS=1");
-assert(
-  rounds1.scratchpad.bossTokens() !== undefined,
-  `BOSS_ROUNDS=1 made at least one boss call`,
-);
+assert(rounds1.scratchpad.bossTokens() !== undefined, `BOSS_ROUNDS=1 made at least one boss call`);
 // With only 1 step, the boss may legitimately produce zero workers (it
 // must synth in the same step it could have dispatched in). No hard
 // assertion on worker count — just that the boss exited cleanly.
@@ -227,10 +231,7 @@ process.env["WARDEN_REVIEW_WORKER_BUDGET"] = "1";
 
 const budget1 = await runScenario("3] WORKER_BUDGET=1");
 const workerCount = budget1.scratchpad.workerOutputs().length;
-assert(
-  workerCount <= 1,
-  `worker budget caps dispatched count at 1 (got ${workerCount})`,
-);
+assert(workerCount <= 1, `worker budget caps dispatched count at 1 (got ${workerCount})`);
 
 // If the boss attempted a 2nd dispatch, a budget-exhausted degraded entry
 // must surface in the scratchpad (recorded via scratchpad.recordDegraded()

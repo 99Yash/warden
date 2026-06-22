@@ -26,24 +26,14 @@ export const externalKnowledge = sqliteTable(
 
     /** Source kind so consumers can route formatting (cve | advisory | ...). */
     sourceType: text("source_type", {
-      enum: [
-        "cve",
-        "advisory",
-        "changelog",
-        "documentation",
-        "web",
-        "tool",
-        "repo_convention",
-      ],
+      enum: ["cve", "advisory", "changelog", "documentation", "web", "tool", "repo_convention"],
     }).notNull(),
 
     /** Original URL or query target, when applicable. */
     sourceUrl: text("source_url"),
 
     /** Verified payload from the upstream (raw JSON). */
-    payload: text("payload", { mode: "json" })
-      .notNull()
-      .$type<Record<string, unknown>>(),
+    payload: text("payload", { mode: "json" }).notNull().$type<Record<string, unknown>>(),
 
     /** Unix epoch ms; consumers respect TTLs documented in vision.md §9. */
     ttlExpiresAt: integer("ttl_expires_at", { mode: "timestamp_ms" }).notNull(),

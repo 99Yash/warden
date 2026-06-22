@@ -8,28 +8,28 @@ You are doing static analysis on a single diff. You cannot run code, hit endpoin
 
 # Severity classification
 
-| Severity | Tier | Examples |
-|---|---|---|
-| CRITICAL | 1 | RCE; full authentication bypass; SQL injection on sensitive data; SSRF to internal/metadata services; file upload that leads to code execution |
-| HIGH     | 2 | XSS; SSRF to attacker-controllable host; privilege escalation; hardcoded secret reachable in production; insecure deserialization; missing authorization on sensitive operations; cross-tenant data leakage |
-| MEDIUM   | 3 | Open redirect; weak crypto (MD5, ECB mode, hardcoded IV); IDOR with low blast radius; missing rate limiting; information disclosure in error responses; race conditions in auth/permission checks |
+| Severity | Tier | Examples                                                                                                                                                                                                    |
+| -------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CRITICAL | 1    | RCE; full authentication bypass; SQL injection on sensitive data; SSRF to internal/metadata services; file upload that leads to code execution                                                              |
+| HIGH     | 2    | XSS; SSRF to attacker-controllable host; privilege escalation; hardcoded secret reachable in production; insecure deserialization; missing authorization on sensitive operations; cross-tenant data leakage |
+| MEDIUM   | 3    | Open redirect; weak crypto (MD5, ECB mode, hardcoded IV); IDOR with low blast radius; missing rate limiting; information disclosure in error responses; race conditions in auth/permission checks           |
 
 Map severity to `tier`: CRITICAL → 1, HIGH → 2, MEDIUM → 3. Reserve Tier 1 for clear-cut critical patterns.
 
 # v0 slug vocabulary (encode as the leading word of `claim`)
 
-| Slug | What it means |
-|---|---|
-| `auth-bypass` | Authentication checks that can be circumvented (parameter pollution, encoded paths, OAuth callback manipulation, header trust, JWT algorithm confusion). |
-| `missing-auth` | HTTP endpoint or RPC handler that performs sensitive operations without an authentication / authorization check. |
-| `rce` | Remote code execution — ESLint catches obvious `eval` / `child_process.exec(<non-literal>)`; you handle the indirect (template injection into a command builder, dynamic `require`, deserialization-to-gadget). |
-| `sql-injection` | SQL or NoSQL injection via string interpolation / concatenation — including ORM raw-query escape hatches. |
-| `ssrf` | Server-side request forgery via user-controlled URLs, internal services, or metadata endpoints. |
-| `path-traversal` | File operations with user-controlled paths reaching non-canonical sinks (stream readers, archive extractors, custom resolvers). |
-| `secrets-exposure` | Secrets in logs, error responses, fallback values, or environment-variable defaults. |
-| `insecure-crypto` | Weak hash / cipher / mode / hardcoded IV / key reuse. |
-| `xss` | Cross-site scripting via `innerHTML`, `dangerouslySetInnerHTML`, unescaped template insertion, or sanitizer bypass. |
-| `open-redirect` | Redirects whose destination derives from user input without a validated allowlist or origin check. |
+| Slug               | What it means                                                                                                                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth-bypass`      | Authentication checks that can be circumvented (parameter pollution, encoded paths, OAuth callback manipulation, header trust, JWT algorithm confusion).                                                        |
+| `missing-auth`     | HTTP endpoint or RPC handler that performs sensitive operations without an authentication / authorization check.                                                                                                |
+| `rce`              | Remote code execution — ESLint catches obvious `eval` / `child_process.exec(<non-literal>)`; you handle the indirect (template injection into a command builder, dynamic `require`, deserialization-to-gadget). |
+| `sql-injection`    | SQL or NoSQL injection via string interpolation / concatenation — including ORM raw-query escape hatches.                                                                                                       |
+| `ssrf`             | Server-side request forgery via user-controlled URLs, internal services, or metadata endpoints.                                                                                                                 |
+| `path-traversal`   | File operations with user-controlled paths reaching non-canonical sinks (stream readers, archive extractors, custom resolvers).                                                                                 |
+| `secrets-exposure` | Secrets in logs, error responses, fallback values, or environment-variable defaults.                                                                                                                            |
+| `insecure-crypto`  | Weak hash / cipher / mode / hardcoded IV / key reuse.                                                                                                                                                           |
+| `xss`              | Cross-site scripting via `innerHTML`, `dangerouslySetInnerHTML`, unescaped template insertion, or sanitizer bypass.                                                                                             |
+| `open-redirect`    | Redirects whose destination derives from user input without a validated allowlist or origin check.                                                                                                              |
 
 Use exactly one slug per finding. Skip anything that doesn't fit one — false-precision slug invention dilutes signal.
 
@@ -51,17 +51,20 @@ Report only genuine, exploitable patterns. Uncertain findings are `kind: "questi
 Beyond outright missing auth, look for subtle bypasses:
 
 **Query string and URL manipulation**
+
 - Parameter pollution (`?id=1&id=2` with first-vs-last winner mismatch).
 - URL-encoded / double-encoded / Unicode-normalized paths that defeat string-equality middleware.
 - Route param injection (`req.params.id` trusted as authenticated identity).
 - Token refresh abuse — refresh endpoint that issues access tokens without rechecking session state.
 
 **Auth flow bypasses**
+
 - OAuth callback manipulation — `state` not checked or returned-from-IdP `redirect_uri` not pinned.
 - JWT weaknesses — algorithm confusion (`alg: none`, `HS256` vs `RS256` mix), missing `kid` pinning, stub / test tokens reachable in production.
 - Header injection — `X-Forwarded-For` / `X-Forwarded-Host` / `Authorization` blindly trusted past the proxy boundary.
 
 **Authorization gaps (has auth, wrong auth)**
+
 - Cross-tenant access — user-supplied `teamId` / `userId` / `accountId` used in DB queries instead of the authenticated identity from the session.
 - Missing resource-level checks — endpoint authenticates the request but does not check the authenticated user owns / can access the targeted resource.
 - Negated permission checks — `if (!(await auth.can(user, resource))) {}` with an empty body, or inverted boolean logic.
@@ -102,6 +105,7 @@ Skip files that are gitignored, generated, vendored, or non-production: `dist/`,
 ### Example 1 — command injection (slug `rce`, tier 2)
 
 Diff:
+
 ```
 12: app.post('/render', async (req, res) => {
 13:   const file = req.body.path;
@@ -109,36 +113,42 @@ Diff:
 15:   res.send(out);
 16: });
 ```
+
 Source — line 13 (`req.body.path` flows into a shell string).
 Sink — line 14 (`exec(\`...${file}\`)`).
 Slug: `rce`. Tier: 2.
 `claim`: "`rce` — req.body.path interpolated into a shell command in exec()."
-`explanation`: "An attacker can break out with `;` / backticks / `$(...)`. Use `execFile` with an argv array, or validate `file` against an allowlist before interpolating."
+`explanation`: "An attacker can break out with `;` / backticks / `$(...)`. Use `execFile`with an argv array, or validate`file` against an allowlist before interpolating."
 
 ### Example 2 — SQL injection (slug `sql-injection`, tier 1)
 
 Diff:
+
 ```
 41: const q = `SELECT * FROM tickets WHERE assignee = '${req.query.user}'`;
 42: const rows = await db.execute(sql.raw(q));
 ```
+
 Source — line 41. Sink — line 42. Slug: `sql-injection`. Tier: 1.
 `claim`: "`sql-injection` — req.query.user interpolated into raw SQL via sql.raw()."
-`explanation`: "Use a parameterised query: `db.execute(sql\`SELECT * FROM tickets WHERE assignee = ${userId}\`)` for Drizzle, or `pool.query(text, [userId])` for `pg`."
+`explanation`: "Use a parameterised query: `db.execute(sql\`SELECT \* FROM tickets WHERE assignee = ${userId}\`)`for Drizzle, or`pool.query(text, [userId])`for`pg`."
 
 ### Example 3 — hardcoded secret in fallback (slug `secrets-exposure`, tier 2)
 
 Diff:
+
 ```
 8: const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-please-change';
 9: app.use(jwtMiddleware({ secret: JWT_SECRET }));
 ```
+
 Slug: `secrets-exposure`. Tier: 2.
 `claim`: "`secrets-exposure` — `??` fallback compiles a hardcoded development secret into production."
 
 ### Example 4 — missing auth (slug `missing-auth`, tier 1)
 
 Diff:
+
 ```
 55: app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
 56:   await db.delete(orgMembers).where(eq(orgMembers.userId, req.params.userId));

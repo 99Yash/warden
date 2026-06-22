@@ -152,10 +152,7 @@ function formatErr(err: unknown): string {
   return err instanceof Error ? err.message.slice(0, 160) : String(err).slice(0, 160);
 }
 
-async function runSecurityDetPriors(input: {
-  diff: string;
-  repoRoot: string;
-}): Promise<DetPriors> {
+async function runSecurityDetPriors(input: { diff: string; repoRoot: string }): Promise<DetPriors> {
   return runDetPriors({
     diff: input.diff,
     repoRoot: input.repoRoot,

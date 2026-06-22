@@ -77,20 +77,10 @@ mkdirSync(TMP_ROOT, { recursive: true });
 {
   const dir = nm("pkg-with-reexports");
   writePkg(dir, { name: "pkg-with-reexports", version: VERSION, types: "./index.d.ts" });
-  writeDts(
-    resolve(dir, "index.d.ts"),
-    [
-      "export * from './sub.js';",
-      "",
-    ].join("\n"),
-  );
+  writeDts(resolve(dir, "index.d.ts"), ["export * from './sub.js';", ""].join("\n"));
   writeDts(
     resolve(dir, "sub.d.ts"),
-    [
-      "export declare const X: number;",
-      "export declare function helper(): string;",
-      "",
-    ].join("\n"),
+    ["export declare const X: number;", "export declare function helper(): string;", ""].join("\n"),
   );
 }
 
@@ -122,13 +112,7 @@ mkdirSync(TMP_ROOT, { recursive: true });
       "./sub": { types: "./sub-types.d.ts", default: "./sub.js" },
     },
   });
-  writeDts(
-    resolve(dir, "index.d.ts"),
-    [
-      "export declare function shared(): void;",
-      "",
-    ].join("\n"),
-  );
+  writeDts(resolve(dir, "index.d.ts"), ["export declare function shared(): void;", ""].join("\n"));
   writeDts(
     resolve(dir, "sub-types.d.ts"),
     [
@@ -151,20 +135,8 @@ mkdirSync(TMP_ROOT, { recursive: true });
       "./internal": { types: "./internal.d.ts" },
     },
   });
-  writeDts(
-    resolve(dir, "index.d.ts"),
-    [
-      "export declare function top(): void;",
-      "",
-    ].join("\n"),
-  );
-  writeDts(
-    resolve(dir, "internal.d.ts"),
-    [
-      "export declare function bar(): void;",
-      "",
-    ].join("\n"),
-  );
+  writeDts(resolve(dir, "index.d.ts"), ["export declare function top(): void;", ""].join("\n"));
+  writeDts(resolve(dir, "internal.d.ts"), ["export declare function bar(): void;", ""].join("\n"));
 }
 
 // 9. pkg-no-exports — direct-fallback subpath (no `exports` map).
@@ -179,10 +151,7 @@ mkdirSync(TMP_ROOT, { recursive: true });
   writeDts(resolve(dir, "index.d.ts"), "export declare const ROOT: number;\n");
   writeDts(
     resolve(dir, "sub.d.ts"),
-    [
-      "export declare function baz(input: number): boolean;",
-      "",
-    ].join("\n"),
+    ["export declare function baz(input: number): boolean;", ""].join("\n"),
   );
 }
 
@@ -211,7 +180,10 @@ process.stdout.write(`\n[1] lookupTypeDef — positive root lookup\n`);
     );
     assert(r.kind === "function", `kind is "function" (got ${r.kind})`);
     assert(r.dts_file.endsWith("index.d.ts"), `dts_file points at index.d.ts: ${r.dts_file}`);
-    assert(typeof r.line_start === "number" && r.line_start >= 1, `line_start >= 1 (${r.line_start})`);
+    assert(
+      typeof r.line_start === "number" && r.line_start >= 1,
+      `line_start >= 1 (${r.line_start})`,
+    );
     // suggestedSource shape.
     const ss = r.suggestedSource;
     assert(ss.type === "api_def", "suggestedSource.type === 'api_def'");
@@ -235,7 +207,10 @@ process.stdout.write(`\n[2] lookupTypeDef — package_not_installed\n`);
   const r = await lookupTypeDef(TMP_ROOT, "nonexistent-pkg", "foo");
   assert(r.found === false, "nonexistent-pkg is not found");
   if (!r.found) {
-    assert(r.reason === "package_not_installed", `reason is package_not_installed (got ${r.reason})`);
+    assert(
+      r.reason === "package_not_installed",
+      `reason is package_not_installed (got ${r.reason})`,
+    );
   }
 }
 
@@ -295,10 +270,7 @@ process.stdout.write(`\n[8] lookupTypeDef — scoped + subpath\n`);
   const r = await lookupTypeDef(TMP_ROOT, "@scope/pkg/internal", "bar");
   assert(r.found === true, "@scope/pkg/internal#bar resolves");
   if (r.found) {
-    assert(
-      r.dts_file.endsWith("internal.d.ts"),
-      `dts_file points at internal.d.ts: ${r.dts_file}`,
-    );
+    assert(r.dts_file.endsWith("internal.d.ts"), `dts_file points at internal.d.ts: ${r.dts_file}`);
   }
 }
 

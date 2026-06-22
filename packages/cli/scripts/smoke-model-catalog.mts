@@ -1,7 +1,4 @@
-import {
-  _resetModelCatalogCacheForTests,
-  modelCatalogPrice,
-} from "@warden/ai/model-catalog";
+import { _resetModelCatalogCacheForTests, modelCatalogPrice } from "@warden/ai/model-catalog";
 import type { ResolvedLlmModel } from "@warden/ai";
 
 const originalFetch = globalThis.fetch;

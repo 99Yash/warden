@@ -9,7 +9,7 @@ M15 packages the dedicated milestone the M14 boss-laziness memo asked for. The M
 1. **`./decisions.md`** — focus on **ADR-0031** (the M15 design commit). Also: **ADR-0030** (M14 — direct predecessor; M15 calibrates the review harness ADR-0030 shipped); **ADR-0017** (multi-provider cascade — M15's Gemini adapter sits inside the cascade reimplemented inline in `boss-loop.ts`); **ADR-0015** (DeepSec borrow/reject framing — M15's eval suite picks up the "borrow methodology, defer LLM-as-judge" thread); **ADR-0013** (I/O-pure core — the eval suite reads fixture files from `packages/cli/scripts/eval/` which is the CLI's scripts dir, not core); **ADR-0006** (model tier helpers — M15 may bump boss to `claude-opus-4-7` as Config D fallback only; default stays 4.6).
 2. **`./CONTEXT.md`** — §1 the **review harness** entry (M14's pipeline; M15 calibrates it); §3 boss model / worker tiers (M15 adds programmatic-dispatch + examples-first-prompt as glossary entries); §7 confidence threshold (no change in M15; review-eval is orthogonal); §8 **state-of-the-art verification suite** entry (M15 is distinct — this is the LEAN internal suite, not the SOTA bench); and the new entries M15 lands: **review-eval**, **programmatic dispatch**, **examples-first prompt**, **multi-criteria threshold**, **transformSchemaForGemini**.
 3. **`./CLAUDE.md`** — package boundary table; AI SDK v6 notes (cascade-inline-in-boss-loop fact); M14 close-out paragraph (the 0-comment dogfood evidence); the M14+ deferred list (insert M15 review-eval ahead of M16 security-harness).
-4. **`./vision.md` §12** — Phase 8: Feedback Loop. Read for the *vocabulary* of usefulness rate / address rate / false-positive rate so M15 doesn't collide with terms reserved for the SOTA suite. M15 deliberately uses different terms (catch rate, plant rate, dispatch rate) to keep the slot open for SOTA later.
+4. **`./vision.md` §12** — Phase 8: Feedback Loop. Read for the _vocabulary_ of usefulness rate / address rate / false-positive rate so M15 doesn't collide with terms reserved for the SOTA suite. M15 deliberately uses different terms (catch rate, plant rate, dispatch rate) to keep the slot open for SOTA later.
 5. **`./packages/core/src/review-harness/boss-loop.ts`** — the entry point M15 modifies in Config B (programmatic dispatch) and the call site of the cascade that needs the Gemini adapter. Walk the dispatch loop end-to-end; understand the existing Round 1+ tool-use loop before introducing Round 0.
 6. **`./packages/core/src/review-harness/prompts/boss-system.md`** — the prompt Config C rewrites around examples. Read once to internalize the current rules-based shape, then plan the examples-first replacement using the worked examples in `m13-plan.md`'s security prompt as a structural reference.
 7. **`./packages/core/src/review-harness/det-priors.ts`** — M15 reuses `runDetPriors()` to compute "substantive files" + det-prior signal per file in Config B's Round 0 fan-out. No modifications here.
@@ -17,7 +17,7 @@ M15 packages the dedicated milestone the M14 boss-laziness memo asked for. The M
 9. **`./packages/ai/src/index.ts` + `./packages/ai/src/models.ts`** — current model tier helpers. M15 adds `transformSchemaForGemini()` here (probably as a sibling file `schema-adapters/gemini.ts` exported from the package root). The adapter wraps Google's `generateText`/`streamText` calls.
 10. **`./packages/cli/scripts/smoke-m14-*.mts` (any one)** — pattern reference for the eval suite's run script. M15's `run.mts` mirrors the `tsx`-based structure: top-level main, real-token assertions, deterministic-facet checks. Different file layout (eval has its own folder structure with fixtures/, configs/, results/) but the same idioms.
 11. **`./packages/cli/package.json`** — adds the `eval` script + the `eval:compare` script + the smoke wiring.
-12. **`./project_warden_m14_boss_laziness.md`** (in `/Users/yash/.claude/projects/-Users-yash-Developer-self-warden/memory/`) — the source-of-truth narrative for *why* M15 exists. The three M14 close-out issues it pre-labels (price-table duplication, cached-input-token discount rate, optional-spread pattern in `runReview()`) become the M14-close-out real-PR fixture's ground-truth labels.
+12. **`./project_warden_m14_boss_laziness.md`** (in `/Users/yash/.claude/projects/-Users-yash-Developer-self-warden/memory/`) — the source-of-truth narrative for _why_ M15 exists. The three M14 close-out issues it pre-labels (price-table duplication, cached-input-token discount rate, optional-spread pattern in `runReview()`) become the M14-close-out real-PR fixture's ground-truth labels.
 13. **`./feedback_milestone_closeout.md`** (in memory) — authorizes uncapped real-token eval spend during M15 close-out; flag in the plan so future-me isn't surprised by $20–90 eval-cycle cost.
 
 ## Goal of this milestone
@@ -184,16 +184,16 @@ packages/cli/package.json                         # MODIFIED — adds:
 
 ## Package boundaries (M15 additions)
 
-| Package          | M15 additions                                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `@warden/cli`    | `packages/cli/scripts/eval/` tree; `pnpm eval` script; four smoke scripts.                                                |
-| `@warden/core`   | `boss-loop.ts` gains `BossLoopConfig` fields + Round 0 dispatch path + prompt-variant loader. Single new prompt file.    |
-| `@warden/ai`     | `schema-adapters/gemini.ts` utility; re-export from `index.ts`.                                                           |
-| `@warden/db`     | No changes.                                                                                                               |
-| `@warden/env`    | No changes.                                                                                                               |
-| `@warden/config` | No changes.                                                                                                               |
+| Package          | M15 additions                                                                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `@warden/cli`    | `packages/cli/scripts/eval/` tree; `pnpm eval` script; four smoke scripts.                                            |
+| `@warden/core`   | `boss-loop.ts` gains `BossLoopConfig` fields + Round 0 dispatch path + prompt-variant loader. Single new prompt file. |
+| `@warden/ai`     | `schema-adapters/gemini.ts` utility; re-export from `index.ts`.                                                       |
+| `@warden/db`     | No changes.                                                                                                           |
+| `@warden/env`    | No changes.                                                                                                           |
+| `@warden/config` | No changes.                                                                                                           |
 
-The eval suite imports `@warden/core` directly (not via the CLI) so future bot wrappers (`apps/github-bot/` per ADR-0013) can re-use the harness without restructuring. The CLI's `scripts/eval/` location is purely organizational — it co-locates the suite with the existing M-plan smokes; logically the suite is a sibling of `packages/core/src/review-harness/` that *measures* the harness rather than implementing it.
+The eval suite imports `@warden/core` directly (not via the CLI) so future bot wrappers (`apps/github-bot/` per ADR-0013) can re-use the harness without restructuring. The CLI's `scripts/eval/` location is purely organizational — it co-locates the suite with the existing M-plan smokes; logically the suite is a sibling of `packages/core/src/review-harness/` that _measures_ the harness rather than implementing it.
 
 ## What to build — phase by phase
 
@@ -213,7 +213,7 @@ The eval suite imports `@warden/core` directly (not via the CLI) so future bot w
 - Hand-author 6 synthetic plant fixtures (one per worker concern). Each is a small (~20–50 line) `.patch` file with one or two `+` lines containing the planted anti-pattern, applied against a minimal context. Each gets a `labels.md` naming the expected line, kind, category, and concern.
 - Hand-author 2 clean-control fixtures (formatting-only, pure rename). Each gets a `labels.md` declaring `{ expected: "zero comments" }`.
 - Extract the M14 close-out delta as a single `.patch` file under `fixtures/real-prs/m14-closeout-<sha>/diff.patch`. Hand-author `labels.md` with the three issues pre-labeled by `project_warden_m14_boss_laziness.md`. Mark each label as `tier_expected` (1/2/3) and `concern_expected` (which of the 6 review concerns should have caught it).
-- *Optional* — extract 1–2 earlier PRs (M6 close-out and M11 close-out are reasonable picks because they shipped substantive features with multi-file diffs). Hand-grade their `labels.md`. Skip if dogfood evidence on the M14 close-out alone is sufficient; the spec ships ≥1 real PR, more is bonus.
+- _Optional_ — extract 1–2 earlier PRs (M6 close-out and M11 close-out are reasonable picks because they shipped substantive features with multi-file diffs). Hand-grade their `labels.md`. Skip if dogfood evidence on the M14 close-out alone is sufficient; the spec ships ≥1 real PR, more is bonus.
 
 ### Phase 3 — Boss-loop modifications (programmatic dispatch + examples-first)
 
@@ -254,7 +254,7 @@ Wire all four into `pnpm smoke:m15`.
 
 ### Phase 6 — Evaluation cycle
 
-- Run Config A (baseline) against the full fixture set, 3 samples each. Commit the scorecard to `results/baseline-m14.json`. Verify it fails the multi-criteria threshold (this is the baseline evidence; if it *passes*, M15 has bigger problems and the rest of the work is unnecessary).
+- Run Config A (baseline) against the full fixture set, 3 samples each. Commit the scorecard to `results/baseline-m14.json`. Verify it fails the multi-criteria threshold (this is the baseline evidence; if it _passes_, M15 has bigger problems and the rest of the work is unnecessary).
 - Run Config B (programmatic dispatch) against the full fixture set, 3 samples each. If it clears the threshold: **stop here. Config B wins.** Commit its scorecard to `results/m15-final/programmatic-dispatch.json`. Update boss-loop.ts to default `programmaticDispatch: true`. Skip Phase 6.5 + 6.6.
 - Run Config C (programmatic dispatch + examples-first prompt) only if B failed. If it clears: **Config C wins.** Commit its scorecard. Set defaults accordingly.
 - Run Config D (C + Opus 4.7) only if C failed. If it clears: **Config D wins.** Commit its scorecard. Document the model bump in the ADR close-out as the cost the calibration paid. Note: this regresses on ADR-0030's "rejects 4.7's 1.4× premium" stance; that's accepted in M15 only if necessary.
@@ -309,7 +309,7 @@ Listed near the top of the "Goal" section; collected here for emphasis:
 - **§5** — flip `security harness` from `[deferred, M15]` to `[deferred, M16]`. Update `m15-plan.md` → `m16-plan.md` cross-reference. Also flip `triage gate`, `boss plan`, `security investigator worker`, `security classifier worker`, `boss synth`, `SecurityScratchpad`, `securityRuns` from `[deferred, M15]` → `[deferred, M16]`.
 - **§7** — add a new entry:
   - **multi-criteria threshold** — `[M15]` The exit gate ADR-0031 applies to candidate boss-loop calibrations. Five gates checked in conjunction: (a) catches ≥2 of 3 documented M14 close-out issues; (b) catches ≥4 of 5 synthetic plants; (c) emits 0 comments on both clean-diff fixtures; (d) total cost <$3 per run on the M14 close-out diff; (e) dispatches ≥1 worker on every fixture where det priors emit a finding OR the diff has ≥1 substantive code file. Median-of-3 sampling per (fixture, config) suppresses LLM variance. Lives in `packages/cli/scripts/eval/score.mts`. → ADR-0031.
-- **§8** — add a new entry, *between* the existing `verify API claims` and `cross-repo retrieval` entries (alphabetically grouped):
+- **§8** — add a new entry, _between_ the existing `verify API claims` and `cross-repo retrieval` entries (alphabetically grouped):
   - **review-eval** — `[M15]` Lean internal calibration fixture suite for the M14 review harness per ADR-0031. Lives at `packages/cli/scripts/eval/`. Hybrid fixtures: ~5–7 synthetic plants (one per worker concern + 2 clean controls) + ≥1 real warden PR with hand-graded ground truth (M14 close-out delta pre-labeled by `project_warden_m14_boss_laziness.md`). Output: per-fixture pass/fail on synthetic + scorecard rows on real PRs + aggregate JSON + console markdown table + the **multi-criteria threshold** verdict. Distinct from the deferred **state-of-the-art verification suite** (this entry, below): review-eval is internal-tuning, not a public-claim benchmark. When SOTA ships, it absorbs review-eval as one subset. → ADR-0031.
 - **§8 `state-of-the-art verification suite` entry** — append a one-line clarification: "M15 ships the lean internal subset (`review-eval`) per ADR-0031; the SOTA suite stays deferred for a future commercial-claim moment."
 

@@ -47,9 +47,7 @@ export async function runAudit(repoRoot: string, lockfile: Lockfile): Promise<Au
   if (!result.ok) {
     return {
       advisories: [],
-      degraded: [
-        { kind: "warning", topic: "audit", message: `audit(${cmd}): spawn failed` },
-      ],
+      degraded: [{ kind: "warning", topic: "audit", message: `audit(${cmd}): spawn failed` }],
     };
   }
 

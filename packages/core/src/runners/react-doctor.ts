@@ -62,11 +62,7 @@ const JsonReportSchema = z
     // schemaVersion 1 (full/diff/staged) or 2 (baseline, `--scope changed`).
     schemaVersion: z.union([z.literal(1), z.literal(2)]),
     ok: z.boolean(),
-    error: z
-      .object({ message: z.string() })
-      .passthrough()
-      .nullable()
-      .optional(),
+    error: z.object({ message: z.string() }).passthrough().nullable().optional(),
     diagnostics: z.array(DiagnosticSchema),
   })
   .passthrough();
@@ -97,9 +93,7 @@ const EMPTY: RunReactDoctorResult = { findings: [], degraded: [] };
  * JSON, `report.ok === false`) collapses to one actionable degraded entry so
  * `check` never hard-fails on a missing react-doctor.
  */
-export async function runReactDoctor(
-  input: RunReactDoctorInput,
-): Promise<RunReactDoctorResult> {
+export async function runReactDoctor(input: RunReactDoctorInput): Promise<RunReactDoctorResult> {
   if (input.changedPaths.length === 0) return EMPTY;
 
   let tmpDir: string | undefined;
@@ -180,8 +174,7 @@ function unavailable(): DegradedEntry {
   return {
     kind: "actionable",
     topic: "react-doctor",
-    message:
-      "react-doctor unavailable — security families skipped; cached after first online run",
+    message: "react-doctor unavailable — security families skipped; cached after first online run",
   };
 }
 
@@ -199,9 +192,7 @@ async function mapDiagnostics(
   const findings: ToolFinding[] = [];
 
   for (const d of diagnostics) {
-    const absFile = isAbsolute(d.filePath)
-      ? d.filePath
-      : resolve(repoRoot, d.filePath);
+    const absFile = isAbsolute(d.filePath) ? d.filePath : resolve(repoRoot, d.filePath);
     const file = relative(repoRoot, absFile);
 
     const snippet = await readSnippet(lineCache, absFile, d.line);
@@ -217,9 +208,7 @@ async function mapDiagnostics(
       ruleId: d.rule,
       message: d.message,
       rdCategory: d.category,
-      ...(snippet !== undefined
-        ? { evidence: { path: file, line: d.line, snippet } }
-        : {}),
+      ...(snippet !== undefined ? { evidence: { path: file, line: d.line, snippet } } : {}),
     };
     findings.push(finding);
   }

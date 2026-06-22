@@ -1,9 +1,6 @@
 import { open } from "node:fs/promises";
 import type { ChangedFile } from "../../diff/index.js";
-import {
-  isSensitivePath,
-  resolveWithinRoot,
-} from "../tools/safety.js";
+import { isSensitivePath, resolveWithinRoot } from "../tools/safety.js";
 
 /**
  * Renders a diff-scoped snippet for a single ChangedFile, mirroring the

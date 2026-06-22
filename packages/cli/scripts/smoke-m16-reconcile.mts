@@ -144,10 +144,7 @@ const newAHashes = await fileChunksStore.getHashesForFile("src/a.ts");
 assert(newAHashes.length === 3, "a.ts still has 3 chunks after edit");
 const charlieHash = sha("charlie");
 assert(!newAHashes.includes(charlieHash), "charlie chunk removed from a.ts junction");
-assert(
-  oldAHashes.includes(charlieHash),
-  "(sanity) charlie chunk was on a.ts pre-edit",
-);
+assert(oldAHashes.includes(charlieHash), "(sanity) charlie chunk was on a.ts pre-edit");
 const charlieRow = db()
   .select({ c: chunks.chunkHash })
   .from(chunks)

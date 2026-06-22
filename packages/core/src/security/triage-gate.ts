@@ -21,8 +21,7 @@ export const SECURITY_SENSITIVE_PATTERNS = [
 
 export function evaluateTriageGate(input: TriageGateInput): TriageGateResult {
   const securitySignalCount =
-    input.detPriors.vulnComments.length +
-    input.detPriors.findings.filter(isSecurityFinding).length;
+    input.detPriors.vulnComments.length + input.detPriors.findings.filter(isSecurityFinding).length;
   const sensitivePathCount = input.detPriors.changed.filter((file) =>
     isSecuritySensitivePath(file.path),
   ).length;

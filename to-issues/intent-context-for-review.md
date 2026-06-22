@@ -4,7 +4,7 @@
 
 ## Problem
 
-Some of the highest-value bugs are *intent-relative invariant violations* —
+Some of the highest-value bugs are _intent-relative invariant violations_ —
 the code is internally plausible and only wrong against a contract stated
 outside the code. On alfred PR#235 these were the two findings warden could
 **not** have caught regardless of prompt quality:
@@ -37,8 +37,8 @@ to read.
   (prose) + the in-diff code. Decide how prose sources fit the
   evidence/sources model (ties into ADR-0044 reasoned-lane / citation demotion).
 - Trust: a stale or aspirational PR description is not ground truth (cf.
-  `project_warden_stale_doccomment_fp`). Treat intent as a *hypothesis to
-  verify against code*, not as fact.
+  `project_warden_stale_doccomment_fp`). Treat intent as a _hypothesis to
+  verify against code_, not as fact.
 
 ## Refs
 

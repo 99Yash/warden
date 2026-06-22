@@ -36,14 +36,17 @@ function assert(cond: unknown, msg: string): void {
 process.stdout.write(`\n[1] schema migration\n`);
 // Force migration by exercising any table.
 db().select().from(fileChunks).all();
-const tableRow = db()
-  .run(sql`SELECT name FROM sqlite_master WHERE type='table' AND name='file_chunks'`);
+const tableRow = db().run(
+  sql`SELECT name FROM sqlite_master WHERE type='table' AND name='file_chunks'`,
+);
 assert(tableRow !== undefined, "file_chunks table created on first db()");
-const pathIdx = db()
-  .run(sql`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_fc_path'`);
+const pathIdx = db().run(
+  sql`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_fc_path'`,
+);
 assert(pathIdx !== undefined, "idx_fc_path index present");
-const hashIdx = db()
-  .run(sql`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_fc_hash'`);
+const hashIdx = db().run(
+  sql`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_fc_hash'`,
+);
 assert(hashIdx !== undefined, "idx_fc_hash index present");
 
 process.stdout.write(`\n[2] store round-trip\n`);
@@ -108,7 +111,10 @@ db()
   .onConflictDoNothing()
   .run();
 const pruneRes = await store.pruneOrphans();
-assert(pruneRes.chunksPruned === 1, `pruneOrphans dropped 1 orphan chunk (got ${pruneRes.chunksPruned})`);
+assert(
+  pruneRes.chunksPruned === 1,
+  `pruneOrphans dropped 1 orphan chunk (got ${pruneRes.chunksPruned})`,
+);
 
 await store.deleteForFile("src/b.ts");
 assert((await store.getHashesForFile("src/b.ts")).length === 0, "b.ts cleared after deleteForFile");

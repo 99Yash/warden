@@ -7,11 +7,7 @@ export {
   SKIP_DIRS,
 } from "./safety.js";
 export { makeReadFileTool, type ReadFileResult } from "./read-file.js";
-export {
-  makeGrepRepoTool,
-  type GrepMatch,
-  type GrepRepoResult,
-} from "./grep-repo.js";
+export { makeGrepRepoTool, type GrepMatch, type GrepRepoResult } from "./grep-repo.js";
 export {
   ConcernEnum,
   makeDispatchWorkerTool,

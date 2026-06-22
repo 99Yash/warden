@@ -1,9 +1,9 @@
 {
   "name": "@warden/db",
-  "type": "module",
   "files": [
     "dist"
   ],
+  "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./*": "./src/*.ts"

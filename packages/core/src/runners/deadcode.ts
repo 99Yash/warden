@@ -130,11 +130,7 @@ function collectOptionalParamCandidates(
       for (const decl of stmt.declarationList.declarations) {
         if (!ts.isIdentifier(decl.name)) continue;
         const init = decl.initializer;
-        if (
-          init &&
-          (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) &&
-          init.body
-        ) {
+        if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) {
           collectFromFunctionLike(sf, init, decl.name.text, addedLines, out);
         }
       }
@@ -350,4 +346,3 @@ function hasExportModifier(node: ts.Node): boolean {
   const mods = ts.getModifiers(node) ?? [];
   return mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
-

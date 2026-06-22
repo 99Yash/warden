@@ -121,7 +121,12 @@ async function walkDir(repoRoot: string, relDir: string, out: string[]): Promise
   const absDir = resolvePath(repoRoot, relDir);
   // Force the string-name overload — Node 22 typings widen Dirent's name to
   // `string | Buffer` when no encoding is supplied.
-  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean }>;
+  let entries: Array<{
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+    isSymbolicLink(): boolean;
+  }>;
   try {
     entries = await readdir(absDir, { withFileTypes: true, encoding: "utf8" });
   } catch {

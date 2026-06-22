@@ -1,12 +1,12 @@
-import { z } from 'zod';
-import { currentWardenRuntime } from './config.js';
+import { z } from "zod";
+import { currentWardenRuntime } from "./config.js";
 
-export * from './config.js';
+export * from "./config.js";
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z
     .string()
-    .min(1, 'ANTHROPIC_API_KEY is required — see https://console.anthropic.com')
+    .min(1, "ANTHROPIC_API_KEY is required — see https://console.anthropic.com")
     .optional(),
   // Optional fallback per ADR-0017. Tool-using review call sites still
   // skip Gemini fallback; provider wiring remains for non-tool cascades.
@@ -19,9 +19,7 @@ const envSchema = z.object({
   // never touches the index) doesn't surprise users; the embedding-provider
   // factory throws fast when consumed without the key.
   VOYAGE_API_KEY: z.string().min(1).optional(),
-  WARDEN_LOG_LEVEL: z
-    .enum(['silent', 'error', 'warn', 'info', 'debug'])
-    .default('info'),
+  WARDEN_LOG_LEVEL: z.enum(["silent", "error", "warn", "info", "debug"]).default("info"),
   // Optional one-off env-file override. Loaded by config.ts before this
   // schema is parsed; kept here so docs-vs-code consistency checks see the
   // supported surface.
@@ -33,7 +31,7 @@ const envSchema = z.object({
   WARDEN_SECURITY_CONFIDENCE_FLOOR: z
     .string()
     .regex(/^\d+(\.\d+)?$/, {
-      message: 'WARDEN_SECURITY_CONFIDENCE_FLOOR must be a numeric string',
+      message: "WARDEN_SECURITY_CONFIDENCE_FLOOR must be a numeric string",
     })
     .refine(
       (s) => {
@@ -41,8 +39,7 @@ const envSchema = z.object({
         return n >= 0 && n <= 1;
       },
       {
-        message:
-          'WARDEN_SECURITY_CONFIDENCE_FLOOR must be a number between 0.0 and 1.0',
+        message: "WARDEN_SECURITY_CONFIDENCE_FLOOR must be a number between 0.0 and 1.0",
       },
     )
     .optional(),
@@ -54,7 +51,7 @@ const envSchema = z.object({
   WARDEN_REVIEW_BOSS_ROUNDS: z
     .string()
     .regex(/^\d+$/, {
-      message: 'WARDEN_REVIEW_BOSS_ROUNDS must be a positive integer',
+      message: "WARDEN_REVIEW_BOSS_ROUNDS must be a positive integer",
     })
     .refine(
       (s) => {
@@ -62,7 +59,7 @@ const envSchema = z.object({
         return n >= 1 && n <= 10;
       },
       {
-        message: 'WARDEN_REVIEW_BOSS_ROUNDS must be between 1 and 10',
+        message: "WARDEN_REVIEW_BOSS_ROUNDS must be between 1 and 10",
       },
     )
     .optional(),
@@ -76,7 +73,7 @@ const envSchema = z.object({
     .string()
     .regex(/^[1-9]\d*$/, {
       message:
-        'WARDEN_REVIEW_WORKER_BUDGET must be a positive integer (use the round cap to disable workers)',
+        "WARDEN_REVIEW_WORKER_BUDGET must be a positive integer (use the round cap to disable workers)",
     })
     .optional(),
   // ADR-0032 / M16: optional USD cap for the review-time incremental
@@ -85,15 +82,10 @@ const envSchema = z.object({
   WARDEN_REVIEW_REFRESH_MAX_USD: z
     .string()
     .optional()
-    .transform((value) =>
-      value === undefined || value === '' ? undefined : Number(value),
-    )
-    .refine(
-      (value) => value === undefined || (Number.isFinite(value) && value >= 0),
-      {
-        message: 'WARDEN_REVIEW_REFRESH_MAX_USD must be a non-negative number',
-      },
-    ),
+    .transform((value) => (value === undefined || value === "" ? undefined : Number(value)))
+    .refine((value) => value === undefined || (Number.isFinite(value) && value >= 0), {
+      message: "WARDEN_REVIEW_REFRESH_MAX_USD must be a non-negative number",
+    }),
   // ADR-0033: per-tier dispatch concurrency caps. Strong = Sonnet via
   // `getWorkerStrongModel()`; cheap = Haiku via `getWorkerCheapModel()`.
   // Provider-neutral naming so M18 + BYOLLM inherit. Positive integers; 0
@@ -103,13 +95,13 @@ const envSchema = z.object({
   WARDEN_WORKER_CONCURRENCY_STRONG: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message: 'WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer',
+      message: "WARDEN_WORKER_CONCURRENCY_STRONG must be a positive integer",
     })
     .optional(),
   WARDEN_WORKER_CONCURRENCY_CHEAP: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message: 'WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer',
+      message: "WARDEN_WORKER_CONCURRENCY_CHEAP must be a positive integer",
     })
     .optional(),
   // M18 / ADR-0029: belt-and-suspenders cap for the dedicated security
@@ -118,7 +110,7 @@ const envSchema = z.object({
   WARDEN_SECURITY_WORKER_BUDGET: z
     .string()
     .regex(/^[1-9]\d*$/, {
-      message: 'WARDEN_SECURITY_WORKER_BUDGET must be a positive integer',
+      message: "WARDEN_SECURITY_WORKER_BUDGET must be a positive integer",
     })
     .optional(),
   // ADR-0046: opt into the `react-doctor` det-prior (subprocessed
@@ -129,9 +121,7 @@ const envSchema = z.object({
   WARDEN_REACT_DOCTOR: z
     .string()
     .optional()
-    .transform(
-      (value) => value !== undefined && /^(1|true)$/i.test(value.trim()),
-    ),
+    .transform((value) => value !== undefined && /^(1|true)$/i.test(value.trim())),
   // ADR-0048: the live, dev-time observability surface (OTEL spans → a
   // self-hosted Langfuse stack at `docker/langfuse/`). DISTINCT from
   // ADR-0044 §7's persisted prose-free review trace. Keys gate emission:
@@ -145,7 +135,7 @@ const envSchema = z.object({
   // capture on) lands in spans, so it must not leave the box. Defaults to
   // the local Docker stack's web port. Pointing this at Langfuse Cloud is
   // explicitly out of scope for v0 (ADR-0048 §6).
-  LANGFUSE_HOST: z.string().url().optional().default('http://localhost:3200'),
+  LANGFUSE_HOST: z.string().url().optional().default("http://localhost:3200"),
   // I/O capture: full prompt/completion bodies (incl. boss reasoning prose)
   // on spans. Defaults ON when keys are present — the self-hosted box makes
   // this the most diagnostic signal for recall iteration. The ADR-0044 §7
@@ -155,12 +145,8 @@ const envSchema = z.object({
   WARDEN_LANGFUSE_CAPTURE_IO: z
     .string()
     .optional()
-    .transform((value) =>
-      value === undefined ? true : !/^(0|false)$/i.test(value.trim()),
-    ),
-  NODE_ENV: z
-    .enum(['development', 'production', 'test'])
-    .default('development'),
+    .transform((value) => (value === undefined ? true : !/^(0|false)$/i.test(value.trim()))),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 
 export type WardenEnv = z.infer<typeof envSchema>;
@@ -170,8 +156,8 @@ export function wardenEnv(): WardenEnv {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     const formatted = result.error.issues
-      .map((i) => `  ${i.path.join('.')}: ${i.message}`)
-      .join('\n');
+      .map((i) => `  ${i.path.join(".")}: ${i.message}`)
+      .join("\n");
     throw new Error(
       `Missing or invalid environment variables:\n${formatted}\n\nRun \`warden setup --check\` to see provider readiness and env file paths.`,
     );

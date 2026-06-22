@@ -21,4 +21,7 @@ async function main() {
     console.log(`  - ${f.file}:${f.line}-${f.endLine ?? f.line}  ${f.message}`);
   }
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

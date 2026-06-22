@@ -20,7 +20,7 @@ the boss emits an empty review, and the CLI prints `warden review: no findings`
 with a successful exit and a tiny cost. Observed on the 2026-06-21 alfred PR#235
 dogfood: two runs reported "clean" purely because every worker had errored.
 
-This is a *second* variant of the landmine in memory
+This is a _second_ variant of the landmine in memory
 `project_warden_boss_structured_output` — the first (`z.url()` → `format:"uri"`)
 was fixed; the all-keys-in-`required` rule is a different rejection on the same
 schema.

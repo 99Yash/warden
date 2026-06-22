@@ -23,22 +23,16 @@
   --warden-primary-bg: var(--warden-ink);
   --warden-primary-fg: var(--warden-paper);
   --warden-surface-shadow:
-    0 0 0 1px rgba(20, 20, 20, 0.055),
-    0 1px 2px rgba(20, 20, 20, 0.04),
-    0 6px 14px -8px rgba(20, 20, 20, 0.16),
-    0 24px 52px -34px rgba(20, 20, 20, 0.32);
+    0 0 0 1px rgba(20, 20, 20, 0.055), 0 1px 2px rgba(20, 20, 20, 0.04),
+    0 6px 14px -8px rgba(20, 20, 20, 0.16), 0 24px 52px -34px rgba(20, 20, 20, 0.32);
   --warden-surface-shadow-hover:
-    0 0 0 1px rgba(20, 20, 20, 0.085),
-    0 2px 4px rgba(20, 20, 20, 0.05),
-    0 12px 24px -12px rgba(20, 20, 20, 0.22),
-    0 36px 70px -32px rgba(20, 20, 20, 0.38);
+    0 0 0 1px rgba(20, 20, 20, 0.085), 0 2px 4px rgba(20, 20, 20, 0.05),
+    0 12px 24px -12px rgba(20, 20, 20, 0.22), 0 36px 70px -32px rgba(20, 20, 20, 0.38);
   --warden-floating-shadow:
-    0 0 0 1px rgba(20, 20, 20, 0.12),
-    0 30px 80px -32px rgba(20, 20, 20, 0.42);
-  --warden-inset:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    inset 0 -1px 0 rgba(20, 20, 20, 0.025);
-  --sl-font: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    0 0 0 1px rgba(20, 20, 20, 0.12), 0 30px 80px -32px rgba(20, 20, 20, 0.42);
+  --warden-inset: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(20, 20, 20, 0.025);
+  --sl-font:
+    "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --sl-font-mono: "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
   --warden-font-serif: "Newsreader", "Iowan Old Style", "Charter", "Georgia", serif;
   --sl-color-accent-low: #ecf6f0;
@@ -74,19 +68,14 @@
     --warden-primary-bg: var(--warden-orange);
     --warden-primary-fg: #111418;
     --warden-surface-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 2px 6px rgba(0, 0, 0, 0.45),
+      0 0 0 1px rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.45),
       0 20px 56px -32px rgba(0, 0, 0, 0.85);
     --warden-surface-shadow-hover:
-      0 0 0 1px rgba(255, 255, 255, 0.1),
-      0 6px 16px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(255, 255, 255, 0.1), 0 6px 16px rgba(0, 0, 0, 0.55),
       0 28px 80px -32px rgba(0, 0, 0, 0.95);
     --warden-floating-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.08),
-      0 36px 110px -28px rgba(0, 0, 0, 0.7);
-    --warden-inset:
-      inset 0 1px 0 rgba(255, 255, 255, 0.05),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+      0 0 0 1px rgba(255, 255, 255, 0.08), 0 36px 110px -28px rgba(0, 0, 0, 0.7);
+    --warden-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
     --sl-color-accent-low: #0b3428;
     --sl-color-accent: var(--warden-green);
     --sl-color-accent-high: #bcead7;
@@ -231,7 +220,9 @@ main {
   border-radius: 7px;
   color: var(--warden-brand-fg);
   background: var(--warden-brand-bg);
-  box-shadow: var(--warden-inset), 0 1px 2px rgba(20, 20, 20, 0.18);
+  box-shadow:
+    var(--warden-inset),
+    0 1px 2px rgba(20, 20, 20, 0.18);
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
@@ -412,11 +403,15 @@ main {
   color: var(--warden-primary-fg);
   border-color: color-mix(in srgb, var(--warden-primary-bg) 86%, var(--warden-line));
   background: var(--warden-primary-bg);
-  box-shadow: var(--warden-inset), 0 1px 2px rgba(20, 20, 20, 0.18);
+  box-shadow:
+    var(--warden-inset),
+    0 1px 2px rgba(20, 20, 20, 0.18);
 }
 
 .button.primary:hover {
-  box-shadow: var(--warden-inset), 0 4px 14px -4px rgba(20, 20, 20, 0.3);
+  box-shadow:
+    var(--warden-inset),
+    0 4px 14px -4px rgba(20, 20, 20, 0.3);
 }
 
 .button.secondary {
@@ -569,8 +564,13 @@ main {
 }
 
 @keyframes pulse-tag {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .finding-list {
@@ -827,8 +827,7 @@ main {
 .workflow-band {
   border-top: 1px solid var(--warden-line);
   border-bottom: 1px solid var(--warden-line);
-  background:
-    linear-gradient(180deg, var(--warden-paper) 0%, var(--warden-paper-deep) 100%);
+  background: linear-gradient(180deg, var(--warden-paper) 0%, var(--warden-paper-deep) 100%);
 }
 
 .workflow,
@@ -996,8 +995,8 @@ main {
   left: 0;
   right: 0;
   height: 14px;
-  background:
-    radial-gradient(circle at 8px 7px, var(--warden-paper-deep) 6px, transparent 6.5px) repeat-x;
+  background: radial-gradient(circle at 8px 7px, var(--warden-paper-deep) 6px, transparent 6.5px)
+    repeat-x;
   background-size: 16px 14px;
 }
 
@@ -1035,9 +1034,15 @@ main {
   overflow-wrap: anywhere;
 }
 
-.receipt-val.tier-1 { color: var(--warden-red); }
-.receipt-val.tier-2 { color: var(--warden-gold); }
-.receipt-val.tier-3 { color: var(--warden-green); }
+.receipt-val.tier-1 {
+  color: var(--warden-red);
+}
+.receipt-val.tier-2 {
+  color: var(--warden-gold);
+}
+.receipt-val.tier-3 {
+  color: var(--warden-green);
+}
 .receipt-val .receipt-emph {
   font-family: var(--warden-font-serif);
   font-style: italic;
@@ -1476,9 +1481,7 @@ body:not(.marketing-shell) {
   --docs-green: #31d0aa;
   --docs-red: #ef6b62;
   --docs-gold: #e5b85c;
-  --docs-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.015),
-    0 20px 80px -52px rgba(0, 0, 0, 0.95);
+  --docs-shadow: 0 0 0 1px rgba(255, 255, 255, 0.015), 0 20px 80px -52px rgba(0, 0, 0, 0.95);
   --sl-color-bg: var(--docs-bg);
   --sl-color-bg-nav: rgba(8, 9, 12, 0.92);
   --sl-color-bg-sidebar: #08090c;
@@ -2312,9 +2315,15 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
   height: 3px;
 }
 
-.doc-tier.tier-one::after { background: var(--docs-red); }
-.doc-tier.tier-two::after { background: var(--docs-gold); }
-.doc-tier.tier-three::after { background: var(--docs-green); }
+.doc-tier.tier-one::after {
+  background: var(--docs-red);
+}
+.doc-tier.tier-two::after {
+  background: var(--docs-gold);
+}
+.doc-tier.tier-three::after {
+  background: var(--docs-green);
+}
 
 .doc-priority-chain {
   display: flex;
@@ -2345,10 +2354,18 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
     animation: reveal-in 720ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   }
 
-  .reveal-in.delay-1 { animation-delay: 80ms; }
-  .reveal-in.delay-2 { animation-delay: 160ms; }
-  .reveal-in.delay-3 { animation-delay: 240ms; }
-  .reveal-in.delay-4 { animation-delay: 340ms; }
+  .reveal-in.delay-1 {
+    animation-delay: 80ms;
+  }
+  .reveal-in.delay-2 {
+    animation-delay: 160ms;
+  }
+  .reveal-in.delay-3 {
+    animation-delay: 240ms;
+  }
+  .reveal-in.delay-4 {
+    animation-delay: 340ms;
+  }
 
   .mini-finding {
     animation: finding-rise 620ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
@@ -2371,18 +2388,32 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
 
   .feature-grid article:nth-child(2),
   .workflow li:nth-child(2),
-  .review-spine li:nth-child(2) { animation-delay: 90ms; }
+  .review-spine li:nth-child(2) {
+    animation-delay: 90ms;
+  }
   .feature-grid article:nth-child(3),
   .workflow li:nth-child(3),
-  .review-spine li:nth-child(3) { animation-delay: 180ms; }
+  .review-spine li:nth-child(3) {
+    animation-delay: 180ms;
+  }
   .workflow li:nth-child(4),
-  .review-spine li:nth-child(4) { animation-delay: 270ms; }
-  .review-spine li:nth-child(5) { animation-delay: 340ms; }
+  .review-spine li:nth-child(4) {
+    animation-delay: 270ms;
+  }
+  .review-spine li:nth-child(5) {
+    animation-delay: 340ms;
+  }
 }
 
 @keyframes reveal-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes finding-rise {
@@ -2397,8 +2428,14 @@ body:not(.marketing-shell) mobile-starlight-toc .display-current {
 }
 
 @keyframes rise-soft {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────── */

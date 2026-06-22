@@ -99,9 +99,7 @@ export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } 
       return { tier: 1, category: "security" };
     }
   }
-  return f.severity === "error"
-    ? { tier: 2, category: "style" }
-    : { tier: 3, category: "style" };
+  return f.severity === "error" ? { tier: 2, category: "style" } : { tier: 3, category: "style" };
 }
 
 /**

@@ -51,7 +51,12 @@ process.stdout.write(`\n[1] comments must overlap added lines\n`);
 const onAddedLine = mkComment({ id: "on-added", lineStart: 12, lineEnd: 12 });
 const rangeOverlaps = mkComment({ id: "range-overlaps", lineStart: 18, lineEnd: 20 });
 const unchangedLine = mkComment({ id: "unchanged", lineStart: 16, lineEnd: 16 });
-const outsideFile = mkComment({ id: "outside-file", file: "src/other.ts", lineStart: 12, lineEnd: 12 });
+const outsideFile = mkComment({
+  id: "outside-file",
+  file: "src/other.ts",
+  lineStart: 12,
+  lineEnd: 12,
+});
 const fileLevel = mkComment({ id: "file-level", lineStart: 0, lineEnd: 0 });
 
 const result = scopeCommentsToDiff(

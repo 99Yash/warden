@@ -321,9 +321,7 @@ function tierCost(
 
 async function computeCosts(
   usage: TokenUsageByTier | undefined,
-): Promise<
-  { costUsd: number; costByTier: CostByTier; costLabels: CostLabelsByTier } | undefined
-> {
+): Promise<{ costUsd: number; costByTier: CostByTier; costLabels: CostLabelsByTier } | undefined> {
   if (!usage) return undefined;
   const prices = await getReviewModelPricingByTier();
   const labels = getReviewModelLabelsByTier();

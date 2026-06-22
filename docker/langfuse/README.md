@@ -7,7 +7,7 @@ worker made (`readFile` / `grepRepo` / `lookupTypeDef`), per-call cost, and the
 one review is one trace tree, and taggable by config/fixture/sample for
 cross-run eval diffing.
 
-This is **not** ADR-0044 §7's persisted, prose-free, never-gating *review trace*
+This is **not** ADR-0044 §7's persisted, prose-free, never-gating _review trace_
 (the trust spine) — that lives in `.warden/cache.sqlite`. This surface is a
 non-authoritative debugging tool. See `decisions.md` ADR-0048 and `CONTEXT.md §9`.
 

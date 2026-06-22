@@ -239,9 +239,15 @@ program
   .description(
     "Build (or refresh) the embedding-backed context index used by `warden review`. Walk → chunk → embed; idempotent re-runs hit the cache.",
   )
-  .option("--rebuild", "Drop the locked-model embeddings and re-embed under the current default SKU.")
+  .option(
+    "--rebuild",
+    "Drop the locked-model embeddings and re-embed under the current default SKU.",
+  )
   .option("--dry-run", "Run Phases 1+2 (walk + chunk) and print the estimate; skip Voyage calls.")
-  .option("--max-cost <usd>", "Abort before Phase 3 (embedding) if the estimate exceeds this USD value.")
+  .option(
+    "--max-cost <usd>",
+    "Abort before Phase 3 (embedding) if the estimate exceeds this USD value.",
+  )
   .option("--json", "Emit structured event log + summary instead of the phase-log UI.")
   .action(
     async (opts: { rebuild?: boolean; dryRun?: boolean; maxCost?: string; json?: boolean }) => {

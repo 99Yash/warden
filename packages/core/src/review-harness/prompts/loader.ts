@@ -68,9 +68,7 @@ const bossCache = new Map<BossPromptVariant, string>();
 // concern coexist without invalidation across eval-suite config sweeps.
 const workerCache = new Map<string, string>();
 
-export function loadBossSystemPrompt(
-  variant: BossPromptVariant = "rules",
-): string {
+export function loadBossSystemPrompt(variant: BossPromptVariant = "rules"): string {
   const cached = bossCache.get(variant);
   if (cached !== undefined) return cached;
   const raw = readFileSync(BOSS_PROMPT_PATHS[variant], "utf8");

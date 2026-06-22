@@ -47,9 +47,7 @@ export async function runJscpd(
 ): Promise<JscpdRunResult> {
   if (scopedPaths.length === 0) return { findings: [], degraded: [] };
 
-  const absPaths = scopedPaths.map((p) =>
-    isAbsolute(p) ? p : resolvePath(repoRoot, p),
-  );
+  const absPaths = scopedPaths.map((p) => (isAbsolute(p) ? p : resolvePath(repoRoot, p)));
 
   let detectClones: DetectClones;
   try {

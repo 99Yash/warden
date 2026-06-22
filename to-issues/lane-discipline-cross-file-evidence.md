@@ -6,7 +6,7 @@
 
 Lane discipline drops any finding whose `sources[].path` is outside the
 dispatched (in-diff) file set. That is correct for scope control, but it also
-kills a real bug class: a defect in changed code whose *proof* lives in an
+kills a real bug class: a defect in changed code whose _proof_ lives in an
 unchanged caller.
 
 alfred PR#235, recurrence-reversed: `scoreAttentionForItems` (in-diff,

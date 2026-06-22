@@ -17,17 +17,12 @@ import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-const TEST_DB = resolve(
-  tmpdir(),
-  `warden-bugfloor-db-${process.pid}-${Date.now()}.sqlite`,
-);
+const TEST_DB = resolve(tmpdir(), `warden-bugfloor-db-${process.pid}-${Date.now()}.sqlite`);
 
 if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
 process.env["WARDEN_CACHE_PATH"] = TEST_DB;
 
-const { db, closeDb, chunks, embeddings, merkle, indexMeta, jobs } = await import(
-  "@warden/db"
-);
+const { db, closeDb, chunks, embeddings, merkle, indexMeta, jobs } = await import("@warden/db");
 
 let failed = 0;
 function assert(cond: unknown, msg: string): void {
@@ -64,10 +59,7 @@ for (const [name, table] of [
 ] as const) {
   try {
     const rows = handle.select().from(table).all();
-    assert(
-      Array.isArray(rows) && rows.length === 0,
-      `${name}: queryable, empty on fresh cache`,
-    );
+    assert(Array.isArray(rows) && rows.length === 0, `${name}: queryable, empty on fresh cache`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     assert(false, `${name}: query failed (${message})`);

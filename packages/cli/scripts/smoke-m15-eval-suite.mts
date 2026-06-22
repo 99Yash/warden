@@ -363,7 +363,10 @@ const perfectFalsepos = scoreFixtureRun(
   [makeSample(0, 0, 0.05, 1), makeSample(0, 0, 0.05, 1), makeSample(0, 0, 0.05, 1)],
   "perfect",
 );
-const perfectAgg = aggregateScores([perfectRow, cleanPerfect, perfectM14, perfectFalsepos], "perfect");
+const perfectAgg = aggregateScores(
+  [perfectRow, cleanPerfect, perfectM14, perfectFalsepos],
+  "perfect",
+);
 assert(
   perfectAgg.falsePositiveTrapHits === 0 && perfectAgg.falsePositiveTraps === 2,
   `perfect aggregate has 0/2 false-positive trap hits`,
@@ -432,16 +435,13 @@ const falseposHit = scoreFixtureRun(
   [makeSample(0, 1, 0.05, 1, 1), makeSample(0, 1, 0.05, 1, 1), makeSample(0, 1, 0.05, 1, 1)],
   "falsepos-hit",
 );
-const falseposFailAgg = aggregateScores([perfectRow, cleanPerfect, perfectM14, falseposHit], "falsepos-hit");
+const falseposFailAgg = aggregateScores(
+  [perfectRow, cleanPerfect, perfectM14, falseposHit],
+  "falsepos-hit",
+);
 const falseposFailVerdict = checkThreshold(falseposFailAgg, falseposFailAgg.rows);
-assert(
-  !falseposFailVerdict.cleared,
-  `false-positive trap hit does NOT clear threshold`,
-);
-assert(
-  falseposFailVerdict.failed.includes("f-false-positive-traps"),
-  `(f) flagged`,
-);
+assert(!falseposFailVerdict.cleared, `false-positive trap hit does NOT clear threshold`);
+assert(falseposFailVerdict.failed.includes("f-false-positive-traps"), `(f) flagged`);
 
 const intermittentFalsepos = scoreFixtureRun(
   falseposFixture,

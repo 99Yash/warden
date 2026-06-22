@@ -64,7 +64,7 @@ Land ADR-0030's design in a single coherent slice:
 - **No `CategoryEnum` change.** All 6 worker concerns already in the enum.
 - **No `PRIORITY_ORDER` change.** Existing slots stay.
 - **No new `Source.type`.** Workers emit existing `tool` / `api_def` sources.
-- **No verifier API change** *post-bug-floor*. Commit 1 fixes the per-line match limitation; the verifier signature stays the same.
+- **No verifier API change** _post-bug-floor_. Commit 1 fixes the per-line match limitation; the verifier signature stays the same.
 - **`getBossModel()` → Opus 4.6.** Existing helper, new mapping. `getApexModel()` (Opus 4.7) untouched.
 - **Env vars.** `WARDEN_REVIEW_BOSS_ROUNDS` (default 5) + `WARDEN_REVIEW_WORKER_BUDGET` (optional). Documented in `.env.example` + CLAUDE.md env table.
 - **No new SQLite tables.** Cost-tracking deferred per Q12.
@@ -86,18 +86,18 @@ By the end:
 
 ## Design decisions (grill-with-docs lock — full reasoning + rejected alternatives)
 
-| # | Decision | Lock | Reasoning + rejected alternatives |
-|---|---|---|---|
-| Q1 | Harness IS the polish — not a separate polish sprint | M14 = harness | **Rejected (A) Polish + harness as separate milestones.** Polish sprint has no clean exit criterion — Copilot will catch new things between PRs. Hand-patching each bug ("optimize the prompt every time Copilot finds something") doesn't scale and was explicitly the strategy rejected. The 3 bug-floor items are preconditions for the harness, not a milestone in themselves. **Chosen (B):** harness's per-file Sonnet workers + boss adjudication catch the *classes* Copilot caught; only the 3 verifier/db/leverage bugs block the harness itself from working. |
-| Q2 | Worker dimension = hybrid `(file, concern-subset)` | (C) Hybrid | **Rejected (A) By concern alone (vision §3 shape).** Fixed concerns × full-diff input misses "this specific file is interesting" — Copilot's verifier-head-only finding required deep look at `verify-citations.ts`, not all files. **Rejected (B) By file alone.** Misses concern-specificity — running every concern on every file is wasteful for styling-only files. **Chosen (C):** boss plans `(files[], concerns[], tier?)` per subtask; M14-security already chose this shape (investigator + classifier). Boss decides "send Sonnet for `verify-citations.ts` correctness+consistency; send Haiku to classify if `README.md`'s VOYAGE_API_KEY claim drifts." |
-| Q3 | Boss model tier = Opus 4.6 | (A) downgraded | **Rejected (B) Sonnet boss; Opus only for `--deep`.** Loses the "smarter planning" payoff per user's explicit "won't be doing good code reviews otherwise." **Rejected (C) Haiku boss.** Too weak for multi-file budget allocation. **Rejected (D) Env-tunable.** Over-design without dogfood evidence. **Chosen (A) downgraded to Opus 4.6:** 1M context; rejects 4.7's 1.4× premium (user: "I can do without that"). `getBossModel()` becomes Opus 4.6 (was Sonnet). `getApexModel()` stays Opus 4.7 until `--deep` re-grill in M15+. |
-| Q4 | Full replacement — M8 spine + M7/M12/M13 sub-agents retire for review-mode | (A) | **Rejected (B) Harness wraps spine.** Preserves the half-baked M8 spine (only 2 of 8 runners migrated through `Runner` contract per ADR-0023 status); wrapping adds complexity without payoff. **Rejected (C) Replace synth; keep sub-agents parallel.** Dual-LLM-brain pattern stays alive — sub-agents bypass the boss's planning, defeating the harness. **Chosen (A):** single planning brain. M13/M12/M7 sub-agent prompts seed M14 worker prompts verbatim; runner files delete; M8 `synthesizer.ts` + `dispatch.ts` + `scratchpad.ts` retire for review-mode. `Runner` contract survives for det-priors additions. Check-mode preserved via thin `det-priors.ts` helper. |
-| Q5 | Boss loop dynamism = full dynamic, `stepCountIs(5)` cap | (γ-capped) | **Rejected (α) Static dispatch (M14-security shape).** Boss never sees scratchpad mid-stream; can't adjudicate. User's framing ("the boss will basically be adjudicating what to do next based on their findings") demanded dynamism. **Rejected (β) Bounded dynamic (3-4 calls).** User asked for full dynamic with cap. **Rejected uncapped γ.** $1.50–2.00/review Opus cost at 10 rounds × 5–20 reviews/day = $7.50–40/day; unacceptable for personal v1. **Chosen (γ-capped at 5 rounds):** boss runs `streamText` tool-use loop with `dispatch_worker` tool + `stopWhen: stepCountIs(5)`. ~$0.75–1.00/review Opus boss; workers separately bounded by `WARDEN_REVIEW_WORKER_BUDGET`. Each round labeled via `phase: 'plan'|'adjudicate'|'synth'` for render UX. |
-| Q6 | Concern set = 6 (correctness, scalability, consistency, security, committability, leverage) | (I) Aggressive 6 | **Rejected (II) Lean 4 (drop committability + leverage workers).** Partial replacement; contradicts Q4 (A); leaves M7/M12 sub-agents as parallel cheap-tier mini-LLMs. **Rejected (III) Maximal 7+ (add clarity/contract).** Clarity overlaps with correctness; contract has no data source pre-sibling-repo. Over-design. **Chosen (I):** full sub-agent consolidation. 3 new prompts (correctness, scalability, consistency) + 3 migrated from M13/M7/M12. Tier defaults: correctness/scalability/consistency/security = Sonnet (vision §3 mandate); committability/leverage = Haiku (matches today). Boss can override per subtask. |
-| Q7 | Phase structure = 3 (Det Priors → Boss Loop → Citation Verify) | (α) Collapsed | **Rejected (β) 6-phase M14-security shape preserved.** Incompatible with γ-capped — full dynamic boss can't be split across rigid Plan/Adjudicate/Synth phases. **Rejected (γ) 4-phase with no-op gate.** Phase 1.5 (Triage Gate) is dead code in review-mode; speculative "might need later" framing. M14-security's gate is binary skip; review can't skip when invoked. **Chosen (α) 3-phase:** Det Priors → Boss Loop → Citation Verify. Boss loop labels rounds via `phase` field. Empty-diff is one-line early-return at harness entry, not a phase. Render UX shows rounds inside Phase 2. |
-| Q10 | Bug floor = 3 commits before harness | as-listed | **Rejected expansion to include ESLint security `ignore: true` fix.** Detector survives as Phase 1 det prior; bug stays live post-harness if not in floor, but it's a detector-quality issue not a harness blocker. Consistency worker may catch. **Rejected expansion to include DB perf.** Performance polish, not correctness. **Rejected narrowing to 2 (drop leverage).** Leverage detector survives the migration; broken detector emits broken comments regardless of harness. **Chosen 3 exact items:** verify-citations multi-line + read-around-line (PR #8 + half of PR #14), `db()` auto-migrate (PR #3 — re-verify at impl-time; may be already-fixed by an existing `migrate()` call), leverage single-line snippet (other half of PR #14, belt-and-suspenders). |
-| Q11 | Exit criterion = dogfood on M14 PR + 6 canonical fixtures | (II) | **Rejected (I) Dogfood-only.** Matches M5–M13 pattern but too soft for M14's scale (6 workers, 5-round boss loop, ~12 new files). One silently-broken worker would slip past. **Rejected (III) Replay on past PRs.** Multi-day tooling investment for marginal signal vs (II); defer to state-of-the-art verification suite milestone. **Chosen (II):** 6 fixtures (one per worker, ~5–10 lines each); each smoke asserts catch + verify + hard-rules pass. Plus dogfood on M14 PR (≥3 issues, ≤1 FP). Fixtures double as per-worker regression tests. |
-| Q12 | Cost-tracking SQLite table = defer | (c) Defer | **Rejected (a) `reviewRuns` table now.** v1 cost ceiling is small (~$5–20/day for personal use); per-run tracking has limited urgency. **Rejected (b) Generalize to `harnessRuns` now.** Pre-empts future fragmentation but adds schema complexity before there's a second consumer. **Chosen (c):** no SQLite table in M14. Add when `--deep` ships in M15+ and cost-tracking matters across both verbs; generalize to `harnessRuns` then with `mode` column. |
+| #   | Decision                                                                                    | Lock             | Reasoning + rejected alternatives                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | ------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ----------------------- |
+| Q1  | Harness IS the polish — not a separate polish sprint                                        | M14 = harness    | **Rejected (A) Polish + harness as separate milestones.** Polish sprint has no clean exit criterion — Copilot will catch new things between PRs. Hand-patching each bug ("optimize the prompt every time Copilot finds something") doesn't scale and was explicitly the strategy rejected. The 3 bug-floor items are preconditions for the harness, not a milestone in themselves. **Chosen (B):** harness's per-file Sonnet workers + boss adjudication catch the _classes_ Copilot caught; only the 3 verifier/db/leverage bugs block the harness itself from working.                                                                                                                                                                                                       |
+| Q2  | Worker dimension = hybrid `(file, concern-subset)`                                          | (C) Hybrid       | **Rejected (A) By concern alone (vision §3 shape).** Fixed concerns × full-diff input misses "this specific file is interesting" — Copilot's verifier-head-only finding required deep look at `verify-citations.ts`, not all files. **Rejected (B) By file alone.** Misses concern-specificity — running every concern on every file is wasteful for styling-only files. **Chosen (C):** boss plans `(files[], concerns[], tier?)` per subtask; M14-security already chose this shape (investigator + classifier). Boss decides "send Sonnet for `verify-citations.ts` correctness+consistency; send Haiku to classify if `README.md`'s VOYAGE_API_KEY claim drifts."                                                                                                          |
+| Q3  | Boss model tier = Opus 4.6                                                                  | (A) downgraded   | **Rejected (B) Sonnet boss; Opus only for `--deep`.** Loses the "smarter planning" payoff per user's explicit "won't be doing good code reviews otherwise." **Rejected (C) Haiku boss.** Too weak for multi-file budget allocation. **Rejected (D) Env-tunable.** Over-design without dogfood evidence. **Chosen (A) downgraded to Opus 4.6:** 1M context; rejects 4.7's 1.4× premium (user: "I can do without that"). `getBossModel()` becomes Opus 4.6 (was Sonnet). `getApexModel()` stays Opus 4.7 until `--deep` re-grill in M15+.                                                                                                                                                                                                                                        |
+| Q4  | Full replacement — M8 spine + M7/M12/M13 sub-agents retire for review-mode                  | (A)              | **Rejected (B) Harness wraps spine.** Preserves the half-baked M8 spine (only 2 of 8 runners migrated through `Runner` contract per ADR-0023 status); wrapping adds complexity without payoff. **Rejected (C) Replace synth; keep sub-agents parallel.** Dual-LLM-brain pattern stays alive — sub-agents bypass the boss's planning, defeating the harness. **Chosen (A):** single planning brain. M13/M12/M7 sub-agent prompts seed M14 worker prompts verbatim; runner files delete; M8 `synthesizer.ts` + `dispatch.ts` + `scratchpad.ts` retire for review-mode. `Runner` contract survives for det-priors additions. Check-mode preserved via thin `det-priors.ts` helper.                                                                                                |
+| Q5  | Boss loop dynamism = full dynamic, `stepCountIs(5)` cap                                     | (γ-capped)       | **Rejected (α) Static dispatch (M14-security shape).** Boss never sees scratchpad mid-stream; can't adjudicate. User's framing ("the boss will basically be adjudicating what to do next based on their findings") demanded dynamism. **Rejected (β) Bounded dynamic (3-4 calls).** User asked for full dynamic with cap. **Rejected uncapped γ.** $1.50–2.00/review Opus cost at 10 rounds × 5–20 reviews/day = $7.50–40/day; unacceptable for personal v1. **Chosen (γ-capped at 5 rounds):** boss runs `streamText` tool-use loop with `dispatch_worker` tool + `stopWhen: stepCountIs(5)`. ~$0.75–1.00/review Opus boss; workers separately bounded by `WARDEN_REVIEW_WORKER_BUDGET`. Each round labeled via `phase: 'plan'                                                | 'adjudicate' | 'synth'` for render UX. |
+| Q6  | Concern set = 6 (correctness, scalability, consistency, security, committability, leverage) | (I) Aggressive 6 | **Rejected (II) Lean 4 (drop committability + leverage workers).** Partial replacement; contradicts Q4 (A); leaves M7/M12 sub-agents as parallel cheap-tier mini-LLMs. **Rejected (III) Maximal 7+ (add clarity/contract).** Clarity overlaps with correctness; contract has no data source pre-sibling-repo. Over-design. **Chosen (I):** full sub-agent consolidation. 3 new prompts (correctness, scalability, consistency) + 3 migrated from M13/M7/M12. Tier defaults: correctness/scalability/consistency/security = Sonnet (vision §3 mandate); committability/leverage = Haiku (matches today). Boss can override per subtask.                                                                                                                                         |
+| Q7  | Phase structure = 3 (Det Priors → Boss Loop → Citation Verify)                              | (α) Collapsed    | **Rejected (β) 6-phase M14-security shape preserved.** Incompatible with γ-capped — full dynamic boss can't be split across rigid Plan/Adjudicate/Synth phases. **Rejected (γ) 4-phase with no-op gate.** Phase 1.5 (Triage Gate) is dead code in review-mode; speculative "might need later" framing. M14-security's gate is binary skip; review can't skip when invoked. **Chosen (α) 3-phase:** Det Priors → Boss Loop → Citation Verify. Boss loop labels rounds via `phase` field. Empty-diff is one-line early-return at harness entry, not a phase. Render UX shows rounds inside Phase 2.                                                                                                                                                                              |
+| Q10 | Bug floor = 3 commits before harness                                                        | as-listed        | **Rejected expansion to include ESLint security `ignore: true` fix.** Detector survives as Phase 1 det prior; bug stays live post-harness if not in floor, but it's a detector-quality issue not a harness blocker. Consistency worker may catch. **Rejected expansion to include DB perf.** Performance polish, not correctness. **Rejected narrowing to 2 (drop leverage).** Leverage detector survives the migration; broken detector emits broken comments regardless of harness. **Chosen 3 exact items:** verify-citations multi-line + read-around-line (PR #8 + half of PR #14), `db()` auto-migrate (PR #3 — re-verify at impl-time; may be already-fixed by an existing `migrate()` call), leverage single-line snippet (other half of PR #14, belt-and-suspenders). |
+| Q11 | Exit criterion = dogfood on M14 PR + 6 canonical fixtures                                   | (II)             | **Rejected (I) Dogfood-only.** Matches M5–M13 pattern but too soft for M14's scale (6 workers, 5-round boss loop, ~12 new files). One silently-broken worker would slip past. **Rejected (III) Replay on past PRs.** Multi-day tooling investment for marginal signal vs (II); defer to state-of-the-art verification suite milestone. **Chosen (II):** 6 fixtures (one per worker, ~5–10 lines each); each smoke asserts catch + verify + hard-rules pass. Plus dogfood on M14 PR (≥3 issues, ≤1 FP). Fixtures double as per-worker regression tests.                                                                                                                                                                                                                         |
+| Q12 | Cost-tracking SQLite table = defer                                                          | (c) Defer        | **Rejected (a) `reviewRuns` table now.** v1 cost ceiling is small (~$5–20/day for personal use); per-run tracking has limited urgency. **Rejected (b) Generalize to `harnessRuns` now.** Pre-empts future fragmentation but adds schema complexity before there's a second consumer. **Chosen (c):** no SQLite table in M14. Add when `--deep` ships in M15+ and cost-tracking matters across both verbs; generalize to `harnessRuns` then with `mode` column.                                                                                                                                                                                                                                                                                                                 |
 
 ## Evidence — Copilot findings that drove this milestone
 
@@ -105,57 +105,57 @@ The Copilot reviews on PRs #3 / #5 / #6 / #8 / #14 / #15 are the **specification
 
 **Class 1 — doc-vs-code drift inside a single function/file** (caught by `consistency` worker)
 
-| Finding | Source | Worker target |
-|---|---|---|
-| Verifier docstring claims `line ± DRIFT`, impl reads file head | PR #8, `verify-citations.ts` | consistency (also bug floor Commit 1 — too load-bearing to wait for harness) |
-| `SourceSchema` docstring claims "silently-skipped", `.refine()` rejects partial triples | PR #8, `schema.ts` | consistency |
-| `diff/tree.ts` docstring claims memory not O(files), code pushes per-file refs | PR #6 | consistency |
-| `diff/tree.ts` comment claims Windows-path defense, code only splits on `/` | PR #6 | consistency |
-| `cli/src/index.ts` banner-ordering comment claims "before phase log", renders after | PR #3 | consistency |
-| `committability.ts` doc says citation verified "before the question lands" — pre-M10 framing | PR #8 | consistency |
-| README claims `VOYAGE_API_KEY` required for `warden review`, code degrades gracefully | PR #3 | consistency |
+| Finding                                                                                      | Source                       | Worker target                                                                |
+| -------------------------------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
+| Verifier docstring claims `line ± DRIFT`, impl reads file head                               | PR #8, `verify-citations.ts` | consistency (also bug floor Commit 1 — too load-bearing to wait for harness) |
+| `SourceSchema` docstring claims "silently-skipped", `.refine()` rejects partial triples      | PR #8, `schema.ts`           | consistency                                                                  |
+| `diff/tree.ts` docstring claims memory not O(files), code pushes per-file refs               | PR #6                        | consistency                                                                  |
+| `diff/tree.ts` comment claims Windows-path defense, code only splits on `/`                  | PR #6                        | consistency                                                                  |
+| `cli/src/index.ts` banner-ordering comment claims "before phase log", renders after          | PR #3                        | consistency                                                                  |
+| `committability.ts` doc says citation verified "before the question lands" — pre-M10 framing | PR #8                        | consistency                                                                  |
+| README claims `VOYAGE_API_KEY` required for `warden review`, code degrades gracefully        | PR #3                        | consistency                                                                  |
 
 **Class 2 — scalability / inefficient resource use** (caught by `scalability` worker)
 
-| Finding | Source | Worker target |
-|---|---|---|
-| `chunk-store.ts` `getByFile()` filters by `fileSha` in JS, not SQL `WHERE` | PR #3 | scalability |
-| `chunk-store.ts` + `embedding-store.ts` `count()` loads all rows, returns `rows.length` | PR #3 | scalability |
-| `committability.ts` `buildFileInput()` reads entire file when only first ~4KB used | PR #5 | scalability |
-| `committability.ts` prompt includes first ~20 lines regardless of where diff touched (leaks unrelated header) | PR #5 | scalability (or security — info leak) |
-| `index.ts` `rawChanged` retained for full `review()` lifetime | PR #6 | scalability (irrelevant post-harness — index.ts rewritten) |
+| Finding                                                                                                       | Source | Worker target                                              |
+| ------------------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------- |
+| `chunk-store.ts` `getByFile()` filters by `fileSha` in JS, not SQL `WHERE`                                    | PR #3  | scalability                                                |
+| `chunk-store.ts` + `embedding-store.ts` `count()` loads all rows, returns `rows.length`                       | PR #3  | scalability                                                |
+| `committability.ts` `buildFileInput()` reads entire file when only first ~4KB used                            | PR #5  | scalability                                                |
+| `committability.ts` prompt includes first ~20 lines regardless of where diff touched (leaks unrelated header) | PR #5  | scalability (or security — info leak)                      |
+| `index.ts` `rawChanged` retained for full `review()` lifetime                                                 | PR #6  | scalability (irrelevant post-harness — index.ts rewritten) |
 
 **Class 3 — parallelism / latency regression in diff** (caught by `scalability` + `correctness` workers)
 
-| Finding | Source | Worker target |
-|---|---|---|
-| `scalabilityRunner` dispatched serially after first `Promise.all` (latency regression) | PR #5 | scalability (correctness for the regression-in-diff signal; irrelevant post-harness — M8 spine retires) |
+| Finding                                                                                | Source | Worker target                                                                                           |
+| -------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------- |
+| `scalabilityRunner` dispatched serially after first `Promise.all` (latency regression) | PR #5  | scalability (correctness for the regression-in-diff signal; irrelevant post-harness — M8 spine retires) |
 
 **Class 4 — security / path safety** (caught by `security` worker)
 
-| Finding | Source | Worker target |
-|---|---|---|
-| `committability.ts` path traversal — `cf.path` used without repoRoot check | PR #5 | security (irrelevant post-harness — committability worker uses `readFile` tool which is repo-scoped) |
-| `verifyCitation()` reads sub-agent-provided paths without repoRoot check | PR #5 | security (irrelevant post-harness — verifier already has `resolveWithinRoot` per current code) |
-| `eslint-security.ts` `ignore: true` lets target repo's `.eslintignore` bleed in | PR #15 | security (defer to post-M14 polish; detector-quality issue) |
+| Finding                                                                         | Source | Worker target                                                                                        |
+| ------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| `committability.ts` path traversal — `cf.path` used without repoRoot check      | PR #5  | security (irrelevant post-harness — committability worker uses `readFile` tool which is repo-scoped) |
+| `verifyCitation()` reads sub-agent-provided paths without repoRoot check        | PR #5  | security (irrelevant post-harness — verifier already has `resolveWithinRoot` per current code)       |
+| `eslint-security.ts` `ignore: true` lets target repo's `.eslintignore` bleed in | PR #15 | security (defer to post-M14 polish; detector-quality issue)                                          |
 
 **Class 5 — silent failures / missing degraded entries** (caught by `correctness` + `consistency` workers)
 
-| Finding | Source | Worker target |
-|---|---|---|
-| `eslint-security.ts` non-`security/*` rules silently `continue` despite comment saying degraded entry | PR #15 | consistency (comment-vs-code drift) |
-| `leverage-libraries.ts` `buildFileInput()` silent on path escape, no degraded entry | PR #14 | correctness (irrelevant post-harness — file deletes) |
-| Stale banner can never trigger because `currentHashes` not supplied | PR #3 | correctness (dead-branch detection) |
-| `renderBannerLine()` doesn't match `context: no embeddings yet — run \`warden init\`` prefix | PR #3 | consistency |
-| Bootstrap script `packages/db/scripts-bootstrap-blair.mts` hardcodes developer paths | PR #3 | committability (committed-helper / dev-script anti-pattern) |
+| Finding                                                                                               | Source | Worker target                                               |
+| ----------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------- |
+| `eslint-security.ts` non-`security/*` rules silently `continue` despite comment saying degraded entry | PR #15 | consistency (comment-vs-code drift)                         |
+| `leverage-libraries.ts` `buildFileInput()` silent on path escape, no degraded entry                   | PR #14 | correctness (irrelevant post-harness — file deletes)        |
+| Stale banner can never trigger because `currentHashes` not supplied                                   | PR #3  | correctness (dead-branch detection)                         |
+| `renderBannerLine()` doesn't match `context: no embeddings yet — run \`warden init\`` prefix          | PR #3  | consistency                                                 |
+| Bootstrap script `packages/db/scripts-bootstrap-blair.mts` hardcodes developer paths                  | PR #3  | committability (committed-helper / dev-script anti-pattern) |
 
 **Class 6 — load-bearing bugs blocking the harness itself** (bug floor, NOT worker territory)
 
-| Finding | Source | Bug-floor commit |
-|---|---|---|
-| Verifier reads file head — citations beyond N silently fail | PR #8 | Commit 1 (also covers multi-line) |
-| `db()` doesn't auto-run migrations on fresh `cache.sqlite` | PR #3 | Commit 2 (re-verify; may already be fixed at line 32-49 of `db/src/index.ts`) |
-| `leverage.ts` `emit()` multi-line snippet causes verifier to drop comment | PR #14 | Commit 1 generalizes verifier; Commit 3 is belt-and-suspenders |
+| Finding                                                                   | Source | Bug-floor commit                                                              |
+| ------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------- |
+| Verifier reads file head — citations beyond N silently fail               | PR #8  | Commit 1 (also covers multi-line)                                             |
+| `db()` doesn't auto-run migrations on fresh `cache.sqlite`                | PR #3  | Commit 2 (re-verify; may already be fixed at line 32-49 of `db/src/index.ts`) |
+| `leverage.ts` `emit()` multi-line snippet causes verifier to drop comment | PR #14 | Commit 1 generalizes verifier; Commit 3 is belt-and-suspenders                |
 
 **Rejection reasoning for non-floor items:** Any Copilot finding that the harness will catch via worker dispatch is **not** hand-patched. Any finding whose codepath gets rewritten as part of the harness migration is **not** hand-patched. Any finding that's pure detector-quality polish (eslint-security ignore-config) defers to post-M14. The 3 bug-floor items are exactly the ones where (a) the codepath survives M14 unchanged AND (b) the harness can't function trustworthily without the fix.
 
@@ -436,14 +436,14 @@ packages/core/src/llm/cache.ts                    KEEP — content-addressed LLM
 
 ## Package boundaries (M14 additions)
 
-| Package          | M14 additions                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `@warden/cli`    | Render extensions for 3-phase + boss-loop UX; smoke harness; no new verbs/flags.                                              |
+| Package          | M14 additions                                                                                                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@warden/cli`    | Render extensions for 3-phase + boss-loop UX; smoke harness; no new verbs/flags.                                                                                                                             |
 | `@warden/core`   | `packages/core/src/review-harness/` module; rewires `review()` + `check()`; deletes M7/M12/M13 sub-agent runners; retires parts of M8 spine. Bug floor commits modify `verify-citations.ts` + `leverage.ts`. |
-| `@warden/ai`     | `getBossModel()` mapping changes to Opus 4.6; no new helpers.                                                                |
-| `@warden/db`     | Possibly `db()` migration logic (Commit 2 — re-verify; likely no change).                                                    |
-| `@warden/env`    | `WARDEN_REVIEW_BOSS_ROUNDS` + `WARDEN_REVIEW_WORKER_BUDGET`.                                                                |
-| `@warden/config` | No changes.                                                                                                                  |
+| `@warden/ai`     | `getBossModel()` mapping changes to Opus 4.6; no new helpers.                                                                                                                                                |
+| `@warden/db`     | Possibly `db()` migration logic (Commit 2 — re-verify; likely no change).                                                                                                                                    |
+| `@warden/env`    | `WARDEN_REVIEW_BOSS_ROUNDS` + `WARDEN_REVIEW_WORKER_BUDGET`.                                                                                                                                                 |
+| `@warden/config` | No changes.                                                                                                                                                                                                  |
 
 `@warden/core/src/review-harness/` may import `@warden/ai` (for models + tools) and is forbidden from importing `commander`, `picocolors`, `ora`, or anything reading `process.argv` / writing `process.stdout` (ADR-0013 invariant). Worker tools (`read-file.ts`, `grep-repo.ts`) read files via Node's `node:fs` directly — bounded I/O-impurity for the tool implementations; surrounding harness remains pure relative to the LLM context.
 
@@ -470,10 +470,13 @@ packages/core/src/llm/cache.ts                    KEEP — content-addressed LLM
 
 ```typescript
 export async function runBossLoop({
-  scratchpad, diff, repoRoot, detPriors,
+  scratchpad,
+  diff,
+  repoRoot,
+  detPriors,
 }: BossLoopInput): Promise<BossLoopOutput> {
   const result = await streamText({
-    model: getBossModel(),                       // Opus 4.6
+    model: getBossModel(), // Opus 4.6
     system: loadBossSystemPrompt(),
     messages: buildBossMessages({ diff, detPriors }),
     tools: {
@@ -488,6 +491,7 @@ export async function runBossLoop({
 ```
 
 **Boss prompt instructs (`boss-system.md`):**
+
 - Round 1 — read diff + det priors + retrieved context; dispatch initial workers via `dispatch_worker` (label `phase: 'plan'`).
 - Rounds 2–4 — read tool results; decide if more workers warranted; if yes, dispatch more (label `phase: 'adjudicate'`); if not, proceed to synth.
 - Final round — emit `Output.array(CommentSchema)` via the LLM's structured-output channel (label `phase: 'synth'`).
@@ -497,19 +501,23 @@ export async function runBossLoop({
 ### `dispatch_worker` tool descriptor (`tools/dispatch-worker.ts`)
 
 ```typescript
-import { z } from 'zod';
+import { z } from "zod";
 
 const ConcernEnum = z.enum([
-  'correctness', 'scalability', 'consistency',
-  'security', 'committability', 'leverage',
+  "correctness",
+  "scalability",
+  "consistency",
+  "security",
+  "committability",
+  "leverage",
 ]);
 
 export const dispatchWorkerInput = z.object({
-  files: z.array(z.string()).min(1),               // repo-relative
+  files: z.array(z.string()).min(1), // repo-relative
   concern: ConcernEnum,
-  tier: z.enum(['sonnet', 'haiku']).optional(),    // boss override
-  focus: z.string().optional(),                    // one-line hint
-  phase: z.enum(['plan', 'adjudicate', 'synth']),  // render UX hint
+  tier: z.enum(["sonnet", "haiku"]).optional(), // boss override
+  focus: z.string().optional(), // one-line hint
+  phase: z.enum(["plan", "adjudicate", "synth"]), // render UX hint
 });
 
 export const dispatchWorkerOutput = z.object({
@@ -521,14 +529,14 @@ export const dispatchWorkerOutput = z.object({
 
 **Default tier per concern** (boss can override per call):
 
-| Concern         | Default tier | Reason |
-|-----------------|--------------|--------|
-| `correctness`   | Sonnet       | Subtle bugs (null-deref, off-by-one, async race) — vision §3 mandate |
-| `scalability`   | Sonnet       | Perf/memory patterns need reasoning across call sites |
-| `consistency`   | Sonnet       | Multi-file reading (docstring vs impl, README vs schema) |
-| `security`      | Sonnet       | Vision §3 mandate; auth/injection too important to skimp on |
-| `committability`| Haiku        | Pattern-matching against known anti-patterns; M7 baseline |
-| `leverage`      | Haiku        | Pattern-matching against library idioms; M12 baseline |
+| Concern          | Default tier | Reason                                                               |
+| ---------------- | ------------ | -------------------------------------------------------------------- |
+| `correctness`    | Sonnet       | Subtle bugs (null-deref, off-by-one, async race) — vision §3 mandate |
+| `scalability`    | Sonnet       | Perf/memory patterns need reasoning across call sites                |
+| `consistency`    | Sonnet       | Multi-file reading (docstring vs impl, README vs schema)             |
+| `security`       | Sonnet       | Vision §3 mandate; auth/injection too important to skimp on          |
+| `committability` | Haiku        | Pattern-matching against known anti-patterns; M7 baseline            |
+| `leverage`       | Haiku        | Pattern-matching against library idioms; M12 baseline                |
 
 ### Per-worker shape (each `workers/<concern>.ts`)
 
@@ -560,7 +568,7 @@ Unchanged from M10 + Commit 1 generalization. Same call site M8 had:
 
 ```typescript
 const verified = await verifyCitations({ comments: bossComments, repoRoot });
-const final = applyHardRules(verified.comments, { harness: 'm14-review' });
+const final = applyHardRules(verified.comments, { harness: "m14-review" });
 ```
 
 The `harness` discriminator on `applyHardRules` was introduced in ADR-0029 for the M14-security carve-out (skips confidence floor). For M14-review, the discriminator is `'m14-review'` and the **confidence floor stays in place** — same posture as M8 path. Naming nit: ADR-0029 used `'m8-review'`; M14 renames to `'m14-review'` (or just drops the discriminator if no longer needed since M14-security defers).
@@ -571,7 +579,7 @@ The `harness` discriminator on `applyHardRules` was introduced in ADR-0029 for t
 export async function check(input: CheckInput): Promise<CommentSet> {
   const detPriors = await runDetPriors(input);
   const toolComments = detPriors.findings.map(toComment);
-  const comments = applyHardRules(toolComments, { harness: 'm14-check' });
+  const comments = applyHardRules(toolComments, { harness: "m14-check" });
   return { comments, durationMs, degradedWorkers: detPriors.degraded };
 }
 ```
@@ -638,7 +646,7 @@ Listed for emphasis (see also "Stop at..." line near the top):
 ## Design nuances (gotchas + judgment calls)
 
 - **`ReviewScratchpad` vs M14-security's `SecurityScratchpad`:** intentionally different types. M14-security held `{ detPriors, plan, workerOutputs[], tokenUsage, costUsd, degraded[] }` with a structured Plan field. M14-review's `ReviewScratchpad` holds `{ detPriors, workerOutputs[], tokenUsage, degraded[] }` — no Plan field because the dynamic boss loop emits decisions per-round rather than upfront. Adapt M14-security's shape; don't reuse it directly.
-- **Boss final-output shape:** the boss's last `streamText` round emits `Output.array(CommentSchema)`. Implementation question to resolve at impl-time: does the boss's final message contain *only* the comment array (no tool calls), or does it call a synthetic `emit_final` tool? Test both with AI SDK v6 docs; pick whichever the cascade + retry path handles cleanly.
+- **Boss final-output shape:** the boss's last `streamText` round emits `Output.array(CommentSchema)`. Implementation question to resolve at impl-time: does the boss's final message contain _only_ the comment array (no tool calls), or does it call a synthetic `emit_final` tool? Test both with AI SDK v6 docs; pick whichever the cascade + retry path handles cleanly.
 - **Worker output shape:** workers emit `WorkerFinding[]` (worker-internal); the boss's final synth pass converts to `Comment[]` with citations attached. Workers don't emit `Comment` directly because boss may dedupe / reframe / drop before final emission.
 - **Boss-side citation discipline:** the boss MUST copy sources verbatim from worker output. Spell this out in `boss-system.md` clearly; substring-verifier (Phase 3) catches drift but only after the boss has spent tokens. Save tokens by trusting the verifier as backstop, not the boss.
 - **Cost estimation accuracy:** AI SDK v6 returns a `usage` object per `streamText` call. Sum across all boss rounds + all worker calls. Render in the final cost line per model. Static pricing table can live inline in `boss-loop.ts` for v0 (Opus 4.6 = $5 input / $25 output per 1M tokens — verify at ship-time; Sonnet 4.6 = $3 / $15; Haiku 4.5 = $1 / $5). Update via a one-line PR when prices change.

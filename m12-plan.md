@@ -42,7 +42,7 @@ By the end:
 - ADR-0027 status snapshot row flips from `Direction` to `Done` (after dogfood acceptance — see Acceptance §4 below).
 - CLAUDE.md M12 line lands as `[x]` above the M11+ deferred-items list, which loses its `leverage review category` bullet.
 
-**Stop at "two runners + enum + priority slot + dispatch + prompt + smoke + close-out." Do NOT start: a third detector pattern (revisit M13+ once dogfood reveals which substitutions the sub-agent consistently misses); a curated library table in the sub-agent prompt (ADR-0027 §3 rejects this); the `type_def_embeddings` table for semantic retrieval over `.d.ts` (ADR-0026 §14 + ADR-0027 §10 defer); an inline `// warden-ignore-leverage` suppression marker (ADR-0027 §9 rejects); exposing `lookupTypeDef` to the leverage *detector* (ADR-0027 alternatives — detector is stdlib-only); a new confidence-threshold subsystem or per-category threshold tuning; re-platforming the remaining 6 inline runners through the `Runner` contract (ADR-0023 deferred); BYOEmbedder; daemon `JobRunner`; or any other M11+ deferred item.** Those are later milestones.
+**Stop at "two runners + enum + priority slot + dispatch + prompt + smoke + close-out." Do NOT start: a third detector pattern (revisit M13+ once dogfood reveals which substitutions the sub-agent consistently misses); a curated library table in the sub-agent prompt (ADR-0027 §3 rejects this); the `type_def_embeddings` table for semantic retrieval over `.d.ts` (ADR-0026 §14 + ADR-0027 §10 defer); an inline `// warden-ignore-leverage` suppression marker (ADR-0027 §9 rejects); exposing `lookupTypeDef` to the leverage _detector_ (ADR-0027 alternatives — detector is stdlib-only); a new confidence-threshold subsystem or per-category threshold tuning; re-platforming the remaining 6 inline runners through the `Runner` contract (ADR-0023 deferred); BYOEmbedder; daemon `JobRunner`; or any other M11+ deferred item.** Those are later milestones.
 
 ## Repo additions
 
@@ -143,24 +143,24 @@ One-line change:
 
 ```ts
 export const CategoryEnum = z.enum([
-  'correctness',
-  'clarity',
-  'style',
-  'dedup',
-  'tests',
-  'security',
-  'vulnerability',
-  'contract',
+  "correctness",
+  "clarity",
+  "style",
+  "dedup",
+  "tests",
+  "security",
+  "vulnerability",
+  "contract",
   // ADR-0020: Copilot-delta categories (M6). The LLM emits these only as
   // questions — there are no deterministic producers yet (M7+ work).
-  'scalability',
-  'consistency',
-  'deadcode',
-  'committability',
+  "scalability",
+  "consistency",
+  "deadcode",
+  "committability",
   // ADR-0027: M12 — second producer pair against the ADR-0008 citation thesis.
   // The leverage detector emits assertions for bounded stdlib patterns; the
   // leverage sub-agent emits questions for library-substitution suggestions.
-  'leverage',
+  "leverage",
 ]);
 ```
 
@@ -182,7 +182,7 @@ const PRIORITY_ORDER: Category[] = [
   "committability",
   "clarity",
   "style",
-  "leverage",   // NEW — ADR-0027 §5
+  "leverage", // NEW — ADR-0027 §5
   "dedup",
   "tests",
 ];
@@ -196,14 +196,7 @@ const PRIORITY_ORDER: Category[] = [
 
 ```ts
 export interface ToolFinding {
-  source:
-    | "tsc"
-    | "eslint"
-    | "jscpd"
-    | "scalability"
-    | "deadcode"
-    | "consistency"
-    | "leverage";
+  source: "tsc" | "eslint" | "jscpd" | "scalability" | "deadcode" | "consistency" | "leverage";
   file: string;
   line: number;
   column: number;
@@ -262,9 +255,7 @@ export interface LeverageRunnerOutput {
   degraded: DegradedEntry[];
 }
 
-export async function runLeverage(
-  input: LeverageRunnerInput,
-): Promise<LeverageRunnerOutput> {
+export async function runLeverage(input: LeverageRunnerInput): Promise<LeverageRunnerOutput> {
   const findings: ToolFinding[] = [];
   const degraded: DegradedEntry[] = [];
 
@@ -308,6 +299,7 @@ Pattern matchers:
 **(b) `findIncludes`** — match `<receiver>.indexOf(<x>) <comp> <num>` where `<comp>` is one of `!==` / `!=` / `>` / `>=` and `<num>` is `-1` (for `!==`/`!=`) or `-1` (for `>`) or `0` (for `>=`). Visitor predicate: `ts.isBinaryExpression(node)` && operator in `{!==, !=, >, >=}` && left side is `ts.isCallExpression` with `.indexOf(...)` && right side matches the numeric literal pattern. Emit for arrays and strings; both `Array.prototype.includes` and `String.prototype.includes` express membership/readability better than an index comparison. Evidence: same shape. `claim`: `"Replace indexOf(...) !== -1 with includes(...) — includes is the idiomatic membership check."`
 
 **(c) `findSome`** — two sub-patterns:
+
 - `<arr>.filter(<pred>).length > 0` / `.length >= 1` / `.length !== 0`. Visitor predicate: `ts.isBinaryExpression(node)` with appropriate comparison && left side is `<call>.length` && that call is `.filter(...)`.
 - `<arr>.find(<pred>) !== undefined` / `<arr>.find(<pred>) != null`. Visitor predicate: `ts.isBinaryExpression(node)` with `!==`/`!=` && one side is `.find(...)` call && other side is `undefined` / `null` literal.
 
@@ -517,7 +509,7 @@ Your job is narrow: emit a question for each plausible substitution. You are not
 
 ## What counts as a leverage opportunity
 
-A leverage finding requires *all four* to be true:
+A leverage finding requires _all four_ to be true:
 
 1. The diff contains code that does something a library function would do directly.
 2. The library is in the **Installed libraries** list below (do not suggest libraries the user doesn't have).
@@ -531,7 +523,7 @@ Canonical examples (illustrative, not exhaustive):
 - **AI SDK `Output.array(schema)`** — `generateText` followed by `JSON.parse(text)` plus zod parsing collapsing into `streamText({ output: Output.array(schema) })`.
 - **Drizzle `onConflictDoNothing()` / `onConflictDoUpdate()`** — pattern of `SELECT...INSERT IF NOT FOUND` collapsing to one `INSERT ... onConflictDoNothing()` call.
 
-These examples anchor the *shape* of a leverage finding. Other libraries (and other primitives in these libraries) are fair game when the four conditions above hold.
+These examples anchor the _shape_ of a leverage finding. Other libraries (and other primitives in these libraries) are fair game when the four conditions above hold.
 
 ## Citation discipline
 
@@ -597,12 +589,12 @@ Update the `orchestrationRunners` block to register both new runners:
 const orchestrationRunners: Runner[] = [];
 if (changed && changed.length > 0) {
   orchestrationRunners.push(scalabilityRunner);
-  orchestrationRunners.push(leverageRunner);     // NEW — runs in check + review
+  orchestrationRunners.push(leverageRunner); // NEW — runs in check + review
   // Committability + leverage-libraries fire only in `review` mode. `check` is
   // deterministic-only per ADR-0011 — no LLM calls.
   if (input.config.mode === "review") {
     orchestrationRunners.push(committabilityRunner);
-    orchestrationRunners.push(leverageLibrariesRunner);   // NEW — review only
+    orchestrationRunners.push(leverageLibrariesRunner); // NEW — review only
   }
 }
 ```
@@ -717,7 +709,7 @@ Update §8 (Deferred concepts) — narrow the existing **leverage** entry to ack
 
 2. **"Both" Q1 answer is structurally honest, not a hedge.** The grilling-pass Q1 ("detector vs. sub-agent") offered three options; the user picked "Both." Easy to read as risk-aversion ("ship both to cover the case"); actually a substantive design choice — the citation shapes are different (`type: "tool"` AST evidence vs. `type: "api_def"` lookup result), the cost tiers are different (microsecond AST visit vs. Haiku call + tool budget), the anti-pattern sets are disjoint (stdlib idioms vs. library substitutions). Bundling them into one runner would either waste tokens (stdlib through Haiku) or break the bounded-set rule (libraries through AST). The two-runner split lets each half earn its rent independently.
 
-3. **The three detector patterns are honest-tightenable.** ADR-0027 §9 + caveats: each pattern has a known intentional use or semantic edge (`JSON.parse(JSON.stringify)` for deep-strip / `toJSON` / older runtime behaviour; `indexOf !== -1` for `NaN`-sensitive code; `find(...) !== undefined` / `find(...) != null` when the matched element itself can be nullish). The v0 detector emits uniformly with conditional wording; if dogfood shows specific FP patterns, the fix is *narrowing the detector* (e.g., AST-time check that the input type doesn't contain `Map`/`Set`/`Date` before suggesting `structuredClone`, or that the array element type excludes nullish values before suggesting `some` for `find`). Mirrors M7-committability → M9 deletion philosophy.
+3. **The three detector patterns are honest-tightenable.** ADR-0027 §9 + caveats: each pattern has a known intentional use or semantic edge (`JSON.parse(JSON.stringify)` for deep-strip / `toJSON` / older runtime behaviour; `indexOf !== -1` for `NaN`-sensitive code; `find(...) !== undefined` / `find(...) != null` when the matched element itself can be nullish). The v0 detector emits uniformly with conditional wording; if dogfood shows specific FP patterns, the fix is _narrowing the detector_ (e.g., AST-time check that the input type doesn't contain `Map`/`Set`/`Date` before suggesting `structuredClone`, or that the array element type excludes nullish values before suggesting `some` for `find`). Mirrors M7-committability → M9 deletion philosophy.
 
 4. **Detector + sub-agent don't double-fire.** The detector's patterns are stdlib-only (`JSON.parse`, `Array.prototype.indexOf`, `Array.prototype.filter`); the sub-agent's prompt explicitly excludes stdlib idiom misses ("A separate detector handles these — do not duplicate"). The disjointness is enforced at the prompt level + the AST level — there's no AST pattern the detector flags that the sub-agent would also flag, and vice versa. Verified by the smoke harness's regression-guard cases (smoke §1 + §4-5 + §6).
 
@@ -727,13 +719,13 @@ Update §8 (Deferred concepts) — narrow the existing **leverage** entry to ack
 
 7. **Library-agnostic prompt inverts the maintenance burden.** A curated library table requires hand-updating per library version bump. Library-agnostic + 4 examples + deps preamble + `lookupTypeDef` verifier shifts the burden: the LLM names libraries from its training data (updates as the model updates); the preamble narrows to installed ones; the verifier drops hallucinations. Warden's maintenance load is the prompt's four examples (stable for years) + the four-trigger structure (stable across milestones).
 
-8. **`kind: "question"` is the right shape for sub-agent emissions.** The LLM is suggesting a substitution; even with `api_def` verifying the API exists, the *substitution itself* has unstated tradeoffs (bundle size, perf, ergonomics, opt-in features) the LLM can't assess. Questions invite the developer to decide; assertions overclaim. The detector's `kind: "assertion"` is appropriate because the AST pattern *is* mechanically present — there's no intent layer. Mixing assertion + question kinds within a category (`leverage`) is fine; vulnerability + committability already establish the precedent.
+8. **`kind: "question"` is the right shape for sub-agent emissions.** The LLM is suggesting a substitution; even with `api_def` verifying the API exists, the _substitution itself_ has unstated tradeoffs (bundle size, perf, ergonomics, opt-in features) the LLM can't assess. Questions invite the developer to decide; assertions overclaim. The detector's `kind: "assertion"` is appropriate because the AST pattern _is_ mechanically present — there's no intent layer. Mixing assertion + question kinds within a category (`leverage`) is fine; vulnerability + committability already establish the precedent.
 
 9. **Lane discipline (dropping citations outside the diff) prevents the sub-agent from "wandering."** Committability does this; M12's sub-agent does the same. If the LLM cites a substitution opportunity at a path outside the changed files, drop the finding silently (info-level degraded entry counting the drops, no per-finding noise). The post-pass verifier in `verify-citations.ts` independently substring-checks each `api_def` source, so the lane filter is belt-and-suspenders — but it catches a different failure mode (LLM cites the right `.d.ts` for the wrong diff) than the verifier (LLM cites the wrong `.d.ts`).
 
 10. **Skipping the sub-agent in `check` mode is silent.** ADR-0027 §8 + caveats: surfacing "leverage suggestions unavailable in check mode" every run would be the noise pattern ADR-0025 explicitly rejected. The user chose the fast verb; they know what it excludes. The detector running in `check` is the half that earns rent — bounded stdlib substitutions are deterministically AST-decidable and worth surfacing in pre-commit gates.
 
-11. **Future semantic-retrieval path is additive, not a rewrite.** ADR-0026 §14 designed the schema for it: an additive `type_def_embeddings` table keyed on `(package, version, symbol, model_id, model_version)` layered on M11's `type_def_cache`. M12 doesn't build it; M13+ does when dogfood shows the sub-agent hits recall limits. The exact-match path stays useful even after embeddings exist — it's the fast path for known-name lookups; semantic retrieval is the fallback for "I know it has *something* like this but I can't name it."
+11. **Future semantic-retrieval path is additive, not a rewrite.** ADR-0026 §14 designed the schema for it: an additive `type_def_embeddings` table keyed on `(package, version, symbol, model_id, model_version)` layered on M11's `type_def_cache`. M12 doesn't build it; M13+ does when dogfood shows the sub-agent hits recall limits. The exact-match path stays useful even after embeddings exist — it's the fast path for known-name lookups; semantic retrieval is the fallback for "I know it has _something_ like this but I can't name it."
 
 12. **The M8 contract migration debt does not grow.** Both new runners land on the `Runner` contract; the six inline runners (TSC, ESLint, jscpd, vuln, deadcode, consistency) stay inline as before. M12 doesn't migrate them; that's a separate milestone (loosely targeted to the noise-filter / orchestration touch in M13+ per ADR-0023's deferral note). The contract earns rent by absorbing the new code with zero structural friction.
 

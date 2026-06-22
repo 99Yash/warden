@@ -14,9 +14,10 @@ no way to resume after the user killed it.
 ## What ADR-0048 already decided
 
 ADR-0048 ships the durable run identity this builds on:
+
 - `reviewRuns.id` = random `createId("run")` (identity + trace grouping).
 - `reviewRuns.input_hash` = content hash over `(diff_hash, resolved config,
-  sorted model-set)` — the dedup/resume lookup key.
+sorted model-set)` — the dedup/resume lookup key.
 
 It explicitly **defers** the cache/resume implementation and names the contract:
 

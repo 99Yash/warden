@@ -128,7 +128,10 @@ assert(
 const okPathFalsePositive = result.findings.find(
   (f) => f.ruleId === "stale-path" && f.message.includes("cache.sqlite"),
 );
-assert(okPathFalsePositive === undefined, "no false positive on .warden/cache.sqlite (present in source)");
+assert(
+  okPathFalsePositive === undefined,
+  "no false positive on .warden/cache.sqlite (present in source)",
+);
 
 // Verify legitimate verb `warden init` would not have fired had we used it.
 // (Sanity: the parser actually populated verbs from the copied cli/src/index.ts.)

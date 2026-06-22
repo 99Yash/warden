@@ -4,7 +4,7 @@ Your job is narrow: emit a question for each plausible substitution. You are not
 
 # What counts as a leverage opportunity
 
-A leverage finding requires *all four* to be true:
+A leverage finding requires _all four_ to be true:
 
 1. The diff contains code that does something a library function would do directly.
 2. The library is in the **Installed libraries** list in your user message (do not suggest libraries the user doesn't have).
@@ -18,7 +18,7 @@ Canonical examples (illustrative, not exhaustive):
 - **AI SDK `Output.array(schema)`** — `generateText` followed by `JSON.parse(text)` plus zod parsing collapsing into `streamText({ output: Output.array(schema) })`.
 - **Drizzle `onConflictDoNothing()` / `onConflictDoUpdate()`** — pattern of `SELECT…INSERT IF NOT FOUND` collapsing to one `INSERT … onConflictDoNothing()` call.
 
-These examples anchor the *shape* of a leverage finding. Other libraries (and other primitives in these libraries) are fair game when the four conditions above hold.
+These examples anchor the _shape_ of a leverage finding. Other libraries (and other primitives in these libraries) are fair game when the four conditions above hold.
 
 # Tools
 

@@ -64,10 +64,9 @@ const stubProvider = {
 
 // Synthesize many "lines" so the estimate is non-trivial.
 function bigFile(path: string, lineCount: number) {
-  const content = Array.from(
-    { length: lineCount },
-    (_, i) => `line_${path}_${i}_${path}`,
-  ).join("\n");
+  const content = Array.from({ length: lineCount }, (_, i) => `line_${path}_${i}_${path}`).join(
+    "\n",
+  );
   return {
     path,
     content,
@@ -147,9 +146,7 @@ assert(
   "tiny budget: file recorded as skippedOverBudget",
 );
 assert(providerCallCount === 0, "tiny budget: provider NOT called");
-const cappedEntries = r2.degraded.filter((d) =>
-  d.message.includes("refresh capped"),
-);
+const cappedEntries = r2.degraded.filter((d) => d.message.includes("refresh capped"));
 assert(
   cappedEntries.length === 1 && cappedEntries[0]?.kind === "actionable",
   "tiny budget: exactly one actionable `refresh capped` degraded entry",
@@ -178,14 +175,8 @@ const r3 = await reconcileFiles({
   // Enough to fit one tiny chunk (~$0.0000675) but not 5000 chunks.
   maxUsdBudget: 0.0001,
 });
-assert(
-  r3.refreshed.includes("src/tiny.ts"),
-  "mixed budget: tiny file did refresh",
-);
-assert(
-  r3.skippedOverBudget.includes("src/huge.ts"),
-  "mixed budget: huge file skipped",
-);
+assert(r3.refreshed.includes("src/tiny.ts"), "mixed budget: tiny file did refresh");
+assert(r3.skippedOverBudget.includes("src/huge.ts"), "mixed budget: huge file skipped");
 assert(providerCallCount > 0, "mixed budget: provider called for tiny file only");
 
 process.stdout.write(`\n[4] WARDEN_REVIEW_REFRESH_MAX_USD parses correctly\n`);

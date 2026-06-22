@@ -1,6 +1,6 @@
 # Dogfood backlog — detector candidates
 
-Detector-shaped dogfood lessons (per [ADR-0035](../decisions.md#adr-0035--dogfood-lesson-intake-three-lanes-detector--prompt-delta--repo-overlay-with-retirement-discipline)) awaiting an M-plan slot. When a milestone schedules one of these, lift the entry into the milestone plan (`m{N}-plan.md`) and remove it here. When the detector ships, retire the corresponding prompt delta in the worker prompt per ADR-0035 §2 — otherwise warden double-pays (detector flags it *and* the LLM still hunts for it).
+Detector-shaped dogfood lessons (per [ADR-0035](../decisions.md#adr-0035--dogfood-lesson-intake-three-lanes-detector--prompt-delta--repo-overlay-with-retirement-discipline)) awaiting an M-plan slot. When a milestone schedules one of these, lift the entry into the milestone plan (`m{N}-plan.md`) and remove it here. When the detector ships, retire the corresponding prompt delta in the worker prompt per ADR-0035 §2 — otherwise warden double-pays (detector flags it _and_ the LLM still hunts for it).
 
 LLM-only residue lives in `packages/core/src/review-harness/prompts/workers/*-system.md` and is audited via `rg "<!-- dogfood:" packages/core/src/review-harness/prompts/`.
 
@@ -28,7 +28,7 @@ LLM-only residue lives in `packages/core/src/review-harness/prompts/workers/*-sy
 
 **Origin:** alfred PR#14 (2026-05-20). Settings sign-out logic moved from a `DangerSection` component to a `UserSection` component during a UI parity pass; the pre-refactor `await navigate({ to: "/login" })` after `authClient.signOut()` was silently dropped on the move. Both sections look internally consistent in isolation; the missing call is only visible against the pre-refactor version. Caught by Devin, missed by warden.
 
-**Pattern shape:** a diff hunk that *moves* code between functions / components / sections where the old hunk contained a side-effect call (from a configurable name registry) and the new hunk does not. Detector must distinguish "move" from "create new function" to know the side-effect was load-bearing in the original.
+**Pattern shape:** a diff hunk that _moves_ code between functions / components / sections where the old hunk contained a side-effect call (from a configurable name registry) and the new hunk does not. Detector must distinguish "move" from "create new function" to know the side-effect was load-bearing in the original.
 
 **Inputs the detector needs:**
 

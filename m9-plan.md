@@ -11,17 +11,17 @@ This is the milestone brief for the agent (or future-me) implementing M9. Self-c
 3. **`./packages/core/src/diff/index.ts`** — the existing `parseUnifiedDiff()` returning `ChangedFile[]`. M9's tree builder consumes its output.
 4. **`./packages/core/src/ecosystem/index.ts`** — the existing JS-shaped detector. **Read but do not modify.** Multi-ecosystem detection is M11+ work; M9 assumes JS.
 5. **`./packages/core/src/runners/committability.ts`** — carries the M7 directory-concentration heuristic + Tier-1 hard-skip list that M9 removes (heuristic gone) and migrates (Tier-1 list → `BASELINE_NOISE` in `diff/prune.ts`).
-6. **`./packages/core/src/runners/`** — every runner (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consumes the diff. After M9, each consumes the *pruned* `ChangedFile[]`. The β interface (ADR-0023 §5) means runners' contracts don't change shape — `path[]` stays — only the contents narrow.
+6. **`./packages/core/src/runners/`** — every runner (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consumes the diff. After M9, each consumes the _pruned_ `ChangedFile[]`. The β interface (ADR-0023 §5) means runners' contracts don't change shape — `path[]` stays — only the contents narrow.
 7. **`./packages/core/src/index.ts`** — `review()`'s pipeline order. M9 inserts the prune step between diff parsing and runner dispatch.
 
 ## Goal of this milestone
 
 Implement **M9 v0: diff-level noise filter — JS profile + universal Tier-1 baseline + tree pruning at the diff loader.** By the end:
 
-- A repo with `node_modules/` accidentally committed (gitignore broken, 500K+ files in `node_modules/`) runs `warden review` cleanly: TSC / ESLint / jscpd / vuln / scalability / deadcode / consistency / committability all see the *pruned* `ChangedFile[]` (real source files only). One degraded entry of `topic: "noise-filter"`, `kind: "actionable"` names what got skipped and why.
+- A repo with `node_modules/` accidentally committed (gitignore broken, 500K+ files in `node_modules/`) runs `warden review` cleanly: TSC / ESLint / jscpd / vuln / scalability / deadcode / consistency / committability all see the _pruned_ `ChangedFile[]` (real source files only). One degraded entry of `topic: "noise-filter"`, `kind: "actionable"` names what got skipped and why.
 - The M7 directory-concentration heuristic in `committability.ts` is removed entirely (no fallback layer in M9 v0; M10's overlay closes the project-specific-noise gap properly).
 - The Tier-1 hard-skip list (`.git/`, `*.pyc`, `*.swp`, `.DS_Store`, `Thumbs.db`, `.vscode/.history/`) graduates from `committability.ts` to a language-agnostic `BASELINE_NOISE` constant in `diff/prune.ts`. Applied universally before any profile; every runner benefits, not just committability.
-- `packages/core/src/ecosystem/profiles/javascript.json` ships with `alwaysNoise.{directories, extensions}`. No `contextDependent`, no `files`, no schema versioning. Lockfiles deliberately *not* pruned (vuln runs against `repoRoot`; lockfile presence in the diff is signal, not noise).
+- `packages/core/src/ecosystem/profiles/javascript.json` ships with `alwaysNoise.{directories, extensions}`. No `contextDependent`, no `files`, no schema versioning. Lockfiles deliberately _not_ pruned (vuln runs against `repoRoot`; lockfile presence in the diff is signal, not noise).
 - The diff tree is depth-limited (≤3 levels) with `fileCount` per node. Built from `parseUnifiedDiff()` output. Bounded in memory by directory structure, not file count.
 - Smoke harness covers the catastrophic JS case (synthetic 500K-file `node_modules/` diff) and the legitimate-large-refactor case (1K-file refactor inside a real source directory; assert no false-positive prune).
 - Dogfood validation: rerun `warden review` against warden's own M6 / M7 / M8 PRs; confirm no regressions on non-catastrophic inputs.
@@ -81,6 +81,7 @@ No new workspace package. No new CLI verb. No new env var. No new dep (no yaml p
 ```
 
 Notes:
+
 - **Lockfiles are deliberately absent.** `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` belong in the diff — vuln runs against `repoRoot` independently of diff content; ESLint and TSC filter by extension; the synthesizer prompt benefits from "this is a dep-bump PR" context.
 - `.turbo` and `coverage` echo the existing `SKIP_DIRS` set in `ecosystem/index.ts` (line 15) to keep the two lists conceptually aligned. The profile is the source of truth for the noise filter; `SKIP_DIRS` continues to scope tsconfig discovery only.
 - `dist/` is **not** in `alwaysNoise.directories`. It's a context-dependent directory (some monorepos commit `dist/` intentionally). Without an overlay escape hatch, false-positive risk is too high. M10's overlay re-opens the question.
@@ -98,6 +99,7 @@ const BASELINE_NOISE = {
 ```
 
 Notes:
+
 - Migrated from `committability.ts`'s Tier-1 hard-skip list. Original location drops it once `BASELINE_NOISE` is wired in.
 - Distinct from the JS profile by being language-agnostic. Future profiles add to the picture without redeclaring this floor.
 
@@ -116,7 +118,7 @@ Notes:
 `packages/core/src/diff/prune.ts`:
 
 - Input: the `DiffTreeNode` + the loaded JS noise profile (statically imported at module load) + the `BASELINE_NOISE` constant.
-- Output: the *pruned* `ChangedFile[]` + a `DegradedEntry[]` listing pruned subtrees.
+- Output: the _pruned_ `ChangedFile[]` + a `DegradedEntry[]` listing pruned subtrees.
 - Algorithm (apply in this order):
   1. **Apply `BASELINE_NOISE`.** Walk the tree; drop nodes whose name matches `BASELINE_NOISE.directories`; drop files whose name matches `BASELINE_NOISE.fileNames` or whose extension matches `BASELINE_NOISE.extensions`. Each dropped subtree (not each file) emits one degraded entry.
   2. **Apply the JS profile's `alwaysNoise.directories`.** Walk the tree; drop nodes whose name (at any depth) matches. One degraded entry per dropped subtree.
@@ -152,7 +154,7 @@ The β interface holds: runners still receive `ChangedFile[]`. Only the contents
 
 - Synthesizes a fixture diff with 1K added files inside a legitimate source directory (e.g., `packages/api/src/`).
 - Asserts: pruned `ChangedFile[]` has 1K paths (no false-positive prune); zero `topic: "noise-filter"` degraded entries.
-- Documents that the M7 directory-concentration heuristic *would* have skipped committability on this diff — i.e., M9 strictly improves on the placeholder.
+- Documents that the M7 directory-concentration heuristic _would_ have skipped committability on this diff — i.e., M9 strictly improves on the placeholder.
 
 There is **no** multi-ecosystem smoke fixture in M9. That fixture is named in M11+ when the multi-ecosystem detector ships.
 
@@ -176,7 +178,7 @@ There is **no** multi-ecosystem smoke fixture in M9. That fixture is named in M1
 - [ ] `BASELINE_NOISE` constant in `diff/prune.ts` covers `.git/`, `.DS_Store`, `*.pyc`, `*.swp`, `Thumbs.db`, `.vscode/.history/`.
 - [ ] Diff tree builder produces a depth-limited tree from `ChangedFile[]` — verified by unit fixture, including the 500K-file pathological case (memory bounded, fast build time).
 - [ ] Prune logic applies baseline → profile-directories → profile-extensions in order; pruned subtrees emit one degraded entry each with `topic: "noise-filter"`, `kind: "actionable"`.
-- [ ] All existing runners (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consume the *pruned* `ChangedFile[]`. No runner regressions on M4–M8 behaviour.
+- [ ] All existing runners (TSC, ESLint, jscpd, vuln, scalability, deadcode, consistency, committability) consume the _pruned_ `ChangedFile[]`. No runner regressions on M4–M8 behaviour.
 - [ ] `committability.ts` no longer runs the directory-concentration heuristic; no longer maintains its own Tier-1 hard-skip list.
 - [ ] Smoke harness passes: `smoke-m9-catastrophic.mts` + `smoke-m9-large-refactor.mts`.
 - [ ] Dogfood: rerun against warden's M6 + M7 + M8 PRs, no regressions vs. M8 baseline behaviour on non-catastrophic inputs.

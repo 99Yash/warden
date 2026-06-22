@@ -17,7 +17,7 @@ invisible.
 
 ## Proposal
 
-Emit one `info`/`actionable` degraded entry when a *single* pruned file exceeds
+Emit one `info`/`actionable` degraded entry when a _single_ pruned file exceeds
 a line/byte threshold (e.g. >500 changed lines), even on the silent extension
 path — so the review log says "skipped 6,618-line generated
 `migrations/meta/0044_snapshot.json`". Keep small drops silent.

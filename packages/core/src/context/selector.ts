@@ -14,12 +14,7 @@ import {
   MAX_SAME_FOLDER_ONLY,
   REASON_WEIGHTS,
 } from "./index.js";
-import type {
-  ContextCandidate,
-  ContextSelector,
-  Reason,
-  SelectorOutput,
-} from "./index.js";
+import type { ContextCandidate, ContextSelector, Reason, SelectorOutput } from "./index.js";
 import { TsCompilerParser, type ExportRef, type ImportRef, type SourceParser } from "./parser.js";
 import {
   collectImportedByReasons,
@@ -93,9 +88,7 @@ export class CheapSignalsSelector implements ContextSelector {
       });
 
     // 1. Source-file universe via `git ls-files`.
-    const allFilesRel = (await gitLs(repoRoot, ["ls-files"])).filter((f) =>
-      SOURCE_EXT_RE.test(f),
-    );
+    const allFilesRel = (await gitLs(repoRoot, ["ls-files"])).filter((f) => SOURCE_EXT_RE.test(f));
     if (allFilesRel.length === 0) {
       return { candidates: [], degraded };
     }
