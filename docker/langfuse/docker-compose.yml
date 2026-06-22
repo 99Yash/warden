@@ -1,13 +1,12 @@
 # Self-hosted Langfuse v3 for Warden's LOCAL development observability surface.
 #
-# Per ADR-0048: this is the *dev-time* observability surface (live trace
-# inspection + cross-run/eval diffing), NOT ADR-0044 §7's persisted prose-free
-# review trace (that lives in `.warden/cache.sqlite`). Warden reviews other
-# people's source — the diff + repo contents flow into prompts and, with
-# `WARDEN_LANGFUSE_CAPTURE_IO` on, into the spans here. So this stack is
-# self-hosted ONLY and binds to localhost: reviewed source must never leave the
-# box. Do NOT point Warden at Langfuse Cloud, and do NOT reuse these secrets for
-# any hosted deploy — they are local-only throwaways.
+# Per ADR-0048: this stack is reserved for the planned *dev-time*
+# observability surface (live trace inspection + cross-run/eval diffing), NOT
+# ADR-0044 §7's persisted prose-free review trace. Current Warden code does not
+# emit spans yet. Once telemetry wiring lands, reviewed source may flow into
+# spans here, so this stack is self-hosted ONLY and binds to localhost. Do NOT
+# point Warden at Langfuse Cloud, and do NOT reuse these secrets for any hosted
+# deploy — they are local-only throwaways.
 #
 # Fully isolated: its own postgres / redis / clickhouse / minio on the
 # `warden-langfuse` compose project (volumes namespaced, tear down independently).
@@ -51,7 +50,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       SALT: "c1b7bbc3be4f765cdaa7bcf4ddce6dba"
       ENCRYPTION_KEY: "e1d949ed402ad8860c9714d46287920ca4612c9930e93984df5b127c8d9a9b9e"
-      TELEMETRY_ENABLED: "true"
+      TELEMETRY_ENABLED: "false"
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
       CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
       CLICKHOUSE_URL: http://clickhouse:8123

@@ -532,6 +532,7 @@ function scoreOne(
   const matchedCommentIds = new Set<string>();
   for (const label of presentLabels) {
     for (const comment of result.comments) {
+      if (matchedCommentIds.has(comment.id)) continue;
       if (matchesLabel(comment, label)) {
         labelHits.add(label.id);
         matchedCommentIds.add(comment.id);

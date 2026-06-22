@@ -151,7 +151,7 @@ index 74098818..7605a37d 100644
            });
            written = upserted.written;
 diff --git a/apps/web/src/hooks/use-inbox.ts b/apps/web/src/hooks/use-inbox.ts
-index a50eb0fe..56b3bd88 100644
+index a50eb0fe..2b157c88 100644
 --- a/apps/web/src/hooks/use-inbox.ts
 +++ b/apps/web/src/hooks/use-inbox.ts
 @@ -1,4 +1,4 @@
@@ -160,7 +160,7 @@ index a50eb0fe..56b3bd88 100644
  import type { InfiniteData } from "@tanstack/react-query";
  import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
  import { responseErrorMessage } from "~/lib/api-error";
-@@ -250,9 +250,13 @@ function toInboxItem(row: InboxResponseItem): InboxItem {
+@@ -250,6 +250,9 @@ function toInboxItem(row: InboxResponseItem): InboxItem {
      id: row.documentId,
      threadId: row.threadId,
      sender: display || "Unknown sender",
@@ -170,12 +170,8 @@ index a50eb0fe..56b3bd88 100644
      subject: row.subject ?? "(no subject)",
      preview: cleanPreview(row.snippet) || " ",
      time: formatRelativeShort(row.authoredAt),
-+    authoredAtMs: row.authoredAt ? new Date(row.authoredAt).getTime() : null,
-     unread: row.unread,
-     initial: initialFor(display),
-     tone: toneFor(display),
 diff --git a/apps/web/src/routes/-chat/chat-shell.tsx b/apps/web/src/routes/-chat/chat-shell.tsx
-index b5bb1e14..903a2364 100644
+index b5bb1e14..71be76b5 100644
 --- a/apps/web/src/routes/-chat/chat-shell.tsx
 +++ b/apps/web/src/routes/-chat/chat-shell.tsx
 @@ -1,4 +1,4 @@
@@ -184,7 +180,7 @@ index b5bb1e14..903a2364 100644
  import type { SyncedTodo, SyncedTriageTag } from "@alfred/sync";
  import * as Tooltip from "@radix-ui/react-tooltip";
  import { Link } from "@tanstack/react-router";
-@@ -1512,20 +1512,68 @@ function useRailData(): RailData {
+@@ -1512,20 +1512,65 @@ function useRailData(): RailData {
    );
  }
  
@@ -238,9 +234,6 @@ index b5bb1e14..903a2364 100644
 +      subject: item.subject,
 +      category: item.category ?? "fyi",
 +      significanceBand,
-+      // Order recurrence chronologically — the rail is newest-first, so without
-+      // this the latest copy of a repeated alarm would (wrongly) stay demanding.
-+      occurredAtMs: item.authoredAtMs,
 +    })),
 +  );
 +  const withBand = merged.map(({ item }, i) => {
@@ -262,7 +255,7 @@ index b5bb1e14..903a2364 100644
  
  /** Map a synced todo to the rail's display shape (ADR-0050). */
 diff --git a/apps/web/src/routes/-preview-chat/helpers.ts b/apps/web/src/routes/-preview-chat/helpers.ts
-index 6c62193b..446eb23e 100644
+index 6c62193b..e7dbb078 100644
 --- a/apps/web/src/routes/-preview-chat/helpers.ts
 +++ b/apps/web/src/routes/-preview-chat/helpers.ts
 @@ -1,4 +1,4 @@
@@ -271,7 +264,7 @@ index 6c62193b..446eb23e 100644
  import { useEffect, useState } from "react";
  import type { IntegrationBrand } from "~/lib/integrations/integration-icons";
  
-@@ -124,9 +124,22 @@ export const TODOS: TodoItem[] = [
+@@ -124,6 +124,12 @@ export const TODOS: TodoItem[] = [
  export interface InboxItem {
    id: string;
    sender: string;
@@ -284,17 +277,7 @@ index 6c62193b..446eb23e 100644
    subject: string;
    preview: string;
    time: string;
-+  /**
-+   * Authored time as epoch ms — the chronological key the attention scorer uses
-+   * to order recurrence (the rail renders newest-first, but the Nth repeat must
-+   * decay oldest-first). Null when the row carries no authored timestamp.
-+   * Distinct from {@link InboxItem.time}, which is a localized display string.
-+   */
-+  authoredAtMs?: number | null;
-   unread?: boolean;
-   initial: string;
-   tone: ToolTone;
-@@ -136,6 +149,13 @@ export interface InboxItem {
+@@ -136,6 +142,13 @@ export interface InboxItem {
    category?: TriageCategory | null;
    /** Whether the visible triage tag came from the classifier or a user override. */
    categorySource?: TriageTagSource | null;
@@ -458,7 +441,7 @@ index 00000000..3c3c7c20
 +- **ADR-0062** — the object-state projection the day-shape signal reads.
 +- **#218** — epic spine (Tier 2 = this); **#230** — folded in (day-shape); **#219** — drift-metric consumer of the success metric.
 diff --git a/packages/api/src/modules/briefing/gather.ts b/packages/api/src/modules/briefing/gather.ts
-index f4b85651..52506419 100644
+index f4b85651..cb042904 100644
 --- a/packages/api/src/modules/briefing/gather.ts
 +++ b/packages/api/src/modules/briefing/gather.ts
 @@ -5,6 +5,7 @@ import type {
@@ -485,7 +468,7 @@ index f4b85651..52506419 100644
    return {
      gather: {
        email: {
-@@ -417,12 +427,65 @@ export async function gatherBriefingWithSuppressionAudit(
+@@ -417,12 +427,64 @@ export async function gatherBriefingWithSuppressionAudit(
        integration_activity: { items: integrationActivity },
        weather,
        day_of_week: dayContribution(args.briefingDate, args.timezone),
@@ -506,14 +489,14 @@ index f4b85651..52506419 100644
 +
 +/**
 + * Deterministic day-shape (ADR-0064 / #230). `activityVolume` is derived from
-+ * the integration-activity window count; `shipped` is the GitHub work objects
-+ * that *resolved within the briefing window* (ADR-0062 projection), which feeds
-+ * the evening "what you shipped" recap. No LLM judgment — this exists so the
-+ * composer can't call a day with real activity "quiet."
++ * the integration-activity window count; `shipped` is the most-recently-resolved
++ * GitHub work objects (ADR-0062 projection), which feeds the evening "what you
++ * shipped" recap. No LLM judgment — this exists so the composer can't call a day
++ * with real activity "quiet."
 + *
-+ * `shipped` is windowed on the persisted `stateDeliveredAt` (the delivery time
-+ * of the event that resolved the object), so a previously-resolved or
-+ * future-resolved object can't leak into the recap — even on a retry.
++ * v1 scopes `shipped` to recency, not a strict window filter: `list` orders by
++ * `updatedAt` desc and we take the top few resolved objects. A persisted
++ * resolved-at timestamp (to window precisely) is a fast-follow.
 + */
 +export async function gatherDayShape(args: {
 +  userId: string;
@@ -534,7 +517,6 @@ index f4b85651..52506419 100644
 +
 +  const resolved = await objectStateStore.list(args.userId, "github", {
 +    stateCategory: "resolved",
-+    deliveredWithin: { start: args.windowStart, end: args.windowEnd },
 +    limit: MAX_SHIPPED,
 +  });
 +  const shipped = resolved
@@ -564,7 +546,7 @@ index 88b4d1f0..3c72771c 100644
    SUPPRESSED_CATEGORIES,
  } from "./gather";
 diff --git a/packages/api/src/modules/briefing/read.ts b/packages/api/src/modules/briefing/read.ts
-index 17b15eed..522c3fb4 100644
+index 17b15eed..f583ebc4 100644
 --- a/packages/api/src/modules/briefing/read.ts
 +++ b/packages/api/src/modules/briefing/read.ts
 @@ -1,8 +1,20 @@
@@ -607,7 +589,7 @@ index 17b15eed..522c3fb4 100644
    /** Character length of the full body. Lets the agent decide when read_email is worth a tool call. */
    contentLength: number;
  }
-@@ -124,12 +146,42 @@ export async function listEmailsSinceWatermark(
+@@ -124,12 +146,39 @@ export async function listEmailsSinceWatermark(
      listRecentlySurfacedThreadIds({ userId: args.userId, before: args.untilIngestedAt }),
    ]);
  
@@ -637,9 +619,6 @@ index 17b15eed..522c3fb4 100644
 +      subject: r.subject,
 +      category: toTriageCategory(r.triageCategory) ?? "fyi",
 +      significanceBand: bandFor(senders[i] ?? null),
-+      // Chronological key for recurrence (rows arrive newest-first); fall back
-+      // to ingest time when the message carries no authored timestamp.
-+      occurredAtMs: (r.authoredAt ?? r.ingestedAt)?.getTime() ?? null,
 +    })),
 +  );
 +
@@ -653,7 +632,7 @@ index 17b15eed..522c3fb4 100644
        snippet: typeof meta.snippet === "string" ? meta.snippet : null,
        triageCategory: r.triageCategory,
        triageRationale: r.triageRationale,
-@@ -137,11 +189,46 @@ export async function listEmailsSinceWatermark(
+@@ -137,11 +186,46 @@ export async function listEmailsSinceWatermark(
        ingestedAt: r.ingestedAt,
        threadId: r.sourceThreadId,
        previouslySurfaced: r.sourceThreadId ? surfacedThreadIds.has(r.sourceThreadId) : false,
@@ -700,47 +679,6 @@ index 17b15eed..522c3fb4 100644
  /**
   * Thread ids surfaced in a recent terminal briefing — the set the next slot
   * should treat as continuations, not fresh items. Sourced from the persisted
-diff --git a/packages/api/src/modules/integrations/object-state/store.ts b/packages/api/src/modules/integrations/object-state/store.ts
-index cb804680..09dbe767 100644
---- a/packages/api/src/modules/integrations/object-state/store.ts
-+++ b/packages/api/src/modules/integrations/object-state/store.ts
-@@ -10,7 +10,7 @@ import {
-   integrationObjectKeys,
-   integrationObjects,
- } from "@alfred/db/schemas";
--import { and, desc, eq } from "drizzle-orm";
-+import { and, desc, eq, gte, lte } from "drizzle-orm";
- import { reduceGithubEvent } from "./github-reducer";
- 
- /**
-@@ -72,6 +72,14 @@ export interface ObjectListFilter {
-   kind?: string;
-   stateCategory?: StateCategory;
-   limit?: number;
-+  /**
-+   * Restrict to objects whose current state was delivered within `[start, end]`
-+   * (inclusive), keyed on `stateDeliveredAt`. For `stateCategory: "resolved"`
-+   * this windows "what resolved in this period" — e.g. the evening briefing's
-+   * "what shipped today" recap, so a stale or future-resolved object can't leak
-+   * into the window on a retry.
-+   */
-+  deliveredWithin?: { start: Date; end: Date };
- }
- 
- export interface ObjectStateStore {
-@@ -260,6 +268,12 @@ export const objectStateStore: ObjectStateStore = {
-     if (filter?.stateCategory) {
-       conditions.push(eq(integrationObjects.stateCategory, filter.stateCategory));
-     }
-+    if (filter?.deliveredWithin) {
-+      conditions.push(
-+        gte(integrationObjects.stateDeliveredAt, filter.deliveredWithin.start),
-+        lte(integrationObjects.stateDeliveredAt, filter.deliveredWithin.end),
-+      );
-+    }
-     const requestedLimit = filter?.limit ?? DEFAULT_OBJECT_LIST_LIMIT;
-     const limit = Math.min(Math.max(1, requestedLimit), MAX_OBJECT_LIST_LIMIT);
-     const rows = await db()
 diff --git a/packages/api/src/modules/memory/significance.ts b/packages/api/src/modules/memory/significance.ts
 index f880d713..bec8c73e 100644
 --- a/packages/api/src/modules/memory/significance.ts
@@ -975,10 +913,10 @@ index c68705fe..cebac95a 100644
      rowVersion: row.rowVersion,
 diff --git a/packages/api/test/contracts/attention.test.ts b/packages/api/test/contracts/attention.test.ts
 new file mode 100644
-index 00000000..f32e1364
+index 00000000..21450cb7
 --- /dev/null
 +++ b/packages/api/test/contracts/attention.test.ts
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,194 @@
 +import assert from "node:assert/strict";
 +import { describe, test } from "node:test";
 +import {
@@ -1134,27 +1072,6 @@ index 00000000..f32e1364
 +    assert.equal(b.band, "demanding");
 +  });
 +
-+  test("assigns recurrence chronologically even when items arrive newest-first", () => {
-+    // Both live consumers (briefing + inbox rail) feed rows newest-first. The
-+    // FIRST chronological sighting must stay demanding; the latest (10th) copy
-+    // must decay — regardless of the order it's passed in.
-+    const newestFirst = Array.from({ length: 10 }, (_, i) => ({
-+      sender: "no-reply@sns.amazonaws.com",
-+      subject: "ALARM: CPU high",
-+      category: "urgent" as const,
-+      // i=0 is newest; oldest has the smallest timestamp.
-+      occurredAtMs: 10_000 - i * 1000,
-+    }));
-+    const results = scoreAttentionForItems(newestFirst);
-+    const newest = results[0];
-+    const oldest = results[results.length - 1];
-+    assert.ok(newest && oldest);
-+    // The newest copy is the 10th sighting → decayed; the oldest is the 1st.
-+    assert.equal(oldest.band, "demanding", "the first (oldest) sighting stays demanding");
-+    assert.equal(newest.band, "muted", "the latest (10th) copy decays out");
-+    assert.ok(newest.score < oldest.score);
-+  });
-+
 +  test("aligns 1:1 with the input order", () => {
 +    const results = scoreAttentionForItems([
 +      { sender: "Fabian <fabian@acme.com>", subject: "Hi", category: "fyi" },
@@ -1218,10 +1135,10 @@ index a11c98e3..ecd3a687 100644
      assert.equal("classifiedAt" in value, false);
 diff --git a/packages/contracts/src/attention.ts b/packages/contracts/src/attention.ts
 new file mode 100644
-index 00000000..34aec961
+index 00000000..cf352c17
 --- /dev/null
 +++ b/packages/contracts/src/attention.ts
-@@ -0,0 +1,313 @@
+@@ -0,0 +1,277 @@
 +/**
 + * Presentation-layer attention scoring (ADR-0064, #210 / epic #218 Tier 2).
 + *
@@ -1452,15 +1369,6 @@ index 00000000..34aec961
 +
 +// ─── Windowed item scoring (the cross-row recurrence pass) ───────────────────
 +
-+/**
-+ * Recurrence grouping-key separator. A control char (unit separator) that
-+ * cannot appear in a lowercased email address or a normalized subject (both
-+ * reduced to `[a-z0-9 ]`), so it can never collide a distinct sender/subject
-+ * pair into one group. Written as an escape — never a literal control byte in
-+ * source — so search/diff/editor tooling stays sane.
-+ */
-+const RECURRENCE_KEY_SEP = "\u001f";
-+
 +export interface AttentionItemInput {
 +  /** Raw `From` header (display-name + address ok); used for bulk + grouping. */
 +  sender: string | null | undefined;
@@ -1472,28 +1380,16 @@ index 00000000..34aec961
 +  significanceBand?: SignificanceBand | null;
 +  /** Exposed-secret / security pin — forces `demanding` (ADR-0051). */
 +  pinnedDemanding?: boolean;
-+  /**
-+   * Chronological occurrence time (epoch ms, e.g. the email's `authoredAt`).
-+   * Recurrence — "how many copies has the human *already* seen?" — is inherently
-+   * chronological, so the recurrence index is assigned oldest-first off this key,
-+   * independent of the order `items` is passed in (both live consumers render
-+   * newest-first). Omit/null on every item to fall back to input order.
-+   */
-+  occurredAtMs?: number | null;
 +}
 +
 +/**
 + * Score a window of items together so recurrence — an inherently cross-row
 + * property — can be computed. Groups bulk-sender items by
-+ * `(address, normalizedSubject)`; the k-th occurrence in *chronological* order
-+ * gets `recurrenceIndex = k`, so a machine notification fired ten times decays
-+ * out of the demanding lane while its first sighting stays put. Recurrence is
-+ * assigned oldest-first off {@link AttentionItemInput.occurredAtMs} and the
-+ * results mapped back to the caller's order — both live consumers render
-+ * newest-first, where assigning by input order would (wrongly) keep the latest
-+ * copy demanding and mute the older ones. Non-bulk senders never accrue an
-+ * index (a human repeating is not demoted). Returns results aligned 1:1 with
-+ * `items`.
++ * `(address, normalizedSubject)`; the k-th occurrence in input order gets
++ * `recurrenceIndex = k`, so a machine notification fired ten times decays out
++ * of the demanding lane while its first sighting stays put. Non-bulk senders
++ * never accrue an index (a human repeating is not demoted). Returns results
++ * aligned 1:1 with `items`.
 + *
 + * This is the single windowed-scoring entry point shared by the briefing read
 + * path (the agent's email list) and the inbox rail — each computes attention
@@ -1502,38 +1398,23 @@ index 00000000..34aec961
 +export function scoreAttentionForItems(
 +  items: readonly AttentionItemInput[],
 +): AttentionResult[] {
-+  const entries = items.map((item, index) => ({
-+    item,
-+    index,
-+    bulk: isLikelyBulkSender(item.sender),
-+    recurrenceIndex: 0,
-+  }));
-+
-+  // Walk oldest-first so `recurrenceIndex` counts *prior* sightings; ties and
-+  // the no-timestamp case fall back to input order (stable). The sorted view
-+  // holds the same entry objects, so writing `recurrenceIndex` here lands on the
-+  // original-order entries returned below.
 +  const seen = new Map<string, number>();
-+  const chronological = [...entries].sort(
-+    (a, b) => (a.item.occurredAtMs ?? 0) - (b.item.occurredAtMs ?? 0) || a.index - b.index,
-+  );
-+  for (const entry of chronological) {
-+    if (!entry.bulk) continue;
-+    const key = `${senderAddress(entry.item.sender) ?? ""}${RECURRENCE_KEY_SEP}${normalizeSubjectForRecurrence(entry.item.subject ?? "")}`;
-+    const idx = seen.get(key) ?? 0;
-+    entry.recurrenceIndex = idx;
-+    seen.set(key, idx + 1);
-+  }
-+
-+  return entries.map(({ item, bulk, recurrenceIndex }) =>
-+    attentionScore({
++  return items.map((item) => {
++    const bulk = isLikelyBulkSender(item.sender);
++    let recurrenceIndex = 0;
++    if (bulk) {
++      const key = `${senderAddress(item.sender) ?? ""} ${normalizeSubjectForRecurrence(item.subject ?? "")}`;
++      recurrenceIndex = seen.get(key) ?? 0;
++      seen.set(key, recurrenceIndex + 1);
++    }
++    return attentionScore({
 +      category: item.category,
 +      significanceBand: item.significanceBand,
 +      isBulkSender: bulk,
 +      recurrenceIndex,
 +      pinnedDemanding: item.pinnedDemanding,
-+    }),
-+  );
++    });
++  });
 +}
 diff --git a/packages/contracts/src/briefing.ts b/packages/contracts/src/briefing.ts
 index 7e6b17ac..568e3b43 100644

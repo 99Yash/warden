@@ -32,35 +32,45 @@ stripped.
 
 ```yaml
 id: pinned-demanding-never-wired
-path: packages/contracts/src/attention.ts
+path: packages/api/src/modules/briefing/read.ts
+line: 167
 category: correctness
-description: scoreAttentionForItems accepts pinnedDemanding (attention.ts:125) but neither live consumer passes it — briefing/read.ts:167 and chat-shell.tsx:1549 send only category/significance/recurrence. A weak or repeated bulk urgent exposed-secret item can be demoted to normal/muted, contradicting the "security pins stay" invariant. Levers: [prompt] (grep callers to see the param is never supplied) + [intent] (the security-pin invariant lives in ADR-0064 / PR desc, not the code).
+claim_includes: pinnedDemanding
+description: scoreAttentionForItems accepts pinnedDemanding (attention.ts:125/241) but neither live consumer passes it — briefing/read.ts:167 and chat-shell.tsx:1549 send only category/significance/recurrence. A weak or repeated bulk urgent exposed-secret item can be demoted to normal/muted, contradicting the "security pins stay" invariant. Levers: [prompt] (grep callers to see the param is never supplied) + [intent] (the security-pin invariant lives in ADR-0064 / PR desc, not the code).
 ```
 
 ```yaml
 id: recurrence-reversed-for-newest-first
 path: packages/contracts/src/attention.ts
+line: 261
 category: correctness
+claim_includes: newest
 description: scoreAttentionForItems assigns recurrence by input order (attention.ts:257) but briefing and inbox feed it newest-first rows (read.ts:142, me/routes.ts:493). The latest (e.g. tenth) alarm is treated as the first occurrence and stays demanding; older copies get muted. Fix = score in chronological order then map back. Levers: [lane] (the consumer proving the order, me/routes.ts, is unchanged and out-of-diff) + [intent] (recurrence-decay contract is stated, not in-code).
 ```
 
 ```yaml
 id: day-shape-shipped-ignores-window
 path: packages/api/src/modules/briefing/gather.ts
+line: 473
 category: correctness
-description: gatherDayShape accepts windowStart/windowEnd but the resolved-objects query is fetched with no time filter (gather.ts:473 — committed code has no deliveredWithin). An evening briefing recap can show stale or future-resolved PRs as "what shipped today," especially on retries. Lever: [prompt] — within a file warden already reviewed; a worker that traced the windowStart/windowEnd params to their (missing) use would catch it. (Fix now present in working tree.)
+claim_includes: window
+description: gatherDayShape accepts windowStart/windowEnd but the resolved-objects query is fetched with no time filter (gather.ts:473 — committed code has no deliveredWithin). An evening briefing recap can show stale or future-resolved PRs as "what shipped today," especially on retries. Lever: [prompt] — within a file warden already reviewed; a worker that traced the windowStart/windowEnd params to their (missing) use would catch it.
 ```
 
 ```yaml
 id: sender-significance-n-plus-1
 path: packages/api/src/modules/briefing/read.ts
+line: 222
 category: scalability
+claim_includes: getSenderSignificance
 description: Briefing does one alias JSONB scan per distinct sender (read.ts:209 via significance.ts:251); the triage workflow also calls resolveSenderRelationship then getSenderSignificance separately for the same address (email-triage.ts:648). Batch the briefing lookup; share metadata in classify. Lever: [prompt] — textbook "loop contains a query → N+1" checklist item. Warden found the adjacent sequential-await (email-triage.ts:337) but not this.
 ```
 
 ```yaml
 id: literal-nul-byte-in-source
 path: packages/contracts/src/attention.ts
+line: 265
 category: committability
+claim_includes: NUL
 description: attention.ts:265 contains an actual NUL separator in a template literal. Passes TS but is hostile to search/editor tooling. Use "\0" or a printable delimiter constant. Lever: [prompt] — but tier-3/committability is verbose-gated in warden's default output, so it may be found-then-suppressed rather than missed.
 ```

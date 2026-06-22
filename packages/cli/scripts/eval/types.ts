@@ -24,11 +24,11 @@ export interface EvalConfig {
 }
 
 /**
- * A label entry in a fixture's `labels.md`. `expected_line`, `category`,
- * `concern` are optional — synthetic fixtures pin specific (line, kind,
- * category), real-PR fixtures may only describe the issue narrative. The
- * scorer matches loosely: a comment is "caught" iff it cites the labeled
- * file AND its category matches (or `category` is undefined).
+ * A label entry in a fixture's `labels.md`. `line`, `category`, and
+ * `claimIncludes` are optional so old fixtures keep working, but new real-PR
+ * labels should pin all three whenever practical. Loose path/category-only
+ * labels can over-credit generic comments, especially when multiple labels
+ * live in the same file.
  */
 export interface FixtureLabel {
   /** Free-form identifier (e.g. "missing-null-check"). Used in scorecards. */

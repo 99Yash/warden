@@ -122,13 +122,12 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value !== undefined && /^(1|true)$/i.test(value.trim())),
-  // ADR-0048: the live, dev-time observability surface (OTEL spans → a
-  // self-hosted Langfuse stack at `docker/langfuse/`). DISTINCT from
-  // ADR-0044 §7's persisted prose-free review trace. Keys gate emission:
-  // absent pub/secret key → the exporter is never constructed and
-  // `experimental_telemetry` stays off (total no-op, like CI). The OTEL
-  // bootstrap + exporter live only in `@warden/ai`; `@warden/core` never
-  // imports Langfuse.
+  // ADR-0048 reserved scaffolding: planned live observability surface
+  // (OTEL spans → a self-hosted Langfuse stack at `docker/langfuse/`).
+  // DISTINCT from ADR-0044 §7's persisted prose-free review trace. Current
+  // Warden code parses these env vars but does not emit spans yet; the future
+  // OTEL bootstrap + exporter must live only in `@warden/ai`, and `@warden/core`
+  // must never import Langfuse.
   LANGFUSE_PUBLIC_KEY: z.string().min(1).optional(),
   LANGFUSE_SECRET_KEY: z.string().min(1).optional(),
   // Self-hosted only — Warden reviews other people's source, which (with
@@ -136,12 +135,10 @@ const envSchema = z.object({
   // the local Docker stack's web port. Pointing this at Langfuse Cloud is
   // explicitly out of scope for v0 (ADR-0048 §6).
   LANGFUSE_HOST: z.string().url().optional().default("http://localhost:3200"),
-  // I/O capture: full prompt/completion bodies (incl. boss reasoning prose)
-  // on spans. Defaults ON when keys are present — the self-hosted box makes
-  // this the most diagnostic signal for recall iteration. The ADR-0044 §7
-  // prose-free invariant binds the *persisted trust-spine trace* only, not
-  // this non-authoritative dev surface (ADR-0048 §6 carve-out). Flip off
-  // (`0` / `false`) for any future CI/cloud run. Boolean-ish; defaults true.
+  // Future I/O capture toggle: full prompt/completion bodies (incl. boss
+  // reasoning prose) on spans once ADR-0048 telemetry wiring ships. Defaults
+  // ON when keys are present; flip off (`0` / `false`) for any future CI/cloud
+  // run. Boolean-ish; defaults true.
   WARDEN_LANGFUSE_CAPTURE_IO: z
     .string()
     .optional()
