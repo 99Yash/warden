@@ -1,4 +1,5 @@
 import {
+  buildReviewTelemetry,
   createRetryable,
   error as anyError,
   getBossModel,
@@ -537,6 +538,11 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
       ...(primaryInfo.providerOptions !== undefined
         ? { providerOptions: primaryInfo.providerOptions }
+        : {}),
+      // ADR-0048 §3 — auto-emit OTEL spans (LLM + every tool call) under the
+      // run-id's Langfuse trace. No-op unless Langfuse keys are present.
+      ...(input.runId !== undefined
+        ? { experimental_telemetry: buildReviewTelemetry({ runId: input.runId, role: "boss" }) }
         : {}),
     });
 

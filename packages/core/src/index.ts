@@ -21,6 +21,11 @@ import type {
 } from "./schema.js";
 
 export * from "./schema.js";
+// ADR-0048 — the CLI force-flushes the OTEL→Langfuse exporter on exit (the
+// process is short-lived; unflushed spans are lost). Re-exported here because
+// `@warden/ai` is the package boundary that owns observability and the CLI
+// depends on `@warden/core` at runtime (not on `@warden/ai` directly).
+export { shutdownObservability, isObservabilityEnabled } from "@warden/ai";
 export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosystem/index.js";
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 export { pruneDiff, type PruneResult } from "./diff/prune.js";

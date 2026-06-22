@@ -1,6 +1,7 @@
 import {
   getReviewModelLabelsByTier,
   getReviewModelPricingByTier,
+  recordDroppedCandidate,
   type LlmModelPrice,
   type ReviewCostTier,
 } from "@warden/ai";
@@ -214,6 +215,10 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
         `diff-scope: dropped ${scoped.droppedCount} ` +
         `comment${scoped.droppedCount === 1 ? "" : "s"} outside added diff lines`,
     });
+    // ADR-0048 §4 — off-hunk scope-drop event. Runs post-loop (outside any
+    // LLM-call span), so this attaches only if a span happens to be active;
+    // it is a deliberate no-op otherwise.
+    recordDroppedCandidate("off-hunk", { "warden.count": scoped.droppedCount });
   }
 
   // ADR-0033: emit a single info entry when the dispatch concurrency cap
@@ -292,7 +297,7 @@ function computeInputHash(
   const resolvedConfig = {
     mode: input.config.mode,
     verbose: input.config.verbose ?? false,
-    bossLoop: { ...BOSS_LOOP_DEFAULTS, ...(input.config.bossLoop ?? {}) },
+    bossLoop: { ...BOSS_LOOP_DEFAULTS, ...input.config.bossLoop },
   };
   const modelSet = [modelLabels.opus, modelLabels.sonnet, modelLabels.haiku].sort();
   const payload = JSON.stringify({

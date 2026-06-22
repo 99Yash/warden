@@ -60,6 +60,7 @@
     "smoke:fix-worker-concurrency": "node --import tsx/esm scripts/smoke-fix-worker-concurrency.mts",
     "smoke:m18-triage-gate": "node --import tsx/esm scripts/smoke-m18-triage-gate.mts",
     "smoke:m18": "pnpm smoke:m18-triage-gate",
+    "smoke:adr-0048-observability": "node --import tsx/esm scripts/smoke-adr-0048-observability.mts",
     "eval": "node --import tsx/esm scripts/eval/run.mts"
   },
   "dependencies": {

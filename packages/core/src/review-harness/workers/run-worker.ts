@@ -1,14 +1,17 @@
 import {
   Output,
+  buildReviewTelemetry,
   getWorkerCheapModelInfo,
   getWorkerCheapModel,
   getWorkerStrongModelInfo,
   getWorkerStrongModel,
+  recordDroppedCandidate,
   stepCountIs,
   streamText,
   transformSchemaForGemini,
   type LanguageModel,
   type LlmProviderOptions,
+  type ReviewTelemetrySettings,
   type ToolSet,
 } from "@warden/ai";
 import { stableCommentId } from "../../comment-id.js";
@@ -207,6 +210,20 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     };
   }
 
+  // ADR-0048 §3 — per-worker telemetry. Tagged by concern/tier/file so the
+  // Langfuse trace shows which worker investigated what. No-op unless a run-id
+  // is threaded AND Langfuse keys are present.
+  const telemetry =
+    input.runId !== undefined
+      ? buildReviewTelemetry({
+          runId: input.runId,
+          role: "worker",
+          concern: input.concern,
+          tier,
+          ...(input.files.length === 1 ? { file: input.files[0] } : {}),
+        })
+      : undefined;
+
   const call = await callWorker({
     tier,
     modelLabel: primaryLabel,
@@ -219,6 +236,7 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     ...(input.reasonedFindingMode !== undefined
       ? { reasonedFindingMode: input.reasonedFindingMode }
       : {}),
+    ...(telemetry !== undefined ? { telemetry } : {}),
   });
 
   if (!call.ok) {
@@ -255,6 +273,8 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       topic: `worker-${input.concern}`,
       message: `${input.concern}: dropped ${droppedUncited} uncited finding${droppedUncited === 1 ? "" : "s"}`,
     });
+    // ADR-0048 §4 — dropped-candidate event onto the active span.
+    recordDroppedCandidate("uncited", { "warden.concern": input.concern, "warden.count": droppedUncited });
   }
 
   return {
@@ -425,6 +445,8 @@ export async function callWorker(opts: {
   tools: ToolSet;
   timeoutMs: number;
   reasonedFindingMode?: ReasonedFindingMode;
+  /** ADR-0048 §3 telemetry settings; absent → no spans for this call. */
+  telemetry?: ReviewTelemetrySettings;
 }): Promise<WorkerCallOk | WorkerCallErr> {
   const first = await tryProvider(opts.primary, opts);
   if (first.ok) {
@@ -463,6 +485,7 @@ async function tryProvider(
     providerOptions?: LlmProviderOptions;
     timeoutMs: number;
     reasonedFindingMode?: ReasonedFindingMode;
+    telemetry?: ReviewTelemetrySettings;
   },
 ): Promise<ProviderOk | ProviderErr> {
   try {
@@ -478,6 +501,7 @@ async function tryProvider(
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
       output: Output.object({ schema: schemaPair.requestSchema }),
       ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
+      ...(opts.telemetry !== undefined ? { experimental_telemetry: opts.telemetry } : {}),
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;

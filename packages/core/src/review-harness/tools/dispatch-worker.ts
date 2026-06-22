@@ -1,4 +1,4 @@
-import { tool } from "@warden/ai";
+import { recordDroppedCandidate, tool } from "@warden/ai";
 import { z } from "zod";
 import type { Semaphore } from "../../orchestration/semaphore.js";
 import type { Comment, DegradedEntry } from "../../schema.js";
@@ -319,6 +319,11 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
         message:
           `dispatch_worker(${args.concern}): dropped ${droppedCount.value} ` +
           "finding(s) whose path was outside the dispatched file set.",
+      });
+      // ADR-0048 §4 — lane-discipline drop event onto the active boss span.
+      recordDroppedCandidate("lane", {
+        "warden.concern": args.concern,
+        "warden.count": droppedCount.value,
       });
     }
 
