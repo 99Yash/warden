@@ -3,7 +3,11 @@ import { applyConfidenceFloor, dropsToDegraded } from "./confidence.js";
 import type { ContextSelector } from "./context/index.js";
 import type { Lockfile } from "./ecosystem/index.js";
 import type { FormatterListener } from "./llm/index.js";
-import { runReviewHarness, type ReviewHarnessResult } from "./review-harness/harness.js";
+import {
+  runReviewHarness,
+  updateReviewRunCommentsEmitted,
+  type ReviewHarnessResult,
+} from "./review-harness/harness.js";
 import { runDetPriors } from "./review-harness/det-priors.js";
 import { toComment } from "./runners/to-comment.js";
 import {
@@ -266,6 +270,13 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}),
     harness: "m14-review",
   });
+  // ADR-0048 §2 — `recordReviewRun` (in the harness) persisted the pre-hard-
+  // rules count; correct it to the count actually surfaced to the user now
+  // that the confidence floor + Tier-3 gate have run. Security comments belong
+  // to the separate M18 harness (its own row), so they're excluded here.
+  if (harness.metadata.runId !== undefined) {
+    updateReviewRunCommentsEmitted(harness.metadata.runId, ruled.comments.length);
+  }
   const security =
     input.config.deep === true
       ? await runSecurityHarness({
@@ -291,6 +302,7 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     comments: mergedComments,
     metadata: {
       durationMs: harness.metadata.durationMs + (security?.metadata.durationMs ?? 0),
+      ...(harness.metadata.runId !== undefined ? { runId: harness.metadata.runId } : {}),
       degradedWorkers: [
         ...(input.extraDegraded ?? []),
         ...harness.metadata.degradedWorkers,

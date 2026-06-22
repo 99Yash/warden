@@ -201,6 +201,12 @@ export interface MakeDispatchWorkerToolOptions {
    * route stays the unit of observation.
    */
   concurrency?: DispatchConcurrency;
+  /**
+   * ADR-0048 §2 review-run id. When set (and Langfuse keys present), lane-
+   * discipline drops emit an OTEL span grouped under this run's trace.
+   * Absent → the drop is recorded only as a degraded entry (no span).
+   */
+  runId?: string;
 }
 
 /**
@@ -320,11 +326,14 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
           `dispatch_worker(${args.concern}): dropped ${droppedCount.value} ` +
           "finding(s) whose path was outside the dispatched file set.",
       });
-      // ADR-0048 §4 — lane-discipline drop event onto the active boss span.
-      recordDroppedCandidate("lane", {
-        "warden.concern": args.concern,
-        "warden.count": droppedCount.value,
-      });
+      // ADR-0048 §4 — lane-discipline drop. Emit a run-id-grouped span; the
+      // exporter maps span attributes, not the events the old code used.
+      if (opts.runId !== undefined) {
+        recordDroppedCandidate("lane", {
+          runId: opts.runId,
+          attrs: { "warden.concern": args.concern, "warden.count": droppedCount.value },
+        });
+      }
     }
 
     opts.scratchpad.recordWorker({

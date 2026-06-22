@@ -418,6 +418,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     ...(input.workerBudget !== undefined ? { workerBudget: input.workerBudget } : {}),
     route: input.route,
     ...(input.concurrency !== undefined ? { concurrency: input.concurrency } : {}),
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
   });
 
   const resolved = applyBossLoopDefaults(input.config);

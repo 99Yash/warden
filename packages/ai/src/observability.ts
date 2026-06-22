@@ -51,6 +51,20 @@ function ensureObservability(): ObservabilityState {
     _state = { kind: "off" };
     return _state;
   }
+  // §6 "must not leave the box": reviewed source flows into spans when capture
+  // is on, so refuse a non-loopback `LANGFUSE_HOST` unless the operator opts in
+  // explicitly. A fat-fingered Langfuse Cloud URL would otherwise exfiltrate
+  // other people's code — degrade to off (one loud warn) instead.
+  if (!isLocalHost(env.LANGFUSE_HOST) && !env.WARDEN_LANGFUSE_ALLOW_REMOTE) {
+    // eslint-disable-next-line no-console -- silent-off would hide an exfil-shaped misconfig.
+    console.warn(
+      `[warden:observability] LANGFUSE_HOST="${env.LANGFUSE_HOST}" is not a loopback/local address; ` +
+        `telemetry disabled so reviewed source never leaves the box. ` +
+        `Set WARDEN_LANGFUSE_ALLOW_REMOTE=1 to override (ADR-0048 §6).`,
+    );
+    _state = { kind: "off" };
+    return _state;
+  }
   try {
     const sdk = new NodeSDK({
       // LangfuseExporter implements OTEL's `SpanExporter`. NodeSDK wires it as
@@ -75,6 +89,26 @@ function ensureObservability(): ObservabilityState {
 /** Whether the live Langfuse surface is active this process (keys present + SDK started). */
 export function isObservabilityEnabled(): boolean {
   return ensureObservability().kind === "on";
+}
+
+/**
+ * ADR-0048 §6 loopback allowlist. `true` for hosts that resolve on the local
+ * box: `localhost` (+ `*.localhost`), the IPv4 loopback block `127.0.0.0/8`,
+ * the IPv6 loopback `::1`, and the unspecified `0.0.0.0`. Anything else (LAN
+ * IPs, Langfuse Cloud, …) is "remote" and gated behind
+ * `WARDEN_LANGFUSE_ALLOW_REMOTE`. Unparseable URLs are treated as non-local.
+ */
+function isLocalHost(rawUrl: string): boolean {
+  let hostname: string;
+  try {
+    // `URL` strips IPv6 brackets in `.hostname`, so `::1` arrives bare.
+    hostname = new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname === "::1" || hostname === "0.0.0.0") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
 }
 
 export type ReviewTelemetryRole = "boss" | "worker";
@@ -135,23 +169,45 @@ export function buildReviewTelemetry(ctx: ReviewTelemetryContext): ReviewTelemet
 }
 
 /**
- * ADR-0048 §4 — emit a dropped-candidate event onto the currently-active OTEL
- * span (the boss/worker call span the AI SDK created). Closes the gap generic
- * tool-spans can't: a candidate dropped pre-citation never becomes a tool
- * call, so we record it explicitly. No-op when telemetry is off or no span is
- * active (e.g. the post-loop comment-scope pass runs outside any LLM call).
+ * ADR-0048 §4 — record a dropped candidate as a standalone Langfuse
+ * observation grouped under the review's run-id trace.
+ *
+ * Why a fresh span and not `getActiveSpan().addEvent(...)`:
+ *   1. The `langfuse-vercel` exporter maps OTEL *span attributes* into Langfuse
+ *      observations and never reads span *events* — `addEvent` is dropped on
+ *      the floor.
+ *   2. Every drop call site runs *outside* any active LLM-call span anyway:
+ *      the off-hunk scope pass is post-boss-loop, and the uncited pass fires
+ *      after the worker stream has already closed. There is no ambient span to
+ *      attach to.
+ *
+ * So we mint our own span on the AI-SDK-named tracer (the exporter's
+ * `isAiSdkSpan` filter drops every other instrumentation scope) and carry the
+ * run-id as `langfuseTraceId` so it lands in the right trace. `langfuseUpdate
+ * Parent=false` attaches the observation without overwriting the trace's
+ * name/I/O. No-op when telemetry is off.
  *
  * `reason` is one of ADR-0044 §7's deterministic-transform kinds
  * (`lane` / `uncited` / `off-hunk` / `volume-cap` / `degrade`).
  */
 export function recordDroppedCandidate(
   reason: string,
-  attrs: Record<string, AttributeValue> = {},
+  ctx: { runId: string; attrs?: Record<string, AttributeValue> },
 ): void {
   if (!isObservabilityEnabled()) return;
-  const span = trace.getActiveSpan();
-  if (!span) return;
-  span.addEvent("warden.dropped_candidate", { "warden.drop_reason": reason, ...attrs });
+  // The instrumentation scope MUST be "ai" — `langfuse-vercel`'s `isAiSdkSpan`
+  // ignores spans from any other tracer.
+  const span = trace.getTracer("ai").startSpan("warden.dropped_candidate");
+  span.setAttributes({
+    "ai.telemetry.metadata.langfuseTraceId": ctx.runId,
+    "ai.telemetry.metadata.langfuseUpdateParent": false,
+    "ai.telemetry.metadata.warden.runId": ctx.runId,
+    "ai.telemetry.metadata.warden.drop_reason": reason,
+  });
+  for (const [key, value] of Object.entries(ctx.attrs ?? {})) {
+    span.setAttribute(`ai.telemetry.metadata.${key}`, value);
+  }
+  span.end();
 }
 
 /**

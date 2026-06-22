@@ -5,7 +5,7 @@ import {
   type LlmModelPrice,
   type ReviewCostTier,
 } from "@warden/ai";
-import { createId, db, reviewRuns } from "@warden/db";
+import { createId, db, eq, reviewRuns } from "@warden/db";
 import { wardenEnv } from "@warden/env";
 import { createHash } from "node:crypto";
 import type { ContextSelector } from "../context/index.js";
@@ -215,10 +215,10 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
         `diff-scope: dropped ${scoped.droppedCount} ` +
         `comment${scoped.droppedCount === 1 ? "" : "s"} outside added diff lines`,
     });
-    // ADR-0048 §4 — off-hunk scope-drop event. Runs post-loop (outside any
-    // LLM-call span), so this attaches only if a span happens to be active;
-    // it is a deliberate no-op otherwise.
-    recordDroppedCandidate("off-hunk", { "warden.count": scoped.droppedCount });
+    // ADR-0048 §4 — off-hunk scope-drop. Runs post-loop (outside any LLM-call
+    // span), so `recordDroppedCandidate` mints its own run-id-grouped span
+    // rather than relying on an ambient active span.
+    recordDroppedCandidate("off-hunk", { runId, attrs: { "warden.count": scoped.droppedCount } });
   }
 
   // ADR-0033: emit a single info entry when the dispatch concurrency cap
@@ -286,18 +286,32 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
  * The "resolved config" folds in the boss-loop defaults so the variant
  * composition (`bossPromptVariant` / `workerPromptVariant` /
  * `reasonedFindingMode` / programmatic-dispatch shape) is part of the key —
- * flipping a variant misses the cache, as ADR-0048 §8 requires. Hashing the
- * actual prompt-file *contents* (vs. the variant selector) is deferred to the
- * resume pass (#33).
+ * flipping a variant misses the cache, as ADR-0048 §8 requires. It also folds
+ * in the output-affecting env knobs (boss rounds, worker budget, react-doctor,
+ * confidence floor) and the diff base ref so two materially different reviews
+ * never alias to the same resume key. Hashing the actual prompt-file
+ * *contents* (vs. the variant selector) is deferred to the resume pass (#33).
  */
 function computeInputHash(
   input: ReviewHarnessInput,
   modelLabels: Record<ReviewCostTier, string>,
 ): string {
+  const env = wardenEnv();
   const resolvedConfig = {
     mode: input.config.mode,
     verbose: input.config.verbose ?? false,
     bossLoop: { ...BOSS_LOOP_DEFAULTS, ...input.config.bossLoop },
+    // Output-affecting runtime knobs (ADR-0048 §8). Without these, two reviews
+    // that differ only in e.g. boss-round count or whether the react-doctor
+    // det-prior ran would collide on the resume key.
+    runtime: {
+      bossRounds: env.WARDEN_REVIEW_BOSS_ROUNDS ?? null,
+      workerBudget: env.WARDEN_REVIEW_WORKER_BUDGET ?? null,
+      reactDoctor: env.WARDEN_REACT_DOCTOR,
+      confidenceFloor: env.WARDEN_SECURITY_CONFIDENCE_FLOOR ?? null,
+    },
+    // react-doctor's `--scope changed` delta is keyed off the base ref.
+    diffBase: input.diffBase?.baseRef ?? null,
   };
   const modelSet = [modelLabels.opus, modelLabels.sonnet, modelLabels.haiku].sort();
   const payload = JSON.stringify({
@@ -356,6 +370,23 @@ function recordReviewRun(input: {
         message: `review run record failed (${formatErr(err)})`,
       },
     ];
+  }
+}
+
+/**
+ * ADR-0048 §2 — correct a review-run row's `commentsEmitted` after the public
+ * boundary (`packages/core/src/index.ts`) applies `applyHardRules()`: the
+ * confidence floor + Tier-3 verbose gate run there, NOT in the harness, so
+ * `recordReviewRun` can only persist the harness-level (post-citation,
+ * post-scope) count. Callers that surface comments to the user should call
+ * this with the final emitted count so the durable row stops overcounting.
+ * Best-effort: a failed update never breaks a review.
+ */
+export function updateReviewRunCommentsEmitted(runId: string, commentsEmitted: number): void {
+  try {
+    db().update(reviewRuns).set({ commentsEmitted }).where(eq(reviewRuns.id, runId)).run();
+  } catch {
+    // Durable bookkeeping is non-authoritative dev tooling; swallow.
   }
 }
 

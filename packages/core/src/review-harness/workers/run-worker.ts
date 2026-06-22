@@ -273,8 +273,15 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       topic: `worker-${input.concern}`,
       message: `${input.concern}: dropped ${droppedUncited} uncited finding${droppedUncited === 1 ? "" : "s"}`,
     });
-    // ADR-0048 §4 — dropped-candidate event onto the active span.
-    recordDroppedCandidate("uncited", { "warden.concern": input.concern, "warden.count": droppedUncited });
+    // ADR-0048 §4 — uncited-drop span, grouped under the run-id trace. Runs
+    // after the worker stream has closed (no active span), and is a no-op
+    // without a run-id since telemetry is off in that case anyway.
+    if (input.runId !== undefined) {
+      recordDroppedCandidate("uncited", {
+        runId: input.runId,
+        attrs: { "warden.concern": input.concern, "warden.count": droppedUncited },
+      });
+    }
   }
 
   return {

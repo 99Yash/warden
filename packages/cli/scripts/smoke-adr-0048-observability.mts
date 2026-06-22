@@ -69,12 +69,12 @@ assert(workerTel.isEnabled === false, "buildReviewTelemetry(worker) returns { is
 
 let threw = false;
 try {
-  recordDroppedCandidate("lane", { "warden.count": 3 });
-  recordDroppedCandidate("uncited");
+  recordDroppedCandidate("lane", { runId: "run_smoke", attrs: { "warden.count": 3 } });
+  recordDroppedCandidate("uncited", { runId: "run_smoke" });
 } catch {
   threw = true;
 }
-assert(threw === false, "recordDroppedCandidate() is a no-op (no throw) without keys / active span");
+assert(threw === false, "recordDroppedCandidate() is a no-op (no throw) without keys");
 
 await shutdownObservability();
 assert(true, "shutdownObservability() resolves without keys (no-op)");
