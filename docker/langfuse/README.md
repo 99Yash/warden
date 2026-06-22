@@ -7,10 +7,14 @@ per-call cost, and the **dropped-candidate events** that explain recall moves.
 Grouped by **run-id** so one review is one trace tree, and taggable by
 config/fixture/sample for cross-run eval diffing.
 
-Current Warden code does **not** emit spans to this stack yet. This directory
-ships only the self-hosted Langfuse compose stack and local key scaffolding; the
-OTEL bootstrap, AI SDK telemetry wiring, run-id threading, and review-run
-persistence are ADR-0048 follow-up implementation work.
+As of 2026-06-22 (issue #32) Warden **emits spans to this stack** when the
+`LANGFUSE_*` keys are set: the OTEL bootstrap + AI-SDK telemetry wiring, run-id
+threading (grouped by `langfuseTraceId`), dropped-candidate events, and
+`reviewRuns` persistence are live (see `packages/ai/src/observability.ts`).
+Absent the keys it is a total no-op. Not yet wired: per-call cost on spans and
+per-worker cache/resume (ADR-0048 §5/§8). The end-to-end span→Langfuse mapping
+is best verified by running a real review against this stack — that mapping is
+the implementation risk ADR-0048 flagged.
 
 This is **not** ADR-0044 §7's persisted, prose-free, never-gating _review trace_
 (the trust spine) — that is specified to live in `.warden/cache.sqlite` when
