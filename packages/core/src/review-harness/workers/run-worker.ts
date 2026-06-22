@@ -207,6 +207,7 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       degraded,
       durationMs: Date.now() - startedAt,
       tier,
+      failed: true,
     };
   }
 
@@ -251,6 +252,7 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       degraded,
       durationMs: Date.now() - startedAt,
       tier,
+      failed: true,
     };
   }
 

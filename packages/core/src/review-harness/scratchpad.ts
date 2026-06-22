@@ -39,6 +39,14 @@ export interface WorkerOutput {
    * dispatch tool's `tier?` field.
    */
   tier?: "sonnet" | "haiku";
+  /**
+   * True when this dispatch's LLM call errored and produced no output (vs a
+   * worker that ran cleanly and found nothing). `runReviewHarness()` reads
+   * this across all dispatches to detect the all-workers-failed false-clean
+   * (issue #29). Absent/false = the worker completed (with or without
+   * findings).
+   */
+  failed?: boolean;
 }
 
 /**

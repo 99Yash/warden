@@ -13,12 +13,15 @@ import { isGitIgnored, isInSkipDir, isSensitivePath, resolveWithinRoot } from ".
  * gitignored paths so a worker can't be tricked into exfiltrating build
  * artifacts or local-only configs.
  *
- * Output is capped at `LINE_CAP` lines (default 1000) with a truncation
- * marker the worker can react to ("file longer than 1000 lines —
- * `readFile` truncated"). Workers needing more should call `grepRepo` to
- * narrow first, then `readFile` on the same path; the cap is the same on
- * the second call. v0 has no offset/length pagination — keeping the
- * surface narrow per ADR-0030 §Tools.
+ * Output is a bounded window of at most `WINDOW_CAP` lines (default 1000).
+ * Reading is paginated: `offset` (1-based start line) + `limit` (window
+ * size) let a worker walk a large file in fixed-size windows instead of
+ * only ever seeing its head. When more lines follow the returned window the
+ * result carries `truncated: true` and a marker naming the exact next
+ * `offset` to continue from — earlier this just said "grepRepo then readFile
+ * again", but the second call had the same head-only cap, so lines past 1000
+ * were unreachable. `grepRepo` is still the right move to *locate* a region;
+ * `offset` is how you then *read through* it.
  *
  * Return shape is a discriminated union; errors do NOT throw. The boss
  * receives `{ ok: false, reason }` and can route a different worker. This
@@ -26,8 +29,7 @@ import { isGitIgnored, isInSkipDir, isSensitivePath, resolveWithinRoot } from ".
  * loop deterministic.
  */
 
-const LINE_CAP = 1000;
-const TRUNCATION_MARKER = "[truncated at 1000 lines — call grepRepo to narrow then readFile again]";
+const WINDOW_CAP = 1000;
 
 const InputSchema = z.object({
   path: z
@@ -38,6 +40,26 @@ const InputSchema = z.object({
         "resolve inside the repo root; any path that escapes the root via .. is " +
         "rejected. Examples: 'packages/core/src/schema.ts', 'README.md'.",
     ),
+  offset: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "1-based line number to start reading from. Default 1 (top of file). " +
+        "When a previous read returned `truncated: true`, pass its `nextOffset` " +
+        "here to continue through a large file.",
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(WINDOW_CAP)
+    .optional()
+    .describe(
+      `Max lines to return in this window (1-${WINDOW_CAP}, default ${WINDOW_CAP}). ` +
+        "Smaller windows keep context lean when you only need a known span.",
+    ),
 });
 
 export type ReadFileResult =
@@ -45,8 +67,16 @@ export type ReadFileResult =
       ok: true;
       path: string;
       content: string;
+      /** 1-based line number of the first returned line. */
+      startLine: number;
+      /** 1-based line number of the last returned line (startLine-1 if empty). */
+      endLine: number;
+      /** Number of lines in this window. */
       lineCount: number;
+      /** True when more lines follow `endLine`. */
       truncated: boolean;
+      /** When `truncated`, the `offset` to pass next to continue. */
+      nextOffset?: number;
     }
   | {
       ok: false;
@@ -62,9 +92,11 @@ export interface MakeReadFileToolOptions {
 export function makeReadFileTool(opts: MakeReadFileToolOptions) {
   return tool({
     description: [
-      "Read a file from the repo by relative path. Returns up to 1000 lines",
-      "of content with a truncation marker if the file is longer. Secret",
-      "files (.env, *.pem, id_rsa, *.key), files outside the repo root,",
+      "Read a file from the repo by relative path. Returns a window of up to",
+      "1000 lines starting at `offset` (default line 1). If more lines follow,",
+      "the result has `truncated: true` and a `nextOffset` — call again with",
+      "`offset: nextOffset` to page through a large file (logs, long modules).",
+      "Secret files (.env, *.pem, id_rsa, *.key), files outside the repo root,",
       "and gitignored files are rejected with a structured reason — use",
       "the reason to decide whether to back off or pick a different path.",
       "Use BEFORE asserting facts about code in a file you weren't scoped",
@@ -94,13 +126,22 @@ export function makeReadFileTool(opts: MakeReadFileToolOptions) {
         return { ok: false, reason: "gitignored", path: relForChecks };
       }
 
-      return readBounded(abs, relForChecks);
+      const offset = args.offset ?? 1;
+      const limit = args.limit ?? WINDOW_CAP;
+      return readBounded(abs, relForChecks, offset, limit);
     },
   });
 }
 
-async function readBounded(abs: string, relForReport: string): Promise<ReadFileResult> {
+async function readBounded(
+  abs: string,
+  relForReport: string,
+  offset: number,
+  limit: number,
+): Promise<ReadFileResult> {
+  const window = Math.min(limit, WINDOW_CAP);
   const lines: string[] = [];
+  let lineNo = 0; // 1-based number of the last line seen
   let truncated = false;
   let opened = false;
   try {
@@ -109,7 +150,10 @@ async function readBounded(abs: string, relForReport: string): Promise<ReadFileR
     try {
       for await (const line of rl) {
         opened = true;
-        if (lines.length >= LINE_CAP) {
+        lineNo += 1;
+        if (lineNo < offset) continue; // skip to the requested window
+        if (lines.length >= window) {
+          // We've filled the window and there's at least one more line.
           truncated = true;
           rl.close();
           stream.destroy();
@@ -137,19 +181,31 @@ async function readBounded(abs: string, relForReport: string): Promise<ReadFileR
   // Distinguish "not_found" from "empty file" — a stream that never emitted
   // a line + no error means an empty file (ok: true, content: "").
   if (!opened && lines.length === 0) {
-    // Re-stat would tell us empty vs missing; cheaper to attempt the read
-    // a second time only if needed. For v0 we assume the open succeeded
-    // (no throw from createReadStream above) and the file was empty.
-    return { ok: true, path: relForReport, content: "", lineCount: 0, truncated: false };
+    return {
+      ok: true,
+      path: relForReport,
+      content: "",
+      startLine: offset,
+      endLine: offset - 1,
+      lineCount: 0,
+      truncated: false,
+    };
   }
 
-  const content = truncated ? lines.join("\n") + "\n" + TRUNCATION_MARKER : lines.join("\n");
+  const startLine = offset;
+  const endLine = offset + lines.length - 1;
+  const nextOffset = endLine + 1;
+  const marker = `[lines ${startLine}–${endLine} of ${relForReport}; more follow — call readFile with offset: ${nextOffset} to continue]`;
+  const content = truncated ? lines.join("\n") + "\n" + marker : lines.join("\n");
   return {
     ok: true,
     path: relForReport,
     content,
+    startLine,
+    endLine,
     lineCount: lines.length,
     truncated,
+    ...(truncated ? { nextOffset } : {}),
   };
 }
 

@@ -59,12 +59,27 @@ const ANTHROPIC_HAIKU_4_5 = {
   fallbackPricePerMillionTokens: { input: 1, output: 5, cachedInput: 0.1 },
 } satisfies ResolvedLlmModel;
 
+// `strictJsonSchema: false` is load-bearing on the OpenAI path. OpenAI's
+// strict structured-output validator requires *every* property to appear in
+// the schema's `required` array; our shared `SourceSchema` (and the worker
+// finding schema that reuses it) carries optional fields (`url`, `id`,
+// `title`, `{path,line,snippet}`), so strict mode 400s with
+// `'required' is required to be supplied ... Missing 'url'`. That rejection
+// makes every worker `Output.object` call fail, the boss emits an empty
+// review, and the CLI false-cleans (see issue #29). Disabling strict keeps
+// the request schema as guidance while our own zod parse (`Output.object` /
+// the worker output schema) still validates the response — so correctness is
+// preserved and a non-conforming response surfaces as a loud worker error,
+// not a silent 400. This is the second variant of the landmine in
+// `project_warden_boss_structured_output`; the `z.url()` → `format:"uri"`
+// fix lives in `SourceSchema` itself. Anthropic ignores `openai` provider
+// options, so this is a no-op on that path.
 const OPENAI_GPT_5_5 = {
   provider: "openai",
   modelId: "gpt-5.5",
   label: "gpt-5.5 xhigh",
   fallbackPricePerMillionTokens: { input: 5, output: 30, cachedInput: 0.5 },
-  providerOptions: { openai: { reasoningEffort: "xhigh" } },
+  providerOptions: { openai: { reasoningEffort: "xhigh", strictJsonSchema: false } },
 } satisfies ResolvedLlmModel;
 
 const OPENAI_GPT_5_4_MINI = {
@@ -72,7 +87,7 @@ const OPENAI_GPT_5_4_MINI = {
   modelId: "gpt-5.4-mini",
   label: "gpt-5.4-mini xhigh",
   fallbackPricePerMillionTokens: { input: 0.75, output: 4.5, cachedInput: 0.075 },
-  providerOptions: { openai: { reasoningEffort: "xhigh" } },
+  providerOptions: { openai: { reasoningEffort: "xhigh", strictJsonSchema: false } },
 } satisfies ResolvedLlmModel;
 
 /**
