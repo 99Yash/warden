@@ -5,6 +5,7 @@ import {
   resolveDiff,
   review,
   security as securityReview,
+  shutdownObservability,
   type CommentSet,
   type FormatterEvent,
   type ReviewConfig,
@@ -257,11 +258,20 @@ program
     },
   );
 
-program.parseAsync(process.argv).catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(pc.red(`warden: ${message}\n`));
-  process.exit(1);
-});
+program
+  .parseAsync(process.argv)
+  .then(
+    // ADR-0048 §3 — force-flush the OTEL→Langfuse exporter before the
+    // short-lived CLI process exits, or in-flight spans are lost. No-op when
+    // telemetry never started (no Langfuse keys).
+    () => shutdownObservability(),
+    async (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(pc.red(`warden: ${message}\n`));
+      await shutdownObservability();
+      process.exit(1);
+    },
+  );
 
 async function runSecurity(opts: CommonOpts): Promise<void> {
   const repoRoot = findRepoRoot();

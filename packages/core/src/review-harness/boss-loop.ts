@@ -1,4 +1,5 @@
 import {
+  buildReviewTelemetry,
   createRetryable,
   error as anyError,
   getBossModel,
@@ -176,6 +177,13 @@ export interface BossLoopInput {
   /** M15 (ADR-0031) calibration knobs; defaults preserve M14 behavior. */
   config?: BossLoopConfig;
   emit?: FormatterListener;
+  /**
+   * ADR-0048 §2 review-run id. When set (and Langfuse keys present), the boss
+   * `streamText` loop emits OTEL spans tagged with the run-id — the
+   * trace-grouping key shared with every dispatched worker. Absent → telemetry
+   * off (no-op).
+   */
+  runId?: string;
 }
 
 export interface BossLoopOutput {
@@ -410,6 +418,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     ...(input.workerBudget !== undefined ? { workerBudget: input.workerBudget } : {}),
     route: input.route,
     ...(input.concurrency !== undefined ? { concurrency: input.concurrency } : {}),
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
   });
 
   const resolved = applyBossLoopDefaults(input.config);
@@ -530,6 +539,11 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
       ...(primaryInfo.providerOptions !== undefined
         ? { providerOptions: primaryInfo.providerOptions }
+        : {}),
+      // ADR-0048 §3 — auto-emit OTEL spans (LLM + every tool call) under the
+      // run-id's Langfuse trace. No-op unless Langfuse keys are present.
+      ...(input.runId !== undefined
+        ? { experimental_telemetry: buildReviewTelemetry({ runId: input.runId, role: "boss" }) }
         : {}),
     });
 

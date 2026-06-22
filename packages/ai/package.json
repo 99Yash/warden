@@ -13,9 +13,12 @@
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/openai": "catalog:",
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/sdk-node": "catalog:",
     "@warden/env": "workspace:*",
     "ai": "catalog:",
     "ai-retry": "catalog:",
+    "langfuse-vercel": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

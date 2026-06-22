@@ -1,5 +1,6 @@
 export * from "./provider.js";
 export * from "./models.js";
+export * from "./observability.js";
 export * from "./embeddings/index.js";
 export { transformSchemaForGemini, type GeminiSchemaPair } from "./schema-adapters/gemini.js";
 

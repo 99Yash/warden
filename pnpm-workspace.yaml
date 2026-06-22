@@ -6,6 +6,8 @@ catalog:
   "@ai-sdk/anthropic": ^3.0.0
   "@ai-sdk/google": ^3.0.0
   "@ai-sdk/openai": ^3.0.0
+  "@opentelemetry/api": ^1.9.0
+  "@opentelemetry/sdk-node": ^0.219.0
   ai-retry: ^1.7.3
   log-update: ^7.0.0
   "@types/better-sqlite3": ^7.6.13
@@ -17,6 +19,7 @@ catalog:
   drizzle-kit: ^0.31.2
   drizzle-orm: ^0.45.2
   jscpd: ^4.0.9
+  langfuse-vercel: ^3.38.20
   nanoid: 5.1.5
   ora: ^9.0.0
   picocolors: ^1.1.1

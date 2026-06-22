@@ -1,16 +1,23 @@
 # Self-hosted Langfuse (Warden dev observability)
 
-The local stack reserved for Warden's planned **observability surface**
-(ADR-0048): a live, dev-time view of every review run — boss + worker LLM calls,
-the tool calls each worker made (`readFile` / `grepRepo` / `lookupTypeDef`),
-per-call cost, and the **dropped-candidate events** that explain recall moves.
-Grouped by **run-id** so one review is one trace tree, and taggable by
-config/fixture/sample for cross-run eval diffing.
+The local stack backing Warden's **observability surface** (ADR-0048): a live,
+dev-time view of every review run — boss + worker LLM calls, the tool calls each
+worker made (`readFile` / `grepRepo` / `lookupTypeDef`), per-call cost, and the
+**dropped-candidate spans** that explain recall moves. Grouped by **run-id** so
+one review is one trace tree, and taggable by config/fixture/sample for
+cross-run eval diffing.
 
-Current Warden code does **not** emit spans to this stack yet. This directory
-ships only the self-hosted Langfuse compose stack and local key scaffolding; the
-OTEL bootstrap, AI SDK telemetry wiring, run-id threading, and review-run
-persistence are ADR-0048 follow-up implementation work.
+As of 2026-06-22 (issue #32) Warden **emits spans to this stack** when the
+`LANGFUSE_*` keys are set: the OTEL bootstrap + AI-SDK telemetry wiring, run-id
+threading (grouped by `langfuseTraceId`), dropped-candidate spans (standalone
+spans carrying the run-id — the exporter maps span *attributes*, not events,
+so events would be invisible), and `reviewRuns` persistence are live (see
+`packages/ai/src/observability.ts`). Absent the keys it is a total no-op. A
+non-loopback `LANGFUSE_HOST` is refused unless `WARDEN_LANGFUSE_ALLOW_REMOTE` is
+set, so reviewed source can't accidentally ship to Langfuse Cloud. Not yet
+wired: per-call cost on spans and per-worker cache/resume (ADR-0048 §5/§8). The
+end-to-end span→Langfuse mapping is best verified by running a real review
+against this stack.
 
 This is **not** ADR-0044 §7's persisted, prose-free, never-gating _review trace_
 (the trust spine) — that is specified to live in `.warden/cache.sqlite` when
@@ -20,10 +27,11 @@ implemented. This surface is a non-authoritative debugging tool. See
 ## Why self-hosted only
 
 Warden reviews other people's source. The diff and repo contents flow into
-prompts and — once telemetry wiring lands, with `WARDEN_LANGFUSE_CAPTURE_IO` on
-(the default) — into the spans here. So the stack binds to localhost and the
-secrets are local-only throwaways. **Do not** point Warden at Langfuse Cloud or
-reuse these secrets for any hosted deploy.
+prompts and — with `WARDEN_LANGFUSE_CAPTURE_IO` on (the default) — into the
+spans here. So the stack binds to localhost, the secrets are local-only
+throwaways, and `observability.ts` refuses a non-loopback `LANGFUSE_HOST`
+unless `WARDEN_LANGFUSE_ALLOW_REMOTE` is explicitly set. **Do not** point
+Warden at Langfuse Cloud or reuse these secrets for any hosted deploy.
 
 ## Usage
 
@@ -42,6 +50,6 @@ docker compose -f docker/langfuse/docker-compose.yml down -v   # stop + wipe dat
 ```
 
 Host ports are offset (web 3200, worker 3032, clickhouse 8124/9002, minio
-9092/9093) so this can coexist with a sibling repo's Langfuse stack. When
-ADR-0048 telemetry wiring lands, emission will be keys-gated: with no
-`LANGFUSE_*` keys set, Warden should not construct the exporter.
+9092/9093) so this can coexist with a sibling repo's Langfuse stack. Emission
+is keys-gated: with no `LANGFUSE_*` keys set, Warden never constructs the
+exporter (total no-op).

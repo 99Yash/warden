@@ -34,6 +34,12 @@ export interface MakeWorkerRouteOptions {
   /** Det-priors-derived ChangedFile list. Indexed by `path` for O(1) lookup. */
   changed: ChangedFile[];
   /**
+   * ADR-0048 §2 review-run id, captured in the route closure and forwarded to
+   * every `runWorker()` call so per-worker OTEL spans group under the run's
+   * Langfuse trace. Absent → telemetry stays off (no keys / non-harness caller).
+   */
+  runId?: string;
+  /**
    * Mutable shared collector for the `lookupTypeDef` once-per-review
    * "no node_modules/" degraded entry. The same array is passed for every
    * worker so the message is emitted at most once across the whole loop.
@@ -88,6 +94,7 @@ export function makeWorkerRoute(opts: MakeWorkerRouteOptions): WorkerRoute {
       changed: dispatched,
       packageSearchRoots,
       apiClaimDegraded: opts.apiClaimDegraded,
+      ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
       ...(preamble !== undefined ? { preamble } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       ...(opts.workerPromptVariant !== undefined

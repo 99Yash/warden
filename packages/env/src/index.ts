@@ -122,23 +122,32 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value !== undefined && /^(1|true)$/i.test(value.trim())),
-  // ADR-0048 reserved scaffolding: planned live observability surface
-  // (OTEL spans → a self-hosted Langfuse stack at `docker/langfuse/`).
-  // DISTINCT from ADR-0044 §7's persisted prose-free review trace. Current
-  // Warden code parses these env vars but does not emit spans yet; the future
-  // OTEL bootstrap + exporter must live only in `@warden/ai`, and `@warden/core`
-  // must never import Langfuse.
+  // ADR-0048 live observability surface: OTEL spans → a self-hosted Langfuse
+  // stack at `docker/langfuse/`. DISTINCT from ADR-0044 §7's persisted
+  // prose-free review trace. Keys present = telemetry on (the SDK bootstraps
+  // in `@warden/ai`'s `observability.ts`); absent = total no-op. The OTEL
+  // bootstrap + exporter live only in `@warden/ai`; `@warden/core` never
+  // imports Langfuse.
   LANGFUSE_PUBLIC_KEY: z.string().min(1).optional(),
   LANGFUSE_SECRET_KEY: z.string().min(1).optional(),
   // Self-hosted only — Warden reviews other people's source, which (with
   // capture on) lands in spans, so it must not leave the box. Defaults to
-  // the local Docker stack's web port. Pointing this at Langfuse Cloud is
-  // explicitly out of scope for v0 (ADR-0048 §6).
+  // the local Docker stack's web port. A non-loopback host is REFUSED at
+  // bootstrap (telemetry degrades to off) unless WARDEN_LANGFUSE_ALLOW_REMOTE
+  // is set — pointing at Langfuse Cloud is out of scope for v0 (ADR-0048 §6).
   LANGFUSE_HOST: z.url().optional().default("http://localhost:3200"),
-  // Future I/O capture toggle: full prompt/completion bodies (incl. boss
-  // reasoning prose) on spans once ADR-0048 telemetry wiring ships. Defaults
-  // ON when keys are present; flip off (`0` / `false`) for any future CI/cloud
-  // run. Boolean-ish; defaults true.
+  // Explicit escape hatch for the §6 loopback-only guard. Boolean-ish; default
+  // off. When off (the default), `observability.ts` disables telemetry rather
+  // than ship reviewed source to a non-local `LANGFUSE_HOST`. Set `1`/`true`
+  // only when you have deliberately chosen a remote self-hosted Langfuse and
+  // accept that captured I/O leaves the box.
+  WARDEN_LANGFUSE_ALLOW_REMOTE: z
+    .string()
+    .optional()
+    .transform((value) => value !== undefined && /^(1|true)$/i.test(value.trim())),
+  // I/O capture toggle: full prompt/completion bodies (incl. boss reasoning
+  // prose) on spans. Defaults ON when keys are present; flip off
+  // (`0` / `false`) for any CI/cloud run. Boolean-ish; defaults true.
   WARDEN_LANGFUSE_CAPTURE_IO: z
     .string()
     .optional()
