@@ -4,7 +4,9 @@ import {
   type LlmModelPrice,
   type ReviewCostTier,
 } from "@warden/ai";
+import { createId, db, reviewRuns } from "@warden/db";
 import { wardenEnv } from "@warden/env";
+import { createHash } from "node:crypto";
 import type { ContextSelector } from "../context/index.js";
 import type { FormatterListener } from "../llm/index.js";
 import { verifyCitations } from "../llm/verify-citations.js";
@@ -18,7 +20,7 @@ import type {
   TokenUsageBlock,
   TokenUsageByTier,
 } from "../schema.js";
-import { runBossLoop, type BossLoopConfig } from "./boss-loop.js";
+import { BOSS_LOOP_DEFAULTS, runBossLoop, type BossLoopConfig } from "./boss-loop.js";
 import { scopeCommentsToDiff } from "./comment-scope.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
 import { ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
@@ -125,6 +127,15 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     return makeEmptySet(startedAt, detPriors.degraded);
   }
 
+  // ADR-0048 §2 — durable review-run identity. Minted once, here (after the
+  // empty-diff / no-package early returns so a no-LLM run never claims a
+  // run-id), then threaded to the boss loop + worker route as the Langfuse
+  // trace-grouping key and persisted to `reviewRuns` at the end. `inputHash`
+  // is the content-addressed dedup/resume key (§8 / issue #33).
+  const runId = createId("run");
+  const modelLabels = getReviewModelLabelsByTier();
+  const inputHash = computeInputHash(input, modelLabels);
+
   // Phase 2 — boss loop. The scratchpad shares state between the dispatch
   // tool (which records per-worker output + token usage) and the post-loop
   // assembly (which drains degraded entries + worker findings if the boss
@@ -139,6 +150,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     repoRoot: input.repoRoot,
     changed: detPriors.changed,
     apiClaimDegraded,
+    runId,
     ...(input.config.bossLoop?.workerPromptVariant !== undefined
       ? { workerPromptVariant: input.config.bossLoop.workerPromptVariant }
       : {}),
@@ -163,6 +175,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     detPriors,
     scratchpad,
     route,
+    runId,
     ...(workerBudget !== undefined ? { workerBudget } : {}),
     concurrency,
     ...(input.config.bossLoop !== undefined ? { config: input.config.bossLoop } : {}),
@@ -224,11 +237,25 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   const tokenUsage = buildTokenUsageByTier(scratchpad.bossTokens(), scratchpad.workerOutputs());
   const costs = await computeCosts(tokenUsage);
 
+  // ADR-0048 §2 — persist the review-run row best-effort. Failure surfaces as
+  // an info degraded entry and never blocks the review (caveat in the ADR).
+  const recordDegraded = recordReviewRun({
+    runId,
+    inputHash,
+    mode: input.config.mode,
+    modelLabels,
+    tokenUsage,
+    costUsd: costs?.costUsd ?? 0,
+    commentsEmitted: scoped.comments.length,
+  });
+  aggregatedDegraded.push(...recordDegraded);
+
   return {
     comments: scoped.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
       degradedWorkers: aggregatedDegraded,
+      runId,
       ...(tokenUsage !== undefined ? { tokenUsage } : {}),
       ...(costs !== undefined
         ? {
@@ -239,6 +266,97 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
         : {}),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0048 §2 — review-run identity + persistence.
+// ---------------------------------------------------------------------------
+
+/**
+ * Content-addressed dedup/resume key over `(diff_hash, resolved config,
+ * sorted model-set)` — ADR-0048 §2. Two genuine re-runs of the same diff,
+ * config, and models collapse to the same `inputHash` (the §8 / issue-#33
+ * resume lookup), while each keeps a distinct random `id`.
+ *
+ * The "resolved config" folds in the boss-loop defaults so the variant
+ * composition (`bossPromptVariant` / `workerPromptVariant` /
+ * `reasonedFindingMode` / programmatic-dispatch shape) is part of the key —
+ * flipping a variant misses the cache, as ADR-0048 §8 requires. Hashing the
+ * actual prompt-file *contents* (vs. the variant selector) is deferred to the
+ * resume pass (#33).
+ */
+function computeInputHash(
+  input: ReviewHarnessInput,
+  modelLabels: Record<ReviewCostTier, string>,
+): string {
+  const resolvedConfig = {
+    mode: input.config.mode,
+    verbose: input.config.verbose ?? false,
+    bossLoop: { ...BOSS_LOOP_DEFAULTS, ...(input.config.bossLoop ?? {}) },
+  };
+  const modelSet = [modelLabels.opus, modelLabels.sonnet, modelLabels.haiku].sort();
+  const payload = JSON.stringify({
+    diff: createHash("sha256").update(input.diff).digest("hex"),
+    config: resolvedConfig,
+    models: modelSet,
+  });
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+function recordReviewRun(input: {
+  runId: string;
+  inputHash: string;
+  mode: "check" | "review";
+  modelLabels: Record<ReviewCostTier, string>;
+  tokenUsage: TokenUsageByTier | undefined;
+  costUsd: number;
+  commentsEmitted: number;
+}): DegradedEntry[] {
+  // Sum input/output tokens across all tiers for the run-level row. The
+  // per-tier breakdown lives on the live Langfuse spans (ADR-0048 §5); this
+  // row is the durable identity + a coarse cost/usage summary.
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const block of [
+    input.tokenUsage?.opus,
+    input.tokenUsage?.sonnet,
+    input.tokenUsage?.haiku,
+  ]) {
+    if (!block) continue;
+    inputTokens += block.inputTokens;
+    outputTokens += block.outputTokens;
+  }
+  try {
+    db()
+      .insert(reviewRuns)
+      .values({
+        id: input.runId,
+        inputHash: input.inputHash,
+        mode: input.mode,
+        modelBoss: input.modelLabels.opus,
+        modelWorkerStrong: input.modelLabels.sonnet,
+        modelWorkerCheap: input.modelLabels.haiku,
+        inputTokens,
+        outputTokens,
+        costUsd: input.costUsd,
+        commentsEmitted: input.commentsEmitted,
+      })
+      .run();
+    return [];
+  } catch (err) {
+    return [
+      {
+        kind: "info",
+        topic: "review-harness",
+        message: `review run record failed (${formatErr(err)})`,
+      },
+    ];
+  }
+}
+
+function formatErr(err: unknown): string {
+  if (err instanceof Error) return err.message.slice(0, 160);
+  return String(err).slice(0, 160);
 }
 
 // ---------------------------------------------------------------------------

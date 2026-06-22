@@ -187,6 +187,14 @@ export const CommentSetMetadataSchema = z.object({
   /** Workers that timed out or otherwise failed; surfaced per `vision.md` §11. */
   degradedWorkers: z.array(DegradedEntrySchema).default([]),
   /**
+   * ADR-0048 §2 — durable review-run identity (`createId("run")`). Minted once
+   * per `runReviewHarness()`, persisted to the `reviewRuns` table, and used as
+   * the Langfuse trace-grouping key. Surfaced here so the CLI can print "review
+   * run <id>" for cross-run diffing. Absent on the check-mode / empty-diff
+   * paths that never mint a run.
+   */
+  runId: z.string().optional(),
+  /**
    * Per-model-tier token usage (M14+). Absent on the check-mode path
    * (no LLM call) and on review runs where every LLM call's `usage`
    * field came back undefined. Render layer reads this to compute the

@@ -8,5 +8,6 @@ export * from "./schema/index-meta.js";
 export * from "./schema/jobs.js";
 export * from "./schema/llm-review-cache.js";
 export * from "./schema/merkle.js";
+export * from "./schema/review-runs.js";
 export * from "./schema/security-runs.js";
 export * from "./schema/type-def-cache.js";

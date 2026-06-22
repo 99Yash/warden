@@ -50,6 +50,13 @@
       "when": 1779164922824,
       "tag": "0006_parallel_owl",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1782105844766,
+      "tag": "0007_foamy_the_professor",
+      "breakpoints": true
     }
   ]
 }

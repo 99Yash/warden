@@ -176,6 +176,13 @@ export interface BossLoopInput {
   /** M15 (ADR-0031) calibration knobs; defaults preserve M14 behavior. */
   config?: BossLoopConfig;
   emit?: FormatterListener;
+  /**
+   * ADR-0048 §2 review-run id. When set (and Langfuse keys present), the boss
+   * `streamText` loop emits OTEL spans tagged with the run-id — the
+   * trace-grouping key shared with every dispatched worker. Absent → telemetry
+   * off (no-op).
+   */
+  runId?: string;
 }
 
 export interface BossLoopOutput {

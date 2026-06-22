@@ -117,6 +117,13 @@ export interface RunWorkerInput extends WorkerInvocation {
    * empty `sources[]` before the public `evidence` field exists.
    */
   reasonedFindingMode?: ReasonedFindingMode;
+  /**
+   * ADR-0048 §2 review-run id. When set (and Langfuse keys present), this
+   * worker's `streamText` call emits OTEL spans tagged with the run-id so the
+   * boss + all workers group into a single Langfuse trace. Absent → telemetry
+   * off (no-op).
+   */
+  runId?: string;
 }
 
 export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocationResult> {
