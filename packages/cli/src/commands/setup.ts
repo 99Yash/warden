@@ -91,13 +91,17 @@ function renderSetup(input: {
 
   process.stdout.write("\n" + pc.bold("Commands") + "\n");
   for (const command of input.readiness.commands) {
-    process.stdout.write(`  ${command.ready ? pc.green("✓") : pc.yellow("!")} ${formatCommand(command)}\n`);
+    process.stdout.write(
+      `  ${command.ready ? pc.green("✓") : pc.yellow("!")} ${formatCommand(command)}\n`,
+    );
   }
 
   const missing = missingEnvNames(input.readiness.commands);
   if (missing.length > 0) {
     process.stdout.write("\n" + pc.bold("Next") + "\n");
-    process.stdout.write(`  Add missing provider keys to ${input.runtime.globalEnvPath}, export them in your shell,\n`);
+    process.stdout.write(
+      `  Add missing provider keys to ${input.runtime.globalEnvPath}, export them in your shell,\n`,
+    );
     process.stdout.write(`  or run Warden through your secret manager, for example:\n`);
     process.stdout.write(`  ${pc.dim("infisical run -- warden review")}\n`);
   }
@@ -116,8 +120,10 @@ function providerIcon(provider: ProviderReadiness): string {
 }
 
 function formatProvider(provider: ProviderReadiness): string {
-  const required = provider.requiredFor.length > 0 ? ` required: ${provider.requiredFor.join(", ")}` : "";
-  const optional = provider.optionalFor.length > 0 ? ` optional: ${provider.optionalFor.join(", ")}` : "";
+  const required =
+    provider.requiredFor.length > 0 ? ` required: ${provider.requiredFor.join(", ")}` : "";
+  const optional =
+    provider.optionalFor.length > 0 ? ` optional: ${provider.optionalFor.join(", ")}` : "";
   const source = provider.source
     ? provider.source.source === "file"
       ? ` via ${provider.source.path}`
@@ -135,7 +141,9 @@ function formatCommand(command: CommandReadiness): string {
 function missingEnvNames(commands: CommandReadiness[]): string[] {
   return [
     ...new Set(
-      commands.flatMap((command) => command.missing).filter((name) => !name.startsWith("provider:")),
+      commands
+        .flatMap((command) => command.missing)
+        .filter((name) => !name.startsWith("provider:")),
     ),
   ];
 }

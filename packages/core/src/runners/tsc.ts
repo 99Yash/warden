@@ -13,9 +13,7 @@ export async function runTsc(repoRoot: string, tsconfigPaths: string[]): Promise
     return { findings: [], degraded: [] };
   }
 
-  const results = await Promise.all(
-    tsconfigPaths.map((tsconfig) => runOne(repoRoot, tsconfig)),
-  );
+  const results = await Promise.all(tsconfigPaths.map((tsconfig) => runOne(repoRoot, tsconfig)));
 
   const seen = new Set<string>();
   const findings: ToolFinding[] = [];
@@ -59,8 +57,7 @@ async function runOne(repoRoot: string, tsconfig: string): Promise<OneResult> {
   return { findings };
 }
 
-const DIAG_RE =
-  /^(.+?)\((\d+),(\d+)\): (error|warning|info|message) (TS\d+): (.+)$/;
+const DIAG_RE = /^(.+?)\((\d+),(\d+)\): (error|warning|info|message) (TS\d+): (.+)$/;
 
 function parseTscOutput(output: string, repoRoot: string): ToolFinding[] {
   const findings: ToolFinding[] = [];

@@ -178,7 +178,12 @@ function isTransient(err: unknown): boolean {
     if (/abort|timeout|network|fetch failed/i.test(err.message)) return true;
   }
   const code = errorCode(err);
-  if (code === "ETIMEDOUT" || code === "ECONNRESET" || code === "ECONNREFUSED" || code === "ENETUNREACH") {
+  if (
+    code === "ETIMEDOUT" ||
+    code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    code === "ENETUNREACH"
+  ) {
     return true;
   }
   return false;

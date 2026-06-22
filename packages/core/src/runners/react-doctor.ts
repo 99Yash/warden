@@ -47,7 +47,7 @@ const DiagnosticSchema = z
   .object({
     filePath: z.string(),
     rule: z.string(),
-    severity: z.enum(["error", "warning"]),
+    severity: z.string(),
     category: z.string(),
     message: z.string(),
     line: z.number(),
@@ -62,11 +62,7 @@ const JsonReportSchema = z
     // schemaVersion 1 (full/diff/staged) or 2 (baseline, `--scope changed`).
     schemaVersion: z.union([z.literal(1), z.literal(2)]),
     ok: z.boolean(),
-    error: z
-      .object({ message: z.string() })
-      .passthrough()
-      .nullable()
-      .optional(),
+    error: z.object({ message: z.string() }).passthrough().nullable().optional(),
     diagnostics: z.array(DiagnosticSchema),
   })
   .passthrough();
@@ -97,9 +93,7 @@ const EMPTY: RunReactDoctorResult = { findings: [], degraded: [] };
  * JSON, `report.ok === false`) collapses to one actionable degraded entry so
  * `check` never hard-fails on a missing react-doctor.
  */
-export async function runReactDoctor(
-  input: RunReactDoctorInput,
-): Promise<RunReactDoctorResult> {
+export async function runReactDoctor(input: RunReactDoctorInput): Promise<RunReactDoctorResult> {
   if (input.changedPaths.length === 0) return EMPTY;
 
   let tmpDir: string | undefined;
@@ -109,8 +103,8 @@ export async function runReactDoctor(
     await writeFile(changedFilesFile, input.changedPaths.join("\n"), "utf8");
 
     // `review` → `npx --yes` (fetch-on-demand). `check` → `npx --no-install`
-    // (cache-only, fail-fast, degrade if absent) — keeps the fast floor fast
-    // and offline-friendly, matching the `tsc --no-install` precedent (R2).
+    // (no install prompt; degrade if unavailable) — keeps the fast floor from
+    // blocking on an interactive prompt while still never hard-failing check.
     const npxInstallFlag = input.mode === "review" ? "--yes" : "--no-install";
     // `review` → `--scope changed` (only new issues vs base); `check` →
     // `--scope lines` (only changed lines). `--scope full` (whole-project
@@ -181,7 +175,7 @@ function unavailable(): DegradedEntry {
     kind: "actionable",
     topic: "react-doctor",
     message:
-      "react-doctor unavailable — security families skipped; cached after first online run",
+      "react-doctor unavailable — React lint + SAST checks skipped; cached after first online run",
   };
 }
 
@@ -199,9 +193,7 @@ async function mapDiagnostics(
   const findings: ToolFinding[] = [];
 
   for (const d of diagnostics) {
-    const absFile = isAbsolute(d.filePath)
-      ? d.filePath
-      : resolve(repoRoot, d.filePath);
+    const absFile = isAbsolute(d.filePath) ? d.filePath : resolve(repoRoot, d.filePath);
     const file = relative(repoRoot, absFile);
 
     const snippet = await readSnippet(lineCache, absFile, d.line);
@@ -213,18 +205,20 @@ async function mapDiagnostics(
       column: d.column,
       ...(d.endLine !== undefined ? { endLine: d.endLine } : {}),
       ...(d.endColumn !== undefined ? { endColumn: d.endColumn } : {}),
-      severity: d.severity,
+      severity: normalizeDiagnosticSeverity(d.severity),
       ruleId: d.rule,
       message: d.message,
       rdCategory: d.category,
-      ...(snippet !== undefined
-        ? { evidence: { path: file, line: d.line, snippet } }
-        : {}),
+      ...(snippet !== undefined ? { evidence: { path: file, line: d.line, snippet } } : {}),
     };
     findings.push(finding);
   }
 
   return findings;
+}
+
+function normalizeDiagnosticSeverity(severity: string): ToolFinding["severity"] {
+  return severity === "error" || severity === "warning" ? severity : "info";
 }
 
 /**

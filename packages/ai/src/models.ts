@@ -190,7 +190,9 @@ export function getWorkerCheapModelInfo(): ResolvedLlmModel {
   return resolveRoleModel("workerCheap");
 }
 
-export async function getReviewModelPricingByTier(): Promise<Record<ReviewCostTier, LlmModelPrice>> {
+export async function getReviewModelPricingByTier(): Promise<
+  Record<ReviewCostTier, LlmModelPrice>
+> {
   const [opus, sonnet, haiku] = await Promise.all([
     modelCatalogPrice(getBossModelInfo()),
     modelCatalogPrice(getWorkerStrongModelInfo()),

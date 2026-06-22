@@ -116,7 +116,9 @@ process.stdout.write(
 );
 for (const f of result.findings) {
   const summary = f.claim.length > 100 ? f.claim.slice(0, 100) + "…" : f.claim;
-  process.stdout.write(`    [${f.category}/${f.kind}/T${f.tier}] ${f.file}:${f.lineStart} — ${summary}\n`);
+  process.stdout.write(
+    `    [${f.category}/${f.kind}/T${f.tier}] ${f.file}:${f.lineStart} — ${summary}\n`,
+  );
 }
 
 // Worker did not crash.
@@ -132,10 +134,7 @@ assert(
 for (const f of result.findings) {
   assert(f.category === "leverage", `${f.id} category="leverage" (got ${f.category})`);
   assert(f.file === FIXTURE_PATH, `${f.id} file matches fixture path (got ${f.file})`);
-  assert(
-    f.lineStart >= 1 && f.lineStart <= 6,
-    `${f.id} lineStart ∈ [1,6] (got ${f.lineStart})`,
-  );
+  assert(f.lineStart >= 1 && f.lineStart <= 6, `${f.id} lineStart ∈ [1,6] (got ${f.lineStart})`);
   assert(
     f.kind === "assertion" || f.kind === "question",
     `${f.id} kind ∈ {assertion,question} (got ${f.kind})`,

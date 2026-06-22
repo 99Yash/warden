@@ -32,10 +32,7 @@ export interface DiffTreeNode {
   children: Map<string, DiffTreeNode>;
 }
 
-export function buildDiffTree(
-  changed: ChangedFile[],
-  maxDepth: number = MAX_DEPTH,
-): DiffTreeNode {
+export function buildDiffTree(changed: ChangedFile[], maxDepth: number = MAX_DEPTH): DiffTreeNode {
   const root: DiffTreeNode = {
     name: "",
     path: "",

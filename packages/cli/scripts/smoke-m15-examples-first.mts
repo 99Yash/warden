@@ -66,7 +66,10 @@ process.stdout.write(`\n[1] 'rules' variant matches boss-system.md\n`);
 
 const rules = loadBossSystemPrompt("rules");
 const rulesFile = readFileSync(RULES_PATH, "utf8");
-assert(rules === rulesFile, `'rules' prompt content matches boss-system.md file (${rules.length} chars)`);
+assert(
+  rules === rulesFile,
+  `'rules' prompt content matches boss-system.md file (${rules.length} chars)`,
+);
 
 // -----------------------------------------------------------------------
 // 2. examples variant

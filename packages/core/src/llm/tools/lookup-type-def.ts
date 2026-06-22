@@ -68,10 +68,7 @@ export function makeLookupTypeDefTool(opts: MakeLookupTypeDefToolOptions) {
     ].join(" "),
     inputSchema: InputSchema,
     execute: async (args: z.infer<typeof InputSchema>): Promise<LookupTypeDefResult> => {
-      const probeRoots = [
-        ...(opts.packageSearchRoots ?? []),
-        opts.repoRoot,
-      ];
+      const probeRoots = [...(opts.packageSearchRoots ?? []), opts.repoRoot];
       const anyHasNodeModules = probeRoots.some((root) =>
         fs.existsSync(path.join(root, "node_modules")),
       );

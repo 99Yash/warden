@@ -37,6 +37,9 @@ export function scopeCommentsToDiff(
 }
 
 function overlapsAddedLine(comment: Comment, addedLines: Set<number>): boolean {
+  // Boss prompt convention: `0:0` means a file-level finding. Keep those when
+  // the path is in the changed-file set; there is no line span to intersect.
+  if (comment.lineStart === 0 && comment.lineEnd === 0) return true;
   if (comment.lineStart <= 0 || comment.lineEnd <= 0) return false;
   const start = Math.min(comment.lineStart, comment.lineEnd);
   const end = Math.max(comment.lineStart, comment.lineEnd);

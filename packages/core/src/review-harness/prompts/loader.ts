@@ -39,8 +39,23 @@ export type BossPromptVariant = "rules" | "examples";
  * prompt-craft borrows actually fit (correctness + scalability fully;
  * consistency + security partially; committability + leverage not at all)
  * without requiring all 6 variant files to exist.
+ *
+ * `'diligent'` is a *compose* variant rather than a per-concern rewrite: for
+ * the four strong reasoning concerns, it prepends the investigation protocol
+ * in `diligent-preamble.md` to each worker's baseline prompt. Haiku
+ * pattern-match concerns (`committability`, `leverage`) stay on baseline so
+ * the preamble does not contradict their narrow charters.
  */
-export type WorkerPromptVariant = "baseline" | "sentry-borrow";
+export type WorkerPromptVariant = "baseline" | "sentry-borrow" | "diligent";
+
+const DILIGENT_PREAMBLE_PATH = resolve(WORKERS_DIR, "diligent-preamble.md");
+let diligentPreambleCache: string | undefined;
+
+function loadDiligentPreamble(): string {
+  if (diligentPreambleCache !== undefined) return diligentPreambleCache;
+  diligentPreambleCache = readFileSync(DILIGENT_PREAMBLE_PATH, "utf8");
+  return diligentPreambleCache;
+}
 
 const BOSS_PROMPT_PATHS: Record<BossPromptVariant, string> = {
   rules: resolve(DIR, "boss-system.md"),
@@ -51,10 +66,14 @@ const bossCache = new Map<BossPromptVariant, string>();
 // Cache key: `${variant}:${concern}` so baseline + variant for the same
 // concern coexist without invalidation across eval-suite config sweeps.
 const workerCache = new Map<string, string>();
+const DILIGENT_CONCERNS = new Set<Concern>([
+  "correctness",
+  "scalability",
+  "consistency",
+  "security",
+]);
 
-export function loadBossSystemPrompt(
-  variant: BossPromptVariant = "rules",
-): string {
+export function loadBossSystemPrompt(variant: BossPromptVariant = "rules"): string {
   const cached = bossCache.get(variant);
   if (cached !== undefined) return cached;
   const raw = readFileSync(BOSS_PROMPT_PATHS[variant], "utf8");
@@ -83,7 +102,16 @@ export function loadWorkerSystemPrompt(
     }
   }
 
-  const raw = readFileSync(resolve(WORKERS_DIR, `${concern}-system.md`), "utf8");
-  workerCache.set(key, raw);
-  return raw;
+  const baseline = readFileSync(resolve(WORKERS_DIR, `${concern}-system.md`), "utf8");
+
+  // `diligent` composes only onto the strong reasoning concerns. The Haiku
+  // pattern-match prompts intentionally stay sparse and tool-conservative.
+  if (variant === "diligent" && DILIGENT_CONCERNS.has(concern)) {
+    const composed = `${loadDiligentPreamble()}\n${baseline}`;
+    workerCache.set(key, composed);
+    return composed;
+  }
+
+  workerCache.set(key, baseline);
+  return baseline;
 }

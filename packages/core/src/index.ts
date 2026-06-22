@@ -3,10 +3,7 @@ import { applyConfidenceFloor, dropsToDegraded } from "./confidence.js";
 import type { ContextSelector } from "./context/index.js";
 import type { Lockfile } from "./ecosystem/index.js";
 import type { FormatterListener } from "./llm/index.js";
-import {
-  runReviewHarness,
-  type ReviewHarnessResult,
-} from "./review-harness/harness.js";
+import { runReviewHarness, type ReviewHarnessResult } from "./review-harness/harness.js";
 import { runDetPriors } from "./review-harness/det-priors.js";
 import { toComment } from "./runners/to-comment.js";
 import {
@@ -28,7 +25,12 @@ export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosyst
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 export { pruneDiff, type PruneResult } from "./diff/prune.js";
 export { buildDiffTree, MAX_DEPTH as DIFF_TREE_MAX_DEPTH, type DiffTreeNode } from "./diff/tree.js";
-export { resolveDiff, type DiffMode, type ResolveDiffOptions, type ResolvedDiff } from "./diff/source.js";
+export {
+  resolveDiff,
+  type DiffMode,
+  type ResolveDiffOptions,
+  type ResolvedDiff,
+} from "./diff/source.js";
 export type { FormatterEvent, FormatterListener } from "./llm/index.js";
 export {
   verifyCitations,
@@ -80,11 +82,7 @@ export {
 // commit. The `Runner` contract survives — it remains the right shape for
 // future Phase 1 det-priors additions, and the surviving deterministic
 // runners (`scalabilityRunner`, `leverageRunner`) still implement it.
-export {
-  type Runner,
-  type RunnerInput,
-  type RunnerOutput,
-} from "./orchestration/index.js";
+export { type Runner, type RunnerInput, type RunnerOutput } from "./orchestration/index.js";
 export { ensureGitignore } from "./init/ensure-gitignore.js";
 export {
   estimateInit,
@@ -258,7 +256,11 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
     ...(input.emit !== undefined ? { emit: input.emit } : {}),
     ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
-  const ruled = applyHardRules(harness.comments, input.config);
+  const ruled = applyHardRules(harness.comments, {
+    mode: "review",
+    ...(input.config.verbose !== undefined ? { verbose: input.config.verbose } : {}),
+    harness: "m14-review",
+  });
   const security =
     input.config.deep === true
       ? await runSecurityHarness({
@@ -279,9 +281,7 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
         })
       : undefined;
   const mergedComments =
-    ruledSecurity !== undefined
-      ? [...ruled.comments, ...ruledSecurity.comments]
-      : ruled.comments;
+    ruledSecurity !== undefined ? [...ruled.comments, ...ruledSecurity.comments] : ruled.comments;
   return {
     comments: mergedComments,
     metadata: {
@@ -296,9 +296,7 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
       ...(harness.metadata.tokenUsage !== undefined
         ? { tokenUsage: harness.metadata.tokenUsage }
         : {}),
-      ...(harness.metadata.costUsd !== undefined
-        ? { costUsd: harness.metadata.costUsd }
-        : {}),
+      ...(harness.metadata.costUsd !== undefined ? { costUsd: harness.metadata.costUsd } : {}),
       ...(harness.metadata.costByTier !== undefined
         ? { costByTier: harness.metadata.costByTier }
         : {}),
@@ -309,9 +307,11 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
   };
 }
 
-export async function security(input: Omit<ReviewInput, "config"> & {
-  config?: Partial<SecurityHarnessConfig>;
-}): Promise<CommentSet> {
+export async function security(
+  input: Omit<ReviewInput, "config"> & {
+    config?: Partial<SecurityHarnessConfig>;
+  },
+): Promise<CommentSet> {
   const harness: SecurityHarnessOutput = await runSecurityHarness({
     diff: input.diff,
     repoRoot: input.repoRoot,
@@ -389,11 +389,7 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
     comments: ruled.comments,
     metadata: {
       durationMs: Date.now() - startedAt,
-      degradedWorkers: [
-        ...(input.extraDegraded ?? []),
-        ...detPriors.degraded,
-        ...ruled.degraded,
-      ],
+      degradedWorkers: [...(input.extraDegraded ?? []), ...detPriors.degraded, ...ruled.degraded],
     },
   };
 }
@@ -426,6 +422,15 @@ type HardRulesConfig = Pick<ReviewConfig, "mode" | "verbose"> & {
 };
 
 function applyHardRules(comments: Comment[], config: HardRulesConfig): HardRulesOutput {
+  // Off-hunk anchoring is enforced upstream by `scopeCommentsToDiff()` in the
+  // review harness (`review-harness/harness.ts`), which drops any boss comment
+  // whose `[lineStart, lineEnd]` overlaps zero added lines in the *pruned*
+  // `ChangedFile[]`. No added-line rule is duplicated here: a second pass over
+  // the raw diff could only ever keep a superset of what the harness already
+  // kept (pruning is a subset filter), so it would be a no-op for the
+  // m14-review path and would silently re-scope check / m18-security comments
+  // (deterministic / vuln summaries anchored at `package.json:1`) if it ran.
+
   // M13 (ADR-0028 §5): confidence-floor filter runs first. Per-category
   // numeric floor; Tier-1 findings bypass unconditionally (critical-finding
   // short-circuit per `project_warden_security_depth_tiers.md`). Drops
@@ -486,10 +491,7 @@ function collapseVulnComments(comments: Comment[], lockfile: Lockfile | undefine
   // suppresses unless --verbose. Pre-fix this was a fixed tier-3 — silently
   // swallowing tier-1 advisories on non-manifest-touching diffs, which
   // contradicted ADR-0021 #8's "replaced by a single summary line" intent.
-  const summaryTier = comments.reduce<Tier>(
-    (worst, c) => (c.tier < worst ? c.tier : worst),
-    3,
-  );
+  const summaryTier = comments.reduce<Tier>((worst, c) => (c.tier < worst ? c.tier : worst), 3);
   const summary: Comment = {
     id: stableCommentId(`vuln-summary:${file}:${total}`),
     file,

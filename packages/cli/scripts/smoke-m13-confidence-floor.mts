@@ -24,9 +24,7 @@ const TMP_DB = resolve(tmpdir(), `warden-m13-confidence-${process.pid}.sqlite`);
 process.env["WARDEN_CACHE_PATH"] = TMP_DB;
 if (existsSync(TMP_DB)) unlinkSync(TMP_DB);
 
-const { applyConfidenceFloor, dropsToDegraded } = await import(
-  "@warden/core/confidence"
-);
+const { applyConfidenceFloor, dropsToDegraded } = await import("@warden/core/confidence");
 import type { Comment } from "@warden/core";
 
 let failed = 0;

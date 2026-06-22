@@ -124,9 +124,7 @@ export interface VerifyCitationsOutput {
   degraded: DegradedEntry[];
 }
 
-export async function verifyCitations(
-  input: VerifyCitationsInput,
-): Promise<VerifyCitationsOutput>;
+export async function verifyCitations(input: VerifyCitationsInput): Promise<VerifyCitationsOutput>;
 ```
 
 Algorithm (per ADR-0021 §3, refined for the extended schema):
@@ -138,6 +136,7 @@ Algorithm (per ADR-0021 §3, refined for the extended schema):
 3. Emit one `degraded: { kind: "info", topic: "llm", message: "dropped N citations without verifiable snippet" }` entry when N > 0; one `degraded: { kind: "info", topic: "llm", message: "dropped M comments after citation pruning" }` entry when M > 0. Separate lines so the forensic count is unambiguous.
 
 Failure modes:
+
 - File-read error (file moved between detector emit and verifier read) → drop the source; emit `degraded: { kind: "info", topic: "llm", message: "..." }`.
 - Symbolic-link / out-of-repo path → defense-in-depth via `resolveWithinRoot()` lifted from `committability.ts` (or extracted to `packages/core/src/_shared/path.ts` if the duplication bothers).
 
@@ -179,6 +178,7 @@ Out of scope: `node_modules/**/*.md`, `.github/**/*.md`, sub-package READMEs (`p
 #### Trigger condition
 
 The runner fires whenever `changed.length > 0` AND any of:
+
 - A doc file is in `changed` (doc edit — verify against current code).
 - A code file is in `changed` and any doc claim references a symbol/path/env-var the diff touches (overlap-only verification — bounded `O(claims × diff-size)`).
 
@@ -191,7 +191,8 @@ No diff → no run (per `index.ts`'s existing `changed && changed.length > 0` gu
 Extract via regex over the doc set:
 
 ```ts
-const ENV_CLAIM_RE = /\b(WARDEN_[A-Z_]+|ANTHROPIC_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|VOYAGE_API_KEY|NODE_ENV)\b[^.\n]{0,80}?\b(required|optional|defaults?\s+to\s+`?([A-Za-z0-9_./-]+)`?|default\s+`?([A-Za-z0-9_./-]+)`?)\b/gi;
+const ENV_CLAIM_RE =
+  /\b(WARDEN_[A-Z_]+|ANTHROPIC_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|VOYAGE_API_KEY|NODE_ENV)\b[^.\n]{0,80}?\b(required|optional|defaults?\s+to\s+`?([A-Za-z0-9_./-]+)`?|default\s+`?([A-Za-z0-9_./-]+)`?)\b/gi;
 ```
 
 Pair each match with `(envVar, predicate: "required"|"optional"|"default-VALUE")`. Cap the line gap to 80 chars to keep adjacency tight; multiline claims are out of scope (false-positive ceiling).
@@ -236,6 +237,7 @@ const PATH_CLAIM_RE = /\.warden\/[\w./-]+/g;
 ```
 
 Verify by grepping `packages/*/src/**/*.{ts,mts,tsx}` for the same literal. Use `node:fs` + a bounded directory walk (mirrors the doc set walker — depth ≤ 6 under each package's `src/`). Mismatches:
+
 - Doc references `.warden/<path>` that doesn't appear in any source file → `{ruleId: "stale-path"}`.
 
 Why not extend to general `<package>/<path>` strings: too noisy. `.warden/` is the cache anchor and the only path-constant family that's load-bearing in user-facing docs.
@@ -373,14 +375,14 @@ Wire both into a new `pnpm smoke:m10` script in `packages/cli/package.json`. CI 
 
 ## Slice ordering
 
-| Slice | Scope | Smoke gate |
-|---|---|---|
-| **0** | Read this plan + ADR-0021 §1c/§3. | Plan reviewed. |
-| **1** | Schema extension (§1). Migrate `committability.ts:toQuestion()` to emit the triple; remove the internal `verifyCitation()` flow. `pnpm check-types` passes. | No behavioral change yet (verifier doesn't exist) — committability still emits questions, but they now carry triples on `sources[]` and the internal verifier is gone. Manual: run `warden review` on a small diff; committability questions still render correctly. |
-| **2** | Global verifier (§2). Wire into `runReview()` between `synthOutput` and `applyHardRules()`. `smoke-m10-verifier.mts`. | Verifier drops a deliberately-malformed citation; emits the forensic line; the rest of the review is unaffected. |
-| **3** | Consistency detector (§3, §4). `smoke-m10-consistency.mts`. | Runs on fixture with three planted mismatches; surfaces three findings; each carries the expected `ruleId`. |
-| **4** | Dogfood pass: run `warden review` against warden's own working tree (with no diff changes, just a content audit) — does the detector surface any genuine doc-vs-code drift? If yes: document each one in the close-out report and decide which to fix in this branch vs. punch-list. | At least one genuine drift caught (or documented absence: "the docs are already consistent with the schema/CLI/paths"). |
-| **5** | Close-out: ADR-0021 status table updated; `CLAUDE.md` M7 bullet → `[x]`; new `[x]` M10 bullet added above the M10+ deferred-items list. Commit message references closing M7. | M10 ships. |
+| Slice | Scope                                                                                                                                                                                                                                                                                | Smoke gate                                                                                                                                                                                                                                                           |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** | Read this plan + ADR-0021 §1c/§3.                                                                                                                                                                                                                                                    | Plan reviewed.                                                                                                                                                                                                                                                       |
+| **1** | Schema extension (§1). Migrate `committability.ts:toQuestion()` to emit the triple; remove the internal `verifyCitation()` flow. `pnpm check-types` passes.                                                                                                                          | No behavioral change yet (verifier doesn't exist) — committability still emits questions, but they now carry triples on `sources[]` and the internal verifier is gone. Manual: run `warden review` on a small diff; committability questions still render correctly. |
+| **2** | Global verifier (§2). Wire into `runReview()` between `synthOutput` and `applyHardRules()`. `smoke-m10-verifier.mts`.                                                                                                                                                                | Verifier drops a deliberately-malformed citation; emits the forensic line; the rest of the review is unaffected.                                                                                                                                                     |
+| **3** | Consistency detector (§3, §4). `smoke-m10-consistency.mts`.                                                                                                                                                                                                                          | Runs on fixture with three planted mismatches; surfaces three findings; each carries the expected `ruleId`.                                                                                                                                                          |
+| **4** | Dogfood pass: run `warden review` against warden's own working tree (with no diff changes, just a content audit) — does the detector surface any genuine doc-vs-code drift? If yes: document each one in the close-out report and decide which to fix in this branch vs. punch-list. | At least one genuine drift caught (or documented absence: "the docs are already consistent with the schema/CLI/paths").                                                                                                                                              |
+| **5** | Close-out: ADR-0021 status table updated; `CLAUDE.md` M7 bullet → `[x]`; new `[x]` M10 bullet added above the M10+ deferred-items list. Commit message references closing M7.                                                                                                        | M10 ships.                                                                                                                                                                                                                                                           |
 
 ## Acceptance criteria for M10
 
@@ -389,7 +391,7 @@ Wire both into a new `pnpm smoke:m10` script in `packages/cli/package.json`. CI 
 3. `pnpm smoke:m10` passes both smoke scripts.
 4. `warden review` on the dogfood pass (Slice 4) produces no unhandled crashes and surfaces either genuine drift or a clean "no findings" result; either outcome is acceptable.
 5. ADR-0021 status table (decisions.md lines 759–772): #1 row → "Done" (all three detectors shipped); #3 row → "Done — global verifier ships in `packages/core/src/llm/verify-citations.ts`"; #12 row → "Done — `smoke-m10-{consistency,verifier}.mts` shipped".
-6. `CLAUDE.md` M7 bullet: `[~]` → `[x]`. New `[x]` M10 line added: `M10 — close M7: consistency detector + global citation verifier per ADR-0021 §1c + §3. Schema extension to carry `{path, line, snippet}` on sources; committability migrated to emit through `sources[]` (internal verifier removed). Plan: m10-plan.md.`
+6. `CLAUDE.md` M7 bullet: `[~]` → `[x]`. New `[x]` M10 line added: `M10 — close M7: consistency detector + global citation verifier per ADR-0021 §1c + §3. Schema extension to carry `{path, line, snippet}`on sources; committability migrated to emit through`sources[]` (internal verifier removed). Plan: m10-plan.md.`
 7. The committability runner's `verifyCitation` and `normalizeWhitespace` private functions are removed (or, if extracted to a shared util, called from a single site).
 8. `Source` zod schema parse on the existing committability fixtures continues to pass (the new fields are optional — no regression on producers that don't populate them).
 
@@ -412,19 +414,19 @@ If you reach for any of the above, stop and re-read ADR-0021 §1c/§3 — the de
 
 1. **The schema extension is the load-bearing primitive.** Without `{path, line, snippet}` on `Source`, the verifier has nothing to verify — committability's snippet currently lives in `Comment.explanation`, which the LLM authored, not the runner. Migrating committability first means M10's "verifier post-pass" actually has data to chew on; reversing the order would leave the verifier a no-op until a producer fills it.
 
-2. **Committability's internal verifier becomes redundant, not wrong.** The internal `verifyCitation()` runs *before* `toQuestion()` produces the Comment; the global verifier runs *after* `synthesize()`. Same substring algorithm; same drop semantics. Keeping both means double-verification at runtime cost; removing the internal one centralizes the discipline at the only post-pass that can serve future producers uniformly. The lane invariant (citation discipline applies to all citation-bearing comments) is preserved either way; the choice is "where in the pipeline."
+2. **Committability's internal verifier becomes redundant, not wrong.** The internal `verifyCitation()` runs _before_ `toQuestion()` produces the Comment; the global verifier runs _after_ `synthesize()`. Same substring algorithm; same drop semantics. Keeping both means double-verification at runtime cost; removing the internal one centralizes the discipline at the only post-pass that can serve future producers uniformly. The lane invariant (citation discipline applies to all citation-bearing comments) is preserved either way; the choice is "where in the pipeline."
 
-3. **The consistency detector is the *only* M7 detector that *parses sibling-package source as text*.** Scalability + deadcode read diff-touched code; the LLM formatter reads cited snippets. Consistency reads `env/src/index.ts` and `cli/src/index.ts` to extract structured surfaces (zod schema properties, commander verbs+flags) — those files aren't in the diff, so the standard `ChangedFile`-based `parseChangedSourceFile` helper doesn't apply. A small `parseTsFile(absPath, "consistency")` utility lifted from the M5 parser infrastructure handles it; same `TsCompilerParser` lineage, different input source.
+3. **The consistency detector is the _only_ M7 detector that _parses sibling-package source as text_.** Scalability + deadcode read diff-touched code; the LLM formatter reads cited snippets. Consistency reads `env/src/index.ts` and `cli/src/index.ts` to extract structured surfaces (zod schema properties, commander verbs+flags) — those files aren't in the diff, so the standard `ChangedFile`-based `parseChangedSourceFile` helper doesn't apply. A small `parseTsFile(absPath, "consistency")` utility lifted from the M5 parser infrastructure handles it; same `TsCompilerParser` lineage, different input source.
 
 4. **The all-or-nothing source-triple invariant is structural, not validated upstream.** `SourceSchema` declares all three optional; the producer is trusted to populate them coherently. The verifier enforces by skipping mixed sources entirely (any of the three undefined → not a snippet-citation, not subject to verification). The alternative — zod refinement that fails parse on mixed — would force the orchestration layer to drop comments with malformed sources before they hit the verifier; cleaner separation but heavier engineering for a contract today's only consumer (committability) controls end-to-end. Re-evaluate if a second snippet-source producer lands and inconsistency becomes a real risk.
 
-5. **The consistency detector's three claim types intentionally exclude "schema names env var not in any doc."** Symmetric on its face (parity between doc and code), but the false-positive rate is unbounded: not every internal env var deserves a doc mention (some are intentionally undocumented). v0 catches *contradiction*, not *omission*. Adding omission detection is a future-milestone tuning concern; the deterministic shape is the same, only the directionality differs.
+5. **The consistency detector's three claim types intentionally exclude "schema names env var not in any doc."** Symmetric on its face (parity between doc and code), but the false-positive rate is unbounded: not every internal env var deserves a doc mention (some are intentionally undocumented). v0 catches _contradiction_, not _omission_. Adding omission detection is a future-milestone tuning concern; the deterministic shape is the same, only the directionality differs.
 
 6. **Re-parsing `env/src/index.ts` instead of importing it is a "no side effects at detector time" principle.** Import would invoke zod's parser on `process.env`, which crashes if `ANTHROPIC_API_KEY` is unset. A detector running against an arbitrary fixture must not depend on the host env state; static source parse is the only side-effect-free option. Generalizes to: detectors that introspect first-party packages should parse, not import.
 
-7. **The verifier's drop semantics differ between "source had no snippet" (silent passthrough) and "snippet didn't match" (dropped + counted).** Empty `sources[]` and snippet-less sources are *valid* under the citation discipline (asking is not claiming; tool grounding doesn't quote). Only sources that *claim a verifiable echo* and fail to deliver get dropped. The forensic count surfaces only the failures, never the legitimate snippet-less sources — otherwise every TSC/ESLint finding would inflate the count uselessly.
+7. **The verifier's drop semantics differ between "source had no snippet" (silent passthrough) and "snippet didn't match" (dropped + counted).** Empty `sources[]` and snippet-less sources are _valid_ under the citation discipline (asking is not claiming; tool grounding doesn't quote). Only sources that _claim a verifiable echo_ and fail to deliver get dropped. The forensic count surfaces only the failures, never the legitimate snippet-less sources — otherwise every TSC/ESLint finding would inflate the count uselessly.
 
-8. **The post-pass position (after `synthesize()`, before `applyHardRules()`) is deliberate.** The synthesizer is where LLM-authored citations enter; placing the verifier after it catches both deterministic-runner citations (e.g., a future consistency producer with snippet triples) and LLM-authored ones in a single pass. Placing it *inside* the synthesizer would couple verification to LLM-pass-only — wrong, because the check-mode `deterministicSynthesize()` should also enforce citation discipline if a deterministic detector ever emits snippets. Placing it *after* `applyHardRules()` would mean priority-sorted comments get pruned post-sort, breaking the "what does the user see" → "what was the verified set" parity.
+8. **The post-pass position (after `synthesize()`, before `applyHardRules()`) is deliberate.** The synthesizer is where LLM-authored citations enter; placing the verifier after it catches both deterministic-runner citations (e.g., a future consistency producer with snippet triples) and LLM-authored ones in a single pass. Placing it _inside_ the synthesizer would couple verification to LLM-pass-only — wrong, because the check-mode `deterministicSynthesize()` should also enforce citation discipline if a deterministic detector ever emits snippets. Placing it _after_ `applyHardRules()` would mean priority-sorted comments get pruned post-sort, breaking the "what does the user see" → "what was the verified set" parity.
 
 ## When you're done
 
@@ -442,11 +444,11 @@ The next milestone is genuinely M11 — picking one item from the M10+ deferred-
 
 Running the detector against the warden repo (with a synthetic "all three root docs touched" diff so the doc-edit trigger fires) surfaced 5 genuine findings:
 
-| ruleId | doc:line | finding |
-|---|---|---|
-| `env-required-mismatch` | `README.md:54` | README claims `VOYAGE_API_KEY` is "required for `warden init`"; schema marks it `.optional()`. Technically the README's claim is context-conditional ("for init") but the regex matches the bare predicate word — both interpretations are defensible since the schema doesn't encode the context, so a tightening of the docs ("required when running `warden init`") would be the right read. |
-| `env-not-in-schema` | `README.md:56`, `CLAUDE.md:103`, `AGENTS.md:103` | All three docs document `WARDEN_THINKING_BUDGET` (an Anthropic extended-thinking budget knob). The env schema does **not** define it. Either the var was removed from the schema (drift) or it was never added (intent was to read `process.env` directly via `wardenEnv()`-bypass somewhere in `@warden/ai`). Worth resolving in the M10+ doc-cleanup punch list, not in this branch — M10's job is to *detect*, not fix. |
-| `stale-path` | `README.md:108` | README mentions `.warden/cache.sqlite.bak` (likely a documented backup convention) but no source file under `packages/*/src` uses that literal. Same disposition: documented but unimplemented; either remove the doc reference or wire the convention. |
+| ruleId                  | doc:line                                         | finding                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env-required-mismatch` | `README.md:54`                                   | README claims `VOYAGE_API_KEY` is "required for `warden init`"; schema marks it `.optional()`. Technically the README's claim is context-conditional ("for init") but the regex matches the bare predicate word — both interpretations are defensible since the schema doesn't encode the context, so a tightening of the docs ("required when running `warden init`") would be the right read.                            |
+| `env-not-in-schema`     | `README.md:56`, `CLAUDE.md:103`, `AGENTS.md:103` | All three docs document `WARDEN_THINKING_BUDGET` (an Anthropic extended-thinking budget knob). The env schema does **not** define it. Either the var was removed from the schema (drift) or it was never added (intent was to read `process.env` directly via `wardenEnv()`-bypass somewhere in `@warden/ai`). Worth resolving in the M10+ doc-cleanup punch list, not in this branch — M10's job is to _detect_, not fix. |
+| `stale-path`            | `README.md:108`                                  | README mentions `.warden/cache.sqlite.bak` (likely a documented backup convention) but no source file under `packages/*/src` uses that literal. Same disposition: documented but unimplemented; either remove the doc reference or wire the convention.                                                                                                                                                                    |
 
 **Decision: none fixed in this branch.** The dogfood pass exercises the detector against a real codebase; fixing the surfaced drift is a separate doc-quality commit. The findings are the point — the detector earned rent.
 

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
+import { assertNever } from "../assert-never.js";
 import type { Runner, RunnerInput, RunnerOutput } from "../orchestration/runner.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, parseChangedSourceFile } from "./_shared.js";
@@ -25,13 +26,7 @@ import type { ToolFinding } from "./types.js";
  */
 
 const QUERY_TERMINAL_NAMES: ReadonlySet<string> = new Set(["all", "findMany", "find"]);
-const NARROWING_NAMES: ReadonlySet<string> = new Set([
-  "filter",
-  "find",
-  "length",
-  "some",
-  "every",
-]);
+const NARROWING_NAMES: ReadonlySet<string> = new Set(["filter", "find", "length", "some", "every"]);
 const BUILDER_HINT_NAMES: ReadonlySet<string> = new Set([
   "select",
   "from",
@@ -69,6 +64,7 @@ export async function runScalability(
       degraded.push(result.entry);
       continue;
     }
+    if (result.kind !== "ok") assertNever(result, "ParseChangedFileResult");
     const { sf, addedLines } = result.parsed;
     findLoadThenNarrow(sf, cf.path, addedLines, findings);
     findSequentialAwait(sf, cf.path, addedLines, findings);
@@ -191,8 +187,12 @@ function findSequentialAwait(
     if (ts.isBlock(node)) {
       const cluster = collectAwaitCluster(node, sf);
       if (cluster.statements.length >= 2) {
-        const startLine = sf.getLineAndCharacterOfPosition(cluster.statements[0]!.getStart(sf)).line + 1;
-        const endLine = sf.getLineAndCharacterOfPosition(cluster.statements[cluster.statements.length - 1]!.getEnd()).line + 1;
+        const startLine =
+          sf.getLineAndCharacterOfPosition(cluster.statements[0]!.getStart(sf)).line + 1;
+        const endLine =
+          sf.getLineAndCharacterOfPosition(
+            cluster.statements[cluster.statements.length - 1]!.getEnd(),
+          ).line + 1;
         if (anyAddedInRange(startLine, endLine, addedLines)) {
           findings.push({
             source: "scalability",
@@ -299,4 +299,3 @@ function touchesDiff(
   const endLine = sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
   return anyAddedInRange(startLine, endLine, addedLines);
 }
-

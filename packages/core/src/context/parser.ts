@@ -78,7 +78,10 @@ export class TsCompilerParser implements SourceParser {
         });
         continue;
       }
-      if (ts.isImportEqualsDeclaration(stmt) && ts.isExternalModuleReference(stmt.moduleReference)) {
+      if (
+        ts.isImportEqualsDeclaration(stmt) &&
+        ts.isExternalModuleReference(stmt.moduleReference)
+      ) {
         const expr = stmt.moduleReference.expression;
         if (expr && ts.isStringLiteral(expr)) {
           const moduleName = expr.text;
@@ -93,7 +96,11 @@ export class TsCompilerParser implements SourceParser {
         }
         continue;
       }
-      if (ts.isExportDeclaration(stmt) && stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier)) {
+      if (
+        ts.isExportDeclaration(stmt) &&
+        stmt.moduleSpecifier &&
+        ts.isStringLiteral(stmt.moduleSpecifier)
+      ) {
         // `export { x } from "./m"` and `export * from "./m"` — these import too.
         const moduleName = stmt.moduleSpecifier.text;
         const isTypeOnly = stmt.isTypeOnly;
@@ -137,7 +144,11 @@ export class TsCompilerParser implements SourceParser {
         refs.push({ symbol: "default", startLine: signatureLine, endLine: signatureLine });
         continue;
       }
-      if (ts.isExportDeclaration(stmt) && stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+      if (
+        ts.isExportDeclaration(stmt) &&
+        stmt.exportClause &&
+        ts.isNamedExports(stmt.exportClause)
+      ) {
         const signatureLine = sf.getLineAndCharacterOfPosition(stmt.getStart(sf)).line + 1;
         for (const spec of stmt.exportClause.elements) {
           refs.push({ symbol: spec.name.text, startLine: signatureLine, endLine: signatureLine });

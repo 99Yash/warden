@@ -81,10 +81,7 @@ assert(
   result.metadata.durationMs < 5_000,
   `harness duration < 5000ms (got ${result.metadata.durationMs})`,
 );
-assert(
-  wallMs < 5_000,
-  `wall-clock < 5000ms (got ${wallMs})`,
-);
+assert(wallMs < 5_000, `wall-clock < 5000ms (got ${wallMs})`);
 
 // ---------------------------------------------------------------------------
 // 2. check-mode empty-diff also short-circuits cleanly.

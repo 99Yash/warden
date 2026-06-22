@@ -32,7 +32,7 @@ Land ADR-0028's design in a single coherent slice:
 - **Sub-agent half: new runner at `packages/core/src/runners/security.ts`.** Cheap-tier Haiku via `getWorkerCheapModel()` with own system prompt, `lookupTypeDef` tool access, `stopWhen: stepCountIs(8)` budget, lane discipline (drop findings whose `path` is outside the diff), per-finding `tool` source citation discipline. Emits `kind: "question"` Comments carrying source-line + sink-line `tool` sources, each substring-verified by the existing M10 dispatch. Gated to `review` mode only via `dispatch()` registration.
 - **Sub-agent system prompt: `packages/core/src/llm/prompts/security-system.md`.** ~120 lines, structural mirror of DeepSec's `core.ts` with Warden citation-discipline adaptations. Sections: role framing, severity classification (mapped to Tier 1/2/3), 10-slug vocabulary, false-positive guidance, auth-bypass subtleties, citation discipline, worked examples (the 5 canonical examples — command injection, SQL injection, hardcoded secrets, weak crypto, missing auth), out-of-scope file note.
 - **Prompt loader extension** — add `loadSecuritySystemPrompt()` to `packages/core/src/llm/prompt-loader.ts` mirroring `loadLeverageSystemPrompt()`.
-- **Confidence-threshold subsystem (new).** New module `packages/core/src/confidence.ts` exporting `CATEGORY_CONFIDENCE_FLOOR: Record<Category, number>` (v0: `{ security: 0.8 }`, others implicit 0) and `applyConfidenceFloor(comments, env): { kept: Comment[]; dropped: number }`. Read by `applyHardRules()` *before* the priority sort. Tier-1 findings bypass unconditionally. One `{ kind: "info", topic: "security", message: "Dropped N low-confidence security findings below floor 0.8" }` `DegradedEntry` per non-zero drop batch.
+- **Confidence-threshold subsystem (new).** New module `packages/core/src/confidence.ts` exporting `CATEGORY_CONFIDENCE_FLOOR: Record<Category, number>` (v0: `{ security: 0.8 }`, others implicit 0) and `applyConfidenceFloor(comments, env): { kept: Comment[]; dropped: number }`. Read by `applyHardRules()` _before_ the priority sort. Tier-1 findings bypass unconditionally. One `{ kind: "info", topic: "security", message: "Dropped N low-confidence security findings below floor 0.8" }` `DegradedEntry` per non-zero drop batch.
 - **Env-var addition.** `WARDEN_SECURITY_CONFIDENCE_FLOOR` in `@warden/env` (optional, numeric string, validated `0.0`–`1.0`). When set, overrides the static map's `security` floor.
 - **Dispatch registration** — security sub-agent joins `orchestrationRunners` in `packages/core/src/index.ts` around line 337, conditional on `input.config.mode === "review"`. Detector half stays in the inline deterministic runner block and records into the scratchpad separately from the user-config ESLint result.
 - **Smoke harness** — `smoke-m13-eslint-security.mts` (asserts the detector fires on `eval(req.body)` / `child_process.exec(userCmd)` / `crypto.pseudoRandomBytes()` / hardcoded high-entropy API key); `smoke-m13-sub-agent.mts` (asserts the sub-agent calls `lookupTypeDef`, emits questions with verified `tool` sources, drops uncited findings, respects the confidence floor); `smoke-m13-confidence-floor.mts` (asserts low-confidence security comments are dropped + one degraded entry surfaces; Tier-1 bypasses).
@@ -197,15 +197,21 @@ export function applyConfidenceFloor(
     ...(opts.securityFloor !== undefined
       ? { security: opts.securityFloor }
       : env.WARDEN_SECURITY_CONFIDENCE_FLOOR !== undefined
-      ? { security: Number(env.WARDEN_SECURITY_CONFIDENCE_FLOOR) }
-      : {}),
+        ? { security: Number(env.WARDEN_SECURITY_CONFIDENCE_FLOOR) }
+        : {}),
   };
   const kept: Comment[] = [];
   const drops = new Map<Category, { count: number; floor: number }>();
   for (const c of comments) {
-    if (c.tier === 1) { kept.push(c); continue; }        // Tier-1 bypass per ADR-0028 §5
+    if (c.tier === 1) {
+      kept.push(c);
+      continue;
+    } // Tier-1 bypass per ADR-0028 §5
     const floor = floors[c.category];
-    if (floor === undefined || c.confidence >= floor) { kept.push(c); continue; }
+    if (floor === undefined || c.confidence >= floor) {
+      kept.push(c);
+      continue;
+    }
     const prev = drops.get(c.category);
     drops.set(c.category, { count: (prev?.count ?? 0) + 1, floor });
   }
@@ -246,7 +252,9 @@ function applyHardRules(comments: Comment[], config: ReviewConfig): Comment[] {
 
   const shouldGateTier3 = config.mode === "review" && config.verbose !== true;
   const filtered = shouldGateTier3 ? kept.filter((c) => c.tier !== 3) : kept;
-  return [...filtered].sort((a, b) => { /* unchanged */ });
+  return [...filtered].sort((a, b) => {
+    /* unchanged */
+  });
 }
 ```
 
@@ -316,7 +324,7 @@ The existing `toComment()` maps `ToolFinding.source` discriminants to `{ categor
 if (finding.source === "eslint") {
   const rule = finding.ruleId ?? "";
   if (rule.startsWith("security/") || rule.startsWith("no-secrets/")) {
-    return { category: "security", tier: 1, /* ... */ };
+    return { category: "security", tier: 1 /* ... */ };
   }
   // ... existing non-security ESLint routing unchanged
 }
@@ -376,34 +384,36 @@ You think like an attacker but report like an engineer: every claim cites
 specific code, every cited line must actually exist in the file.
 
 ## Static analysis only
+
 [per DeepSec — copy almost verbatim]
 
 ## Severity classification
 
-| Severity | Tier | Examples |
-|---|---|---|
-| CRITICAL | 1 | RCE, auth bypass (full access), SQL injection on sensitive data, RCE via file upload, SSRF to internal services |
-| HIGH | 2 | XSS, SSRF, privilege escalation, hardcoded secrets in source, insecure deserialization, missing authorization on sensitive ops |
-| MEDIUM | 3 | Open redirect, weak crypto, missing rate limiting, info disclosure, IDOR, race conditions, logic bugs in auth/permission checks |
+| Severity | Tier | Examples                                                                                                                        |
+| -------- | ---- | ------------------------------------------------------------------------------------------------------------------------------- |
+| CRITICAL | 1    | RCE, auth bypass (full access), SQL injection on sensitive data, RCE via file upload, SSRF to internal services                 |
+| HIGH     | 2    | XSS, SSRF, privilege escalation, hardcoded secrets in source, insecure deserialization, missing authorization on sensitive ops  |
+| MEDIUM   | 3    | Open redirect, weak crypto, missing rate limiting, info disclosure, IDOR, race conditions, logic bugs in auth/permission checks |
 
 ## v0 slug vocabulary
 
-| Slug | What it means |
-|---|---|
-| auth-bypass | Authentication checks that can be circumvented |
-| missing-auth | HTTP endpoints without authentication |
-| rce | Remote code execution via exec/eval/spawn — ESLint catches the obvious; you handle the indirect (template injection into a command builder, etc.) |
-| sql-injection | SQL injection via string interpolation/concatenation — including ORM raw-query escape hatches |
-| ssrf | Server-side request forgery via user-controlled URLs |
-| path-traversal | File operations with user-controlled paths |
+| Slug             | What it means                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| auth-bypass      | Authentication checks that can be circumvented                                                                                                                      |
+| missing-auth     | HTTP endpoints without authentication                                                                                                                               |
+| rce              | Remote code execution via exec/eval/spawn — ESLint catches the obvious; you handle the indirect (template injection into a command builder, etc.)                   |
+| sql-injection    | SQL injection via string interpolation/concatenation — including ORM raw-query escape hatches                                                                       |
+| ssrf             | Server-side request forgery via user-controlled URLs                                                                                                                |
+| path-traversal   | File operations with user-controlled paths                                                                                                                          |
 | secrets-exposure | Hardcoded secrets — ESLint's `no-secrets` catches entropy-detectable strings; you handle structural cases (secrets in logs, in error responses, in fallback values) |
-| insecure-crypto | Weak hash/cipher algorithms — ESLint catches `pseudoRandomBytes`; you handle the rest (MD5, ECB mode, hardcoded IVs, key reuse) |
-| xss | Cross-site scripting via innerHTML, dangerouslySetInnerHTML, etc. |
-| open-redirect | Redirects bypassing validation functions |
+| insecure-crypto  | Weak hash/cipher algorithms — ESLint catches `pseudoRandomBytes`; you handle the rest (MD5, ECB mode, hardcoded IVs, key reuse)                                     |
+| xss              | Cross-site scripting via innerHTML, dangerouslySetInnerHTML, etc.                                                                                                   |
+| open-redirect    | Redirects bypassing validation functions                                                                                                                            |
 
 ## False positive guidance
 
 Before classifying an issue, check for mitigations:
+
 - Is the input sanitized or escaped before use? (parameterized queries, HTML escaping, allowlists)
 - Is there middleware or a framework guard that **wraps the handler directly**? (Express middleware, Fastify hooks, NestJS guards, Spring filters, Rails before_action, Django decorators, FastAPI Depends). Edge/proxy/CDN/WAF rules are NOT sufficient on their own.
 - Is the vulnerable pattern only used with trusted/internal data?
@@ -416,17 +426,20 @@ If fully mitigated, do not flag it. Report only genuine, exploitable patterns.
 Beyond missing auth, look for subtle bypasses:
 
 ### Query string & URL manipulation
+
 - Parameter pollution
 - URL-encoded / double-encoded / Unicode-normalized paths
 - Route param injection
 - Token refresh abuse
 
 ### Auth flow bypasses
+
 - OAuth callback manipulation
 - Session/JWT weaknesses (missing algorithm pinning, stub sessions, test tokens reachable in prod)
 - Header injection (`X-Forwarded-For`, `Authorization` blindly trusted)
 
 ### Authorization gaps (has auth, wrong auth)
+
 - Cross-tenant access (user-supplied `teamId`/`userId` in DB queries instead of authenticated identity)
 - Missing resource-level checks
 - Negated permission checks (`!(await auth.can(...))`)
@@ -447,22 +460,24 @@ You have an 8-call budget for `lookupTypeDef`. Use it only when the finding hing
 
 Emit JSON matching the SecurityFindingSchema:
 ```
+
 {
-  "slug": "<one of the 10 v0 slugs>",
-  "tier": 1 | 2 | 3,
-  "lineStart": <number>,
-  "lineEnd": <number>,
-  "path": "<changed-file-path>",
-  "body": "<≤2 sentences naming the pattern, citing source+sink>",
-  "suggestedAction": "<≤1 sentence>",
-  "confidence": <0.0–1.0>,
-  "sources": [
-    { "type": "tool", "id": "security-sub-agent", "title": "source",
-      "retrievedAt": "<ISO>", "path": "<file>", "line": <num>, "snippet": "<exact line>" },
-    { "type": "tool", "id": "security-sub-agent", "title": "sink",
-      "retrievedAt": "<ISO>", "path": "<file>", "line": <num>, "snippet": "<exact line>" }
-  ]
+"slug": "<one of the 10 v0 slugs>",
+"tier": 1 | 2 | 3,
+"lineStart": <number>,
+"lineEnd": <number>,
+"path": "<changed-file-path>",
+"body": "<≤2 sentences naming the pattern, citing source+sink>",
+"suggestedAction": "<≤1 sentence>",
+"confidence": <0.0–1.0>,
+"sources": [
+{ "type": "tool", "id": "security-sub-agent", "title": "source",
+"retrievedAt": "<ISO>", "path": "<file>", "line": <num>, "snippet": "<exact line>" },
+{ "type": "tool", "id": "security-sub-agent", "title": "sink",
+"retrievedAt": "<ISO>", "path": "<file>", "line": <num>, "snippet": "<exact line>" }
+]
 }
+
 ```
 
 ## Out-of-scope files
@@ -508,19 +523,20 @@ orchestrationRunners.push(leverageRunner);
 if (input.config.mode === "review") {
   orchestrationRunners.push(committabilityRunner);
   orchestrationRunners.push(leverageLibrariesRunner);
-  orchestrationRunners.push(securityRunner);     // NEW — ADR-0028 §11
+  orchestrationRunners.push(securityRunner); // NEW — ADR-0028 §11
 }
 ```
 
 The detector (`runEslintSecurity()`) is wired into the existing initial `Promise.all` deterministic-runner block alongside `runEslint()` / `runTsc()` — not through `orchestrationRunners`. Preserve the current jscpd sequencing: `runJscpd()` still runs **after** the selector because it consumes `changed ∪ candidates`.
 
 ```ts
-const [tscOut, eslintOut, eslintSecOut, /* vuln/selector/deadcode/consistency ... */] = await Promise.all([
-  runTsc(repoRoot, changedFiles),
-  ecosystem.hasEslint ? runEslint(repoRoot, changedFiles) : emptyEslint,
-  runEslintSecurity(repoRoot, changedFiles),     // NEW — ADR-0028 §2, not gated by hasEslint
-  // ...
-]);
+const [tscOut, eslintOut, eslintSecOut /* vuln/selector/deadcode/consistency ... */] =
+  await Promise.all([
+    runTsc(repoRoot, changedFiles),
+    ecosystem.hasEslint ? runEslint(repoRoot, changedFiles) : emptyEslint,
+    runEslintSecurity(repoRoot, changedFiles), // NEW — ADR-0028 §2, not gated by hasEslint
+    // ...
+  ]);
 ```
 
 Record `eslintSecOut` as its own scratchpad output (`name: "eslint-security"`) or merge its findings into the existing `eslint` scratchpad record. Prefer a separate scratchpad name so degraded entries can say `eslint-security` and dogfood can distinguish user-config lint failures from Warden-security lint failures. `to-comment.ts` does the category routing by rule prefix either way.
@@ -530,17 +546,20 @@ Record `eslintSecOut` as its own scratchpad output (`name: "eslint-security"`) o
 Three smoke scripts under `packages/cli/scripts/`:
 
 **`smoke-m13-eslint-security.mts`** — synthesise a diff with:
+
 - `eval(req.body.code)` → expects `security/detect-eval-with-expression` finding, category=`security`, tier=1.
 - `crypto.pseudoRandomBytes(16)` → expects `security/detect-pseudoRandomBytes`, category=`security`, tier=1.
 - `child_process.exec(userCmd)` → expects `security/detect-child-process` finding.
 - A hardcoded high-entropy API key string → expects `no-secrets/no-secrets` finding.
 
 **`smoke-m13-sub-agent.mts`** — synthesise a diff with:
+
 - A cross-tenant ID leak (`db.users.find({ id: req.body.userId })` without ownership check) → expects sub-agent emits a question with slug=`auth-bypass` or `missing-auth` (the v0 slug list deliberately does not include `cross-tenant-id`), citation of source+sink lines, substring-verifier passes.
 - A diff that would tempt the sub-agent to cite a non-existent path → expects the finding to be dropped by lane discipline (info-level degraded entry counts it).
 - A diff with a library API claim (`bcrypt.compare(x, y)` shown as "this is timing-safe") → expects sub-agent calls `lookupTypeDef`, emits an `api_def` source verified by the global verifier.
 
 **`smoke-m13-confidence-floor.mts`** — synthesise sub-agent emissions at varying confidence:
+
 - A 0.95-confidence security question → kept.
 - A 0.6-confidence security question → dropped; one degraded info entry surfaces (`Dropped 1 low-confidence security finding below floor 0.8`).
 - A Tier-1 0.5-confidence security finding → kept (Tier-1 bypass).
@@ -666,7 +685,7 @@ Update §8 — narrow the existing `custom-code SAST worker` entry to acknowledg
 
 11. **The `WARDEN_SECURITY_CONFIDENCE_FLOOR` env var is the only escape hatch v0 ships.** No inline `// warden-ignore-security` marker, no per-category overlay, no flag, no config file. Mirrors ADR-0027 §9's "tighten the detection; the right escape hatch emerges from dogfood evidence" philosophy. If dogfood reveals real FPs at the floor 0.8 default, the user can lower it via env var while the team investigates whether to tighten the prompt or raise the slug threshold.
 
-12. **The Tier-1 ESLint mapping is unconditional.** All `security/*` and `no-secrets/*` ESLint rule findings map to Tier-1 in `to-comment.ts`, regardless of the rule's ESLint severity. The reasoning: ESLint's security plugins exist because the patterns they detect *are* security issues; relegating them to Tier-2 or Tier-3 would invite the LLM formatter to suppress them via the Tier-3 verbose gate. If dogfood reveals specific rules that produce Tier-2-class noise (e.g., `detect-object-injection` is notoriously noisy), narrow at the rule level — disable the rule in the Warden-managed config — rather than relaxing the Tier-1 mapping for the whole prefix.
+12. **The Tier-1 ESLint mapping is unconditional.** All `security/*` and `no-secrets/*` ESLint rule findings map to Tier-1 in `to-comment.ts`, regardless of the rule's ESLint severity. The reasoning: ESLint's security plugins exist because the patterns they detect _are_ security issues; relegating them to Tier-2 or Tier-3 would invite the LLM formatter to suppress them via the Tier-3 verbose gate. If dogfood reveals specific rules that produce Tier-2-class noise (e.g., `detect-object-injection` is notoriously noisy), narrow at the rule level — disable the rule in the Warden-managed config — rather than relaxing the Tier-1 mapping for the whole prefix.
 
 ## When you're done
 

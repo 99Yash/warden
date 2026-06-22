@@ -86,10 +86,11 @@ db()
     },
   ])
   .run();
-const initialFileChunksCount = db()
-  .select({ c: sql<number>`count(*)` })
-  .from(fileChunks)
-  .get()?.c ?? 0;
+const initialFileChunksCount =
+  db()
+    .select({ c: sql<number>`count(*)` })
+    .from(fileChunks)
+    .get()?.c ?? 0;
 assert(initialFileChunksCount === 0, "file_chunks starts empty");
 const initialMarker = db()
   .select({ k: indexMeta.key })
@@ -173,10 +174,7 @@ await reconcileFiles({
   lockedModelVersion: "dim=4;type=document",
 });
 const aHashesAfter = (await store.getHashesForFile("src/a.ts")).sort();
-const expected = [
-  sha("src/a.ts:edited line one"),
-  sha("src/a.ts:edited line two"),
-].sort();
+const expected = [sha("src/a.ts:edited line one"), sha("src/a.ts:edited line two")].sort();
 assert(
   aHashesAfter.length === 2 && aHashesAfter[0] === expected[0] && aHashesAfter[1] === expected[1],
   "post-reconcile junction holds the new chunk hashes, not the backfilled approximations",

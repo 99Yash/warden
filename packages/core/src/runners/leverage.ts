@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
+import { assertNever } from "../assert-never.js";
 import type { Runner, RunnerInput, RunnerOutput } from "../orchestration/runner.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, parseChangedSourceFile } from "./_shared.js";
@@ -52,9 +53,7 @@ export interface LeverageRunnerOutput {
   degraded: DegradedEntry[];
 }
 
-export async function runLeverage(
-  input: LeverageRunnerInput,
-): Promise<LeverageRunnerOutput> {
+export async function runLeverage(input: LeverageRunnerInput): Promise<LeverageRunnerOutput> {
   const findings: ToolFinding[] = [];
   const degraded: DegradedEntry[] = [];
 
@@ -65,6 +64,7 @@ export async function runLeverage(
       degraded.push(result.entry);
       continue;
     }
+    if (result.kind !== "ok") assertNever(result, "ParseChangedFileResult");
     const { sf, addedLines } = result.parsed;
     findStructuredClone(sf, cf.path, addedLines, findings);
     findIncludes(sf, cf.path, addedLines, findings);
@@ -124,7 +124,11 @@ function isJsonParseOfJsonStringify(call: ts.CallExpression): boolean {
 }
 
 /** Match `<receiverName>.<memberName>(...)`. */
-function isPropertyCall(call: ts.CallExpression, receiverName: string, memberName: string): boolean {
+function isPropertyCall(
+  call: ts.CallExpression,
+  receiverName: string,
+  memberName: string,
+): boolean {
   const callee = call.expression;
   if (!ts.isPropertyAccessExpression(callee)) return false;
   if (!ts.isIdentifier(callee.expression)) return false;
@@ -155,10 +159,7 @@ function findIncludes(
   visit(sf);
 }
 
-function isIndexOfBooleanComparison(
-  node: ts.BinaryExpression,
-  opKind: ts.SyntaxKind,
-): boolean {
+function isIndexOfBooleanComparison(node: ts.BinaryExpression, opKind: ts.SyntaxKind): boolean {
   // Accept indexOf either on the left or the right side of the comparison.
   const { left, right } = node;
   const leftIsIndexOf = isCallNamed(left, "indexOf");
@@ -206,16 +207,10 @@ function readSignedNumeric(node: ts.Node): number | null {
     return Number.parseFloat(node.text);
   }
   if (ts.isPrefixUnaryExpression(node)) {
-    if (
-      node.operator === ts.SyntaxKind.MinusToken &&
-      ts.isNumericLiteral(node.operand)
-    ) {
+    if (node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) {
       return -Number.parseFloat(node.operand.text);
     }
-    if (
-      node.operator === ts.SyntaxKind.PlusToken &&
-      ts.isNumericLiteral(node.operand)
-    ) {
+    if (node.operator === ts.SyntaxKind.PlusToken && ts.isNumericLiteral(node.operand)) {
       return Number.parseFloat(node.operand.text);
     }
   }
@@ -261,10 +256,7 @@ function findSome(
   visit(sf);
 }
 
-function isFilterLengthComparison(
-  node: ts.BinaryExpression,
-  opKind: ts.SyntaxKind,
-): boolean {
+function isFilterLengthComparison(node: ts.BinaryExpression, opKind: ts.SyntaxKind): boolean {
   // Accept either `<call>.length OP pivot` or `pivot OP <call>.length`.
   const leftIsLen = isFilterLengthAccess(node.left);
   const rightIsLen = isFilterLengthAccess(node.right);
@@ -294,10 +286,7 @@ function isFilterLengthAccess(node: ts.Node): boolean {
   return isCallNamed(node.expression, "filter");
 }
 
-function isFindNonNullCheck(
-  node: ts.BinaryExpression,
-  opKind: ts.SyntaxKind,
-): boolean {
+function isFindNonNullCheck(node: ts.BinaryExpression, opKind: ts.SyntaxKind): boolean {
   if (
     opKind !== ts.SyntaxKind.ExclamationEqualsEqualsToken &&
     opKind !== ts.SyntaxKind.ExclamationEqualsToken

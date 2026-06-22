@@ -4,12 +4,12 @@ This document is a self-contained brief for the agent (or future-me) that will s
 
 ## Read first (in this order)
 
-1. `**./decisions.md**` — the 14 ADRs that define the stack. The *why* of every choice.
-2. `**./vision.md*`* — the long-form thinking framework, preserved from the original gist. Most of it is deferred past v0; use it for context, not as a v0 spec.
+1. `**./decisions.md**` — the 14 ADRs that define the stack. The _why_ of every choice.
+2. `**./vision.md*`\* — the long-form thinking framework, preserved from the original gist. Most of it is deferred past v0; use it for context, not as a v0 spec.
 3. `**../alfred/CLAUDE.md**` — Alfred's repo orientation. Warden mirrors its workspace shape and conventions, slimmed down for a CLI (no `apps/server`, no `apps/web`, no auth, no Postgres/Redis).
-4. `**../alfred/scaffolding-plan.md**` — Alfred's M1 brief. The *shape* of this document. Warden's M1 is much smaller because there's no server, web app, or sync layer.
-5. `**../alfred/decisions.md*`* — Alfred's ADRs. Reference points for stack choices Warden adopts (Vercel AI SDK pattern, tsdown build, TS-source exports). Do **not** mirror Alfred ADRs that don't apply (Replicache, Better Auth, Resend, Elysia, Postgres+pgvector, BullMQ).
-6. `**../alfred/package.json`, `../alfred/pnpm-workspace.yaml`, `../alfred/turbo.json`** — config-shape references. Copy structure, trim dependencies aggressively.
+4. `**../alfred/scaffolding-plan.md**` — Alfred's M1 brief. The _shape_ of this document. Warden's M1 is much smaller because there's no server, web app, or sync layer.
+5. `**../alfred/decisions.md*`\* — Alfred's ADRs. Reference points for stack choices Warden adopts (Vercel AI SDK pattern, tsdown build, TS-source exports). Do **not** mirror Alfred ADRs that don't apply (Replicache, Better Auth, Resend, Elysia, Postgres+pgvector, BullMQ).
+6. `**../alfred/package.json`, `../alfred/pnpm-workspace.yaml`, `../alfred/turbo.json`\*\* — config-shape references. Copy structure, trim dependencies aggressively.
 
 ## Goal of this milestone
 
@@ -25,7 +25,7 @@ Implement **M1: scaffold Warden**. By the end:
 - `packages/db` has at least one Drizzle table (`external_knowledge`, the simplest of the four caches in `vision.md` §9), `pnpm db:generate` produces SQL, `pnpm db:migrate` applies it to a local `.warden/cache.sqlite`.
 - `packages/ai` instantiates the AI SDK Anthropic provider (no actual API call required for M1).
 - `@warden/core`'s `review({ diff, repoRoot, config }) → CommentSet` exists with the signature from ADR-0013 (returns an empty `CommentSet` for now).
-- No business logic beyond the above — this is *only* scaffolding.
+- No business logic beyond the above — this is _only_ scaffolding.
 
 **Stop at "hello-world works." Do not start implementing review logic.** Subsequent milestones (ecosystem detection, TSC/ESLint runners, OSV verification, LLM formatter) are separate sessions.
 
@@ -70,7 +70,7 @@ Notes:
 These can be lifted with adaptation. The package namespace is `@warden/*` (not `@alfred/*`).
 
 - **Root config**: `pnpm-workspace.yaml` (trim catalog), `turbo.json` (drop `db:studio`-style server tasks; keep `build`, `check-types`, `dev`, `lint`), `package.json` (rename to `"warden"`, trim scripts), `tsconfig.json` (extends `@warden/config`), `.gitignore` (add `.warden/`), `.nvmrc`, `.oxlintrc.json`, `.oxfmtrc.json`.
-- `**packages/config/`** — copy entire package; rename to `@warden/config`. Strip any rules that assume DOM / React.
+- `**packages/config/`\*\* — copy entire package; rename to `@warden/config`. Strip any rules that assume DOM / React.
 - `**packages/env/**` — copy structure (`src/index.ts` exposing `wardenEnv()` via zod). Single env var for M1: `ANTHROPIC_API_KEY`. Optional: `WARDEN_LOG_LEVEL` with default `"info"`.
 - `**packages/ai/**` — copy structure (`src/index.ts`, `src/provider.ts`, `src/models.ts`). Rewrite contents:
   - `provider.ts` — instantiate `createAnthropic({ apiKey })` from `@ai-sdk/anthropic` using `wardenEnv().ANTHROPIC_API_KEY`. No Google/OpenAI in M1 (deferred per ADR-0006).
@@ -156,17 +156,37 @@ export const CommentSchema = z.object({
   lineStart: z.number().int().nonnegative(),
   lineEnd: z.number().int().nonnegative(),
   tier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-  category: z.enum(["correctness", "clarity", "style", "dedup", "tests", "security", "vulnerability"]),
+  category: z.enum([
+    "correctness",
+    "clarity",
+    "style",
+    "dedup",
+    "tests",
+    "security",
+    "vulnerability",
+  ]),
   claim: z.string(),
   explanation: z.string(),
   suggestedAction: z.string().optional(),
-  sources: z.array(z.object({
-    type: z.enum(["cve", "advisory", "changelog", "documentation", "web", "tool", "repo_convention"]),
-    url: z.string().url().optional(),
-    id: z.string().optional(),
-    title: z.string().optional(),
-    retrievedAt: z.string(),  // ISO timestamp
-  })).default([]),
+  sources: z
+    .array(
+      z.object({
+        type: z.enum([
+          "cve",
+          "advisory",
+          "changelog",
+          "documentation",
+          "web",
+          "tool",
+          "repo_convention",
+        ]),
+        url: z.string().url().optional(),
+        id: z.string().optional(),
+        title: z.string().optional(),
+        retrievedAt: z.string(), // ISO timestamp
+      }),
+    )
+    .default([]),
   confidence: z.number().min(0).max(1),
 });
 
@@ -229,7 +249,7 @@ Trim Alfred's catalog aggressively. Warden M1 needs:
 - `drizzle-kit`
 - `turbo`
 
-**Do not include** (Alfred-only): `pg`, `@types/pg`, `replicache`, `bullmq`, `ioredis`, `better-auth`, `resend`, `@elysiajs/`*, `@tanstack/react-router`, `vite`, `@simplewebauthn/*`, `voyageai`, `perplexity` clients, `langfuse`, `posthog`, `sentry`, `@modelcontextprotocol/sdk`. None of them apply to v0.
+**Do not include** (Alfred-only): `pg`, `@types/pg`, `replicache`, `bullmq`, `ioredis`, `better-auth`, `resend`, `@elysiajs/`_, `@tanstack/react-router`, `vite`, `@simplewebauthn/_`, `voyageai`, `perplexity`clients,`langfuse`, `posthog`, `sentry`, `@modelcontextprotocol/sdk`. None of them apply to v0.
 
 ## Environment variables expected
 
@@ -239,7 +259,9 @@ Add to `packages/env/src/index.ts`:
 import { z } from "zod";
 
 const Schema = z.object({
-  ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY required — see https://console.anthropic.com"),
+  ANTHROPIC_API_KEY: z
+    .string()
+    .min(1, "ANTHROPIC_API_KEY required — see https://console.anthropic.com"),
   WARDEN_LOG_LEVEL: z.enum(["silent", "error", "warn", "info", "debug"]).default("info"),
 });
 
@@ -266,13 +288,13 @@ WARDEN_LOG_LEVEL=info
 These come from Alfred and apply to Warden verbatim:
 
 - **All packages export TS source via `"default": "./src/index.ts"`**. The `tsdown` build only emits `.d.ts` for downstream type resolution. See Alfred's `docs/package-boundaries.md` for the rationale (when alfred/docs lands; otherwise extrapolate from `apps/server/package.json`).
-- `**pnpm check-types` works on a fresh tree without a prior build** because of the TS-source export convention above.
+- `**pnpm check-types` works on a fresh tree without a prior build\*\* because of the TS-source export convention above.
 - **No transitive package imports** — `packages/cli` imports `@warden/core` types via the package export, never reaches into `packages/core/src/...` directly.
 - **Drizzle migrations**: `pnpm db:generate` then `pnpm db:migrate`. Never `db:push` outside local exploration.
 
 These are Warden-specific:
 
-- `**@warden/core` is I/O-pure** (ADR-0013). Never imports `commander`, never calls `console.log` or `process.stdout` directly, never reads `process.argv`, never assumes a TTY. All output flows through the function return value. *This is the load-bearing constraint for the bot future.*
+- `**@warden/core` is I/O-pure\** (ADR-0013). Never imports `commander`, never calls `console.log` or `process.stdout` directly, never reads `process.argv`, never assumes a TTY. All output flows through the function return value. *This is the load-bearing constraint for the bot future.\*
 - **One-shot CLI shape** (ADR-0014). No long-running processes, no interactive prompts, no Ink/TUI. Streamed output is fine; persistent state machines are not.
 
 Worth adding an oxlint config rule that bans `commander` / `picocolors` / `ora` / `process.argv` from being imported under `packages/core/`. If oxlint can't express this, leave a comment in `packages/core/src/index.ts` and add it as M2 work.
@@ -300,8 +322,8 @@ When all of these pass, scaffolding is done:
 - **Do not implement ecosystem detection.** That's M2 (the first real review feature).
 - **Do not run TSC, ESLint, or any deterministic tool.** M2.
 - **Do not call `npm audit` or query OSV.** M3.
-- **Do not call the LLM for anything.** M4. M1 only *constructs* the model instance; it never calls `.generateText()` or similar.
-- **Do not scaffold `apps/`*.** Bot deployments are deferred per ADR-0013.
+- **Do not call the LLM for anything.** M4. M1 only _constructs_ the model instance; it never calls `.generateText()` or similar.
+- **Do not scaffold `apps/`\*.** Bot deployments are deferred per ADR-0013.
 - **Do not add Postgres, Redis, or any docker-compose service.** Deferred.
 - **Do not implement `warden patrol`.** Parked per ADR-0011.
 - **Do not write tests.** Personal-project convention is no test culture (per memory + ADR-0012's caveat). Smoke scripts (when needed) live under `scripts/smoke-*.ts` per Alfred's pattern.
@@ -319,4 +341,4 @@ If you find yourself reaching for any of the above, stop and re-read `decisions.
 
 ## Lessons from M1 → M2 transition
 
-*(Empty — append after M1 ships and M2 begins, mirroring Alfred's pattern.)*
+_(Empty — append after M1 ships and M2 begins, mirroring Alfred's pattern.)_

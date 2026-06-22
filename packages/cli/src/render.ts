@@ -112,11 +112,7 @@ function truncate(s: string, max: number): string {
  * Reads the discriminated `kind` field instead of substring-matching on
  * message prefixes. The first matching entry wins (banner is single-line).
  */
-const BANNER_TOPICS: ReadonlySet<string> = new Set([
-  "context",
-  "embeddings",
-  "diff-source",
-]);
+const BANNER_TOPICS: ReadonlySet<string> = new Set(["context", "embeddings", "diff-source"]);
 
 export function renderBannerLine(degraded: DegradedEntry[]): string | null {
   for (const entry of degraded) {
@@ -197,14 +193,19 @@ export function createInitRenderer(): InitRenderer {
           }
           break;
         case "chunk-complete":
-          finishPhase("chunk", `${event.chunkCount} chunks${event.cachedHits ? ` · ${event.cachedHits} cached` : ""}`);
+          finishPhase(
+            "chunk",
+            `${event.chunkCount} chunks${event.cachedHits ? ` · ${event.cachedHits} cached` : ""}`,
+          );
           break;
         case "embed-progress":
           if (phase === "embed") {
             label = `embedding… ${event.completed}/${event.total} batches`;
             const eta = estimateEta(event.completed, event.total, event.elapsedMs);
             const tokensFmt =
-              event.promptTokensSoFar > 0 ? ` · ${formatTokens(event.promptTokensSoFar)} tokens` : "";
+              event.promptTokensSoFar > 0
+                ? ` · ${formatTokens(event.promptTokensSoFar)} tokens`
+                : "";
             detail = eta ? `~${eta} remaining${tokensFmt}` : tokensFmt.trim();
             paint();
           }
@@ -225,7 +226,9 @@ export function createInitRenderer(): InitRenderer {
           const s = event.summary;
           const lines = [
             `  ${pc.green("✓")} Index ready in ${(s.durationMs / 1000).toFixed(1)}s`,
-            pc.dim(`     ─ ${s.files.toLocaleString()} files · ${s.chunks.toLocaleString()} chunks`),
+            pc.dim(
+              `     ─ ${s.files.toLocaleString()} files · ${s.chunks.toLocaleString()} chunks`,
+            ),
           ];
           if (s.dryRun) {
             lines.push(pc.dim(`     ─ dry-run: skipped embedding`));
@@ -251,7 +254,13 @@ export function createInitRenderer(): InitRenderer {
 }
 
 function renderEstimate(
-  estimate: { estimatedChunks: number; estimatedNewChunks: number; estimatedTokens: number; estimatedUsd: number; estimatedSeconds: number },
+  estimate: {
+    estimatedChunks: number;
+    estimatedNewChunks: number;
+    estimatedTokens: number;
+    estimatedUsd: number;
+    estimatedSeconds: number;
+  },
   abortedForCost: boolean,
 ): void {
   const head = abortedForCost ? pc.red("Estimate exceeds --max-cost:") : pc.bold("Estimated work:");
@@ -264,7 +273,11 @@ function renderEstimate(
     `    Embedding     ${eta} ETA · ≈ ${tokens} tokens · ≈ ${usd}`,
   ];
   if (estimate.estimatedNewChunks < estimate.estimatedChunks) {
-    lines.push(pc.dim(`    (${(estimate.estimatedChunks - estimate.estimatedNewChunks).toLocaleString()} chunks already cached)`));
+    lines.push(
+      pc.dim(
+        `    (${(estimate.estimatedChunks - estimate.estimatedNewChunks).toLocaleString()} chunks already cached)`,
+      ),
+    );
   }
   process.stdout.write(lines.join("\n") + "\n");
 }

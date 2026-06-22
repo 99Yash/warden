@@ -8,7 +8,8 @@ This is the milestone brief for the agent (or future-me) implementing M8. Self-c
 
 1. **`./decisions.md`** — focus on **ADR-0023 (this milestone's direction)** plus ADR-0008 (citation thesis — preserved trivially since M8 ships no new LLM-shaped sub-agents), ADR-0011 (verb separation — `warden check` vs `warden review`; M8 unifies their pipeline up to the synthesis step), ADR-0013 (I/O-pure core; orchestration code is internal to `@warden/core`), ADR-0015 (prompts-as-files; the synthesizer's prompt is M4's `system.md` + `user-template.md` unchanged), ADR-0017 (LLM provider fallback — applies to the synthesizer call unchanged), ADR-0019 #11 (workspace-package split-justification triggers — `orchestration/` directory pre-positions for the analogue), ADR-0021 (M7 — committability sub-agent + scalability detector are M8's two migration consumers), ADR-0022 (M9 noise filter — touches the same runner-input surface so M9 likely re-platforms the remaining 6 detectors).
 
-   Also worth a skim: **`./CONTEXT.md`** — the noun glossary. The runner / detector / sub-agent / boss / worker / scratchpad / dispatch vocabulary used throughout this plan is canonicalised there. The §3 entry on **boss/worker orchestration** specifically calls out that *worker* stays reserved for vision-tier specialist Sonnet LLMs in a multi-call pipeline — M8 doesn't ship any of those; it ships *dispatch + scratchpad + synthesizer* routing existing runners.
+   Also worth a skim: **`./CONTEXT.md`** — the noun glossary. The runner / detector / sub-agent / boss / worker / scratchpad / dispatch vocabulary used throughout this plan is canonicalised there. The §3 entry on **boss/worker orchestration** specifically calls out that _worker_ stays reserved for vision-tier specialist Sonnet LLMs in a multi-call pipeline — M8 doesn't ship any of those; it ships _dispatch + scratchpad + synthesizer_ routing existing runners.
+
 2. **`./CLAUDE.md`** — package boundary table is load-bearing. M8 adds files in `@warden/core` only; no new workspace package; no new package boundary crossings.
 3. **`./packages/core/src/index.ts`** — current `runReview()` pipeline. M5 added the selector; M6 added `runInit`; M7 added detectors + committability sub-agent + question-citation verifier + npm-audit collapse. M8 inserts dispatch + scratchpad between runner invocation and result aggregation, then routes the aggregated scratchpad into either the deterministic formatter (`check`) or the LLM synthesizer (`review`).
 4. **`./packages/core/src/llm/cascade.ts`** — current M4 formatter call site (the LLM-tier pass that becomes the synthesizer). M8 moves this into `orchestration/synthesizer.ts` with the input shape changed from raw `ToolFinding[]` to a flattened-from-`Scratchpad` `ToolFinding[]`. The cascade itself (Anthropic → retry → Google per ADR-0017) stays in `llm/cascade.ts`; the synthesizer calls into it.
@@ -22,12 +23,12 @@ Implement **M8: orchestration spine — `Runner` contract + in-memory `Scratchpa
 - `packages/core/src/orchestration/` directory exists with `runner.ts` (contract), `scratchpad.ts` (in-memory class), `dispatch.ts` (parallel runner invocation + scratchpad write), `synthesizer.ts` (LLM call reading scratchpad, replacing the M4 formatter call site), and `index.ts` (barrel).
 - `packages/core/src/runners/committability.ts` and `runners/scalability.ts` expose the `Runner` contract via thin wrappers; their internal logic (Tier-1 hard-skip + directory-concentration heuristic for committability; AST traversal for scalability) is unchanged.
 - `runReview()` and `runCheck()` (or whatever entry point handles the `check` verb today) both go through `dispatch()` → `Scratchpad`; the synthesis ending diverges (`review` calls `synthesizer.run(scratchpad, retrievedContext) → CommentSet`, `check` calls the deterministic formatter on `scratchpad.flatten()` → `CommentSet`).
-- The remaining 6 deterministic runners (TSC, ESLint, jscpd, vuln, deadcode, consistency) keep their existing inline call sites in `runReview()`; their outputs are *added to the scratchpad* before the synthesis step, so the synthesizer sees a uniform scratchpad regardless of which runners came through `dispatch()` and which came inline. (M9 closes this when the noise filter touches the same surface.)
+- The remaining 6 deterministic runners (TSC, ESLint, jscpd, vuln, deadcode, consistency) keep their existing inline call sites in `runReview()`; their outputs are _added to the scratchpad_ before the synthesis step, so the synthesizer sees a uniform scratchpad regardless of which runners came through `dispatch()` and which came inline. (M9 closes this when the noise filter touches the same surface.)
 - One smoke harness (`packages/cli/scripts/smoke-m8-spine.mts`) validates dispatch + scratchpad + dual-ending pipeline against a fixture diff.
 - Synthesizer prompt is byte-identical to M4 — `system.md` and `user-template.md` unchanged. Input flattening (`scratchpad → ToolFinding[]`) happens in `synthesizer.ts` before prompting.
 - `pnpm check-types` + `pnpm lint` pass.
 - All M4 / M5 / M6 / M7 behavior preserved on every fixture diff — output bytes identical for `warden check` (deterministic), output behaviorally equivalent for `warden review` (LLM call is non-deterministic but the scratchpad's content reaching the synthesizer is identical).
-- **Dogfood validation gate**: rerun `warden check` and `warden review` against warden's own M5, M6, and M7 PRs; assert no regressions in either output. The M7 PR's 6 Copilot-caught misses are *not* expected to close in M8 (they close in M9+ when LLM-shaped sub-agents are added on top of the spine); document this in the close-out report.
+- **Dogfood validation gate**: rerun `warden check` and `warden review` against warden's own M5, M6, and M7 PRs; assert no regressions in either output. The M7 PR's 6 Copilot-caught misses are _not_ expected to close in M8 (they close in M9+ when LLM-shaped sub-agents are added on top of the spine); document this in the close-out report.
 
 **Stop at "spine ships, two runners migrated, dual-ending pipeline works, smoke harness passes, no behavior regression on M5/M6/M7 PRs." Do NOT start implementing dynamic dispatch, three execution modes (direct / parallel / explore-then-decide), new LLM-shaped sub-agents (adversarial critic, self-aware checker, free-form prose consistency), tool-call seams, SQLite-backed scratchpad, boss self-introspection, vision-tier specialist Sonnet workers, migration of TSC / ESLint / jscpd / vuln / deadcode / consistency to the contract, or the M9 noise filter.** Those are M9+.
 
@@ -98,19 +99,19 @@ No new workspace package. No new CLI verb. No new env var. No schema changes.
 
 ```typescript
 export interface RunnerInput {
-  changedPaths: string[];           // β: pre-pruned post-M9; raw in M8
+  changedPaths: string[]; // β: pre-pruned post-M9; raw in M8
   repoRoot: string;
   retrievedContext?: RetrievedContext;
   // Other inputs threaded as needed (parser, importGraph, etc.) per per-runner needs.
 }
 
 export interface RunnerOutput {
-  name: string;                     // e.g., "scalability-detector", "committability-subagent"
+  name: string; // e.g., "scalability-detector", "committability-subagent"
   findings: ToolFinding[];
-  questions?: Question[];           // only LLM-shaped runners (sub-agents) populate this
+  questions?: Question[]; // only LLM-shaped runners (sub-agents) populate this
   degraded: DegradedEntry[];
   durationMs: number;
-  error?: Error;                    // populated on failure; rest of pipeline continues
+  error?: Error; // populated on failure; rest of pipeline continues
 }
 
 export interface Runner {
@@ -236,10 +237,10 @@ export const committabilityRunner: Runner = {
     const internal = await runCommittabilityInternal(input.changedPaths, input.repoRoot);
     return {
       name: "committability-subagent",
-      findings: [],                   // committability emits questions, not assertions
+      findings: [], // committability emits questions, not assertions
       questions: internal.questions,
       degraded: internal.degraded,
-      durationMs: 0,                  // dispatch.ts overrides
+      durationMs: 0, // dispatch.ts overrides
     };
   },
 };
@@ -298,11 +299,11 @@ For reference, the locked answers:
 - **Q7-a — unified pipeline; both verbs through dispatch + scratchpad.** Synthesis ending differs.
 - **Q8a — flat synthesizer prompt.** M4's prompt unchanged; flattening helper before prompting.
 - **Q8b — one smoke harness: `smoke-m8-spine.mts`.**
-- **Q8c — title: "M8: orchestration spine: dispatch + scratchpad + synthesizer."** Avoids pre-claiming CONTEXT.md's reserved *worker* term.
+- **Q8c — title: "M8: orchestration spine: dispatch + scratchpad + synthesizer."** Avoids pre-claiming CONTEXT.md's reserved _worker_ term.
 
 ## What NOT to do in this milestone
 
-- **No dynamic dispatch.** The boss does *not* reason about which runners to invoke per-diff; static dispatch only. Dynamic routing is M9+.
+- **No dynamic dispatch.** The boss does _not_ reason about which runners to invoke per-diff; static dispatch only. Dynamic routing is M9+.
 - **No new LLM-shaped sub-agents.** Adversarial critic, self-aware invariant checker, free-form prose consistency — all M9+ (each its own ADR).
 - **No re-platforming of TSC / ESLint / jscpd / vuln / deadcode / consistency through the contract.** Those keep their inline call sites; M9 likely closes this.
 - **No tool-call seams.** Boss-requesting-mid-stream-info via tool calls is M10+.
@@ -310,7 +311,7 @@ For reference, the locked answers:
 - **No prompt restructuring.** Synthesizer's prompt = M4's prompt. Restructuring to leverage Scratchpad's per-runner shape is its own dogfood-needing redesign; not bundled here.
 - **No new workspace package.** `packages/core/src/orchestration/` is internal. `@warden/orchestration` workspace split waits for ADR-0019 #11's analogue triggers.
 - **No M9 noise-filter work.** The noise filter is M9 (ADR-0022 retargeted); don't pre-implement profiles, diff-tree, or pruning logic in M8.
-- **No vision-tier specialist Sonnet workers.** CONTEXT.md §3's reserved *worker* term stays reserved.
+- **No vision-tier specialist Sonnet workers.** CONTEXT.md §3's reserved _worker_ term stays reserved.
 - **No retroactive M5 / M6 / M7 changes.** M8 is additive; existing call sites get migrated only if migration is mechanical and net-zero behavior. If any migration risks a behavior regression, defer it.
 
 ## Acceptance criteria
@@ -331,15 +332,15 @@ For reference, the locked answers:
 
 ## Lessons from M7 → M8 transition
 
-1. **M7 was partial when M8 started.** The committability sub-agent (ADR-0021 #2) hadn't shipped on `m7`, but ADR-0023 #3 named it as one of the two M8 migration targets. Discovered when reading the codebase before coding — `runners/committability.ts` didn't exist; only the schema's `committability` category did. Surfaced to the user as an explicit tradeoff (build it now / substitute deadcode / accept Q4-Min); the user picked "build it now," and the sub-agent shipped as part of M8 close-out. Generalisable: when scheduling a milestone whose plan presupposes a prior milestone's surface, *verify the surface exists in the codebase before starting*. `[~]` in CLAUDE.md is not a strong enough signal — read the actual files.
+1. **M7 was partial when M8 started.** The committability sub-agent (ADR-0021 #2) hadn't shipped on `m7`, but ADR-0023 #3 named it as one of the two M8 migration targets. Discovered when reading the codebase before coding — `runners/committability.ts` didn't exist; only the schema's `committability` category did. Surfaced to the user as an explicit tradeoff (build it now / substitute deadcode / accept Q4-Min); the user picked "build it now," and the sub-agent shipped as part of M8 close-out. Generalisable: when scheduling a milestone whose plan presupposes a prior milestone's surface, _verify the surface exists in the codebase before starting_. `[~]` in CLAUDE.md is not a strong enough signal — read the actual files.
 
 2. **Vuln stays out of the scratchpad.** Plan §6 sketched all inline runners (TSC, ESLint, jscpd, vuln, deadcode, consistency) recording into the scratchpad. Vuln's already-mapped `Comment[]` shape doesn't fit `RunnerOutput.findings: ToolFinding[]`, and adding an optional `comments?: Comment[]` field to the contract just to accommodate vuln pollutes the contract for every other runner. Pragmatic compromise: vuln stays inline outside the scratchpad in M8; synthesizer accepts `vulnComments` as a separate parameter. M9+ revisits if/when the noise filter benefits from a uniform contract on the vuln side.
 
-3. **The "deterministic formatter" naming in plan §6 conflated two concepts.** Plan suggested modifying `packages/cli/src/format.ts` to consume Scratchpad. But the CLI's `format.ts` is the *CommentSet renderer* (text output); the actual deterministic synthesis (scratchpad → CommentSet for `check`) belongs in core alongside the LLM synthesizer. Both endings ship as sibling exports from `orchestration/synthesizer.ts` (`synthesize` for review, `deterministicSynthesize` for check); CLI `format.ts` stays unchanged. This is the cleaner cut: synthesis lives next to dispatch (one architectural concern, one directory), rendering lives next to the CLI surface (one I/O concern, one binary).
+3. **The "deterministic formatter" naming in plan §6 conflated two concepts.** Plan suggested modifying `packages/cli/src/format.ts` to consume Scratchpad. But the CLI's `format.ts` is the _CommentSet renderer_ (text output); the actual deterministic synthesis (scratchpad → CommentSet for `check`) belongs in core alongside the LLM synthesizer. Both endings ship as sibling exports from `orchestration/synthesizer.ts` (`synthesize` for review, `deterministicSynthesize` for check); CLI `format.ts` stays unchanged. This is the cleaner cut: synthesis lives next to dispatch (one architectural concern, one directory), rendering lives next to the CLI surface (one I/O concern, one binary).
 
-4. **Helper extraction is a forcing function for clean splits.** Moving `toComment` + `mapSeverity` + `scopeToDiff` from `index.ts` to `runners/to-comment.ts` was needed so the synthesizer could reuse them without circular imports. That move also incidentally cleaned `index.ts` from ~170 lines of Comment-mapping noise. The original placement (helpers next to the only caller) was right when there *was* only one caller; spine refactor exposed the seam.
+4. **Helper extraction is a forcing function for clean splits.** Moving `toComment` + `mapSeverity` + `scopeToDiff` from `index.ts` to `runners/to-comment.ts` was needed so the synthesizer could reuse them without circular imports. That move also incidentally cleaned `index.ts` from ~170 lines of Comment-mapping noise. The original placement (helpers next to the only caller) was right when there _was_ only one caller; spine refactor exposed the seam.
 
-5. **Sub-agent citation verification: per-finding inside the runner, not a global post-pass.** ADR-0021 #3's "global question-citation verifier" was scoped out of M7; M8 needed verification *somewhere* for the committability sub-agent's emitted snippets. Decision: verify per-finding inside `runCommittability()` against the cited file, drop unverified findings before they leave the runner. Cleaner than threading a `verifyCitations()` post-pass through `runReview()` — and the global verifier's only consumer in v0 is committability anyway, so consolidating there avoids dead architecture. The future global verifier can deduplicate this when it lands.
+5. **Sub-agent citation verification: per-finding inside the runner, not a global post-pass.** ADR-0021 #3's "global question-citation verifier" was scoped out of M7; M8 needed verification _somewhere_ for the committability sub-agent's emitted snippets. Decision: verify per-finding inside `runCommittability()` against the cited file, drop unverified findings before they leave the runner. Cleaner than threading a `verifyCitations()` post-pass through `runReview()` — and the global verifier's only consumer in v0 is committability anyway, so consolidating there avoids dead architecture. The future global verifier can deduplicate this when it lands.
 
 6. **Smoke-harness scope discipline matters.** Plan §7 named five smoke tests including a mocked-cascade `warden review` test. Mocking the cascade through Vitest-style module mocking from a `.mts` script is awkward in tsx; the spine pieces are unit-shaped enough that direct testing covers the same behaviour without the harness overhead. The smoke ships four tests instead of five; the dropped test's invariant ("synthesizer reads scratchpad correctly") is fully covered by the deterministic-synthesis test.
 
@@ -347,14 +348,14 @@ For reference, the locked answers:
 
 8. **Copilot's PR review caught six real issues — all in the committability sub-agent or the dispatch wiring.** Post-merge fixes folded back in:
    - **Path-traversal guards** on both `buildFileInput()` and `verifyCitation()` — `cf.path` and sub-agent-emitted paths flow through `resolveWithinRoot(repoRoot, ...)` which lexically rejects absolute paths and `..` traversal. Dropped paths surface as a `warning`-kind degraded entry naming the file.
-   - **Sensitive-path redaction** — `.env*`, `*.pem`, `*.key`, `id_rsa*`, `.aws/credentials`, `.npmrc`, `.netrc`, etc. send path-only metadata to the LLM. The path itself is the committability signal (`.env.local` IS the smell); the *contents* never leave the machine.
+   - **Sensitive-path redaction** — `.env*`, `*.pem`, `*.key`, `id_rsa*`, `.aws/credentials`, `.npmrc`, `.netrc`, etc. send path-only metadata to the LLM. The path itself is the committability signal (`.env.local` IS the smell); the _contents_ never leave the machine.
    - **Diff-scoped snippets** instead of "first 20 lines of file" — for modified files this prevents leaking unrelated header content (which on bad luck contains secrets) to the LLM provider. Snippet builds from `addedLines` ±2 lines of context, capped at 20 lines. Each line is prefixed `<n>: ` so the LLM can cite by line number; the prompt instructs it to omit the prefix when emitting `snippet`, and the verifier strips a stray `\d+:\s*` defensively.
    - **`open()/read()` for the file head** instead of `readFile()` slurping the whole file — bounded at `MAX_READ_BYTES = 16 KB` regardless of file size.
    - **`performance` import from `node:perf_hooks`** in `dispatch.ts` instead of relying on the global.
    - **Concurrent dispatch** — dispatch now starts in parallel with the inline `Promise.all` rather than serializing after it. Empirical win on the diff-reviews-itself dogfood: 33s → 6s (committability's Haiku call now overlaps with TSC/ESLint/deadcode instead of stacking after them). The pre-fix shape was a real M7 → M8 latency regression — pre-M8 scalability ran inside the inline `Promise.all`; routing it through the contract serialized it.
 
-   The lesson: when migrating from inline calls to a contract-mediated dispatcher, audit the *call-site shape* not just the *contract shape*. The contract was right; the way `runReview()` wired it broke parallelism. Copilot caught it because it pattern-matches on the simpler shape (`await Promise.all([... runScalability ...])` → `await dispatch([...])` after Promise.all). Future contract migrations should fold the dispatcher into the same Promise.all from day one.
+   The lesson: when migrating from inline calls to a contract-mediated dispatcher, audit the _call-site shape_ not just the _contract shape_. The contract was right; the way `runReview()` wired it broke parallelism. Copilot caught it because it pattern-matches on the simpler shape (`await Promise.all([... runScalability ...])` → `await dispatch([...])` after Promise.all). Future contract migrations should fold the dispatcher into the same Promise.all from day one.
 
 ## When you're done
 
-Hand back: a list of any deviations from this plan (with reasons), confirmation all acceptance criteria pass, the close-out report on dogfood validation against M5 / M6 / M7 PRs (specifically: the M7 PR's 6 Copilot misses are *not* expected to close in M8 — note this explicitly so the next milestone's brief can sequence the LLM-shaped sub-agents that *will* close them), and a one-line note in `decisions.md`'s Status Snapshot table flipping ADR-0023 from `Direction` to `Done`.
+Hand back: a list of any deviations from this plan (with reasons), confirmation all acceptance criteria pass, the close-out report on dogfood validation against M5 / M6 / M7 PRs (specifically: the M7 PR's 6 Copilot misses are _not_ expected to close in M8 — note this explicitly so the next milestone's brief can sequence the LLM-shaped sub-agents that _will_ close them), and a one-line note in `decisions.md`'s Status Snapshot table flipping ADR-0023 from `Direction` to `Done`.

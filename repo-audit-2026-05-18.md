@@ -20,19 +20,19 @@ package).
 
 ## Numbers
 
-| Metric | Value |
-|---|---|
-| comments | 0 |
-| durationMs | 95,235 |
-| costUsd | $3.4646 |
-| Opus boss | 33,869 input · 14 output tokens · $0.17 |
-| Sonnet workers | 879,408 input · 43,778 output tokens · $3.29 |
-| degraded entries | 89 |
-| worker-correctness failures | 67 |
-| worker-security failures | 21 |
-| jscpd failures | 1 |
-| rate-limit 429s in log | 636 |
-| connect-timeout errors in log | 42 |
+| Metric                        | Value                                        |
+| ----------------------------- | -------------------------------------------- |
+| comments                      | 0                                            |
+| durationMs                    | 95,235                                       |
+| costUsd                       | $3.4646                                      |
+| Opus boss                     | 33,869 input · 14 output tokens · $0.17      |
+| Sonnet workers                | 879,408 input · 43,778 output tokens · $3.29 |
+| degraded entries              | 89                                           |
+| worker-correctness failures   | 67                                           |
+| worker-security failures      | 21                                           |
+| jscpd failures                | 1                                            |
+| rate-limit 429s in log        | 636                                          |
+| connect-timeout errors in log | 42                                           |
 
 **Cost interpretation:** the 879K Sonnet input tokens were billed in
 full — Anthropic charges for rate-limited prompt evaluation. We paid
@@ -76,7 +76,7 @@ of the three options from `m16-dogfood-handoff.md:73-77`:
 - **(a) Skip Gemini fallback entirely for tool-using workers.** Already
   the current behavior. Documented now via this audit.
 - **(b) Tool-stripped Gemini retry.** When the primary 429s/timeouts,
-  retry once *without* `tools[]` (worker reasons from snippets only).
+  retry once _without_ `tools[]` (worker reasons from snippets only).
   Lower fidelity (no `lookupTypeDef`) but functional; mark findings
   `degraded: info` so reviewers know they ran tool-less.
 - **(c) Restructure Gemini call to use function-declarations without
@@ -106,7 +106,7 @@ jscpd: detector failed (ENOENT: no such file or directory, lstat
 **Mechanism:** M14 retired `llm/formatter.ts`, `cache.ts`, `cascade.ts`,
 `schema.ts`, `prompt-loader.ts`. M16's `file_chunks` junction was
 correctly pruned (`SELECT * FROM file_chunks WHERE file_path LIKE
-'%formatter.ts%'` returns 0). But the *underlying* `chunks` table
+'%formatter.ts%'` returns 0). But the _underlying_ `chunks` table
 retains 12 rows pointing at those deleted files — they're "vestigial,
 kept only for the auto-backfill source-of-truth window" per M16's
 design.
@@ -115,9 +115,7 @@ The hole is in `packages/core/src/context/signals/semantic.ts:141-144`:
 
 ```typescript
 const filePaths =
-  attributedFiles && attributedFiles.length > 0
-    ? attributedFiles
-    : [record.filePath];  // <-- falls back to the stale chunks.file_path
+  attributedFiles && attributedFiles.length > 0 ? attributedFiles : [record.filePath]; // <-- falls back to the stale chunks.file_path
 ```
 
 When `file_chunks.getFilesForHashes()` returns nothing for a hash (which
@@ -169,7 +167,7 @@ No degraded entry surfaces the failure. The review proceeds against an
 empty diff and returns "all clear."
 
 **Fix shape:** in `runGitDiff` / `resolveDiff`, when git exits non-zero,
-return a `ResolvedDiff` with an empty diff *plus* surface the stderr as
+return a `ResolvedDiff` with an empty diff _plus_ surface the stderr as
 a `degraded: { kind: "actionable", topic: "diff-source" }` entry. The
 CLI / harness already collects degraded entries from every layer; this
 is one more emitter. Bonus: switch to two-dot diff (`A..HEAD`) when
@@ -184,7 +182,7 @@ findings. Effective $/finding: undefined.
 
 **Mechanism:** When `streamText({ output: Output.object({ schema }) })`
 returns malformed JSON, the AI SDK throws `AI_NoObjectGeneratedError`
-*after* the tokens have been consumed and billed. There's no
+_after_ the tokens have been consumed and billed. There's no
 pre-emptive guard.
 
 **Fix shape:** this is downstream of #1 — the failures here are rate-
@@ -231,7 +229,7 @@ worker-fallback collapse. At whole-repo scope:
 - Selector still produced per-file candidates because the M5 cheap
   signals (importers, imports, same-folder, symbol-ref) ran fine.
 - Boss-loop dispatch routed per-file correctly.
-- *The* failure was the worker layer 429'ing.
+- _The_ failure was the worker layer 429'ing.
 
 So the M15+ "Retrieval refinements / multi-vector queries" defer in
 `docs/milestones.md:32` is still the right call. **Worker fallback +

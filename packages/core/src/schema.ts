@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 /**
  * Comment schema mirroring `vision.md` §14. The full LLM-formatted comment
@@ -8,42 +8,42 @@ import { z } from 'zod';
  */
 
 export const SourceTypeEnum = z.enum([
-  'cve',
-  'advisory',
-  'changelog',
-  'documentation',
-  'web',
-  'tool',
-  'repo_convention',
+  "cve",
+  "advisory",
+  "changelog",
+  "documentation",
+  "web",
+  "tool",
+  "repo_convention",
   // M11 (ADR-0026): a type-definition citation produced by `lookupTypeDef`.
   // Re-uses SourceSchema's M10 {path, line, snippet} triple — `path` =
   // dts_file (repoRoot-relative, points into node_modules/), `line` =
   // line_start, `snippet` = the single-line-normalized signature. `id`
   // carries `${package}@${version}#${symbol}`; `title` carries
   // `${kind} ${symbol}`. Verified by the API-claim-verifier post-pass.
-  'api_def',
+  "api_def",
 ]);
 export type SourceType = z.infer<typeof SourceTypeEnum>;
 
 export const CategoryEnum = z.enum([
-  'correctness',
-  'clarity',
-  'style',
-  'dedup',
-  'tests',
-  'security',
-  'vulnerability',
-  'contract',
+  "correctness",
+  "clarity",
+  "style",
+  "dedup",
+  "tests",
+  "security",
+  "vulnerability",
+  "contract",
   // ADR-0020: Copilot-delta categories (M6). The LLM emits these only as
   // questions — there are no deterministic producers yet (M7+ work).
-  'scalability',
-  'consistency',
-  'deadcode',
-  'committability',
+  "scalability",
+  "consistency",
+  "deadcode",
+  "committability",
   // ADR-0027: M12 — second producer pair against the ADR-0008 citation thesis.
   // The leverage detector emits assertions for bounded stdlib patterns; the
   // leverage sub-agent emits questions for library-substitution suggestions.
-  'leverage',
+  "leverage",
 ]);
 export type Category = z.infer<typeof CategoryEnum>;
 
@@ -56,7 +56,7 @@ export type Tier = z.infer<typeof TierEnum>;
  * Questions may have empty `sources[]` — asking is not claiming, so the
  * citation thesis is preserved.
  */
-export const KindEnum = z.enum(['assertion', 'question']);
+export const KindEnum = z.enum(["assertion", "question"]);
 export type Kind = z.infer<typeof KindEnum>;
 
 export const SourceSchema = z
@@ -111,7 +111,7 @@ export const CommentSchema = z.object({
   lineEnd: z.number().int().nonnegative(),
   tier: TierEnum,
   category: CategoryEnum,
-  kind: KindEnum.default('assertion'),
+  kind: KindEnum.default("assertion"),
   claim: z.string(),
   explanation: z.string(),
   suggestedAction: z.string().optional(),

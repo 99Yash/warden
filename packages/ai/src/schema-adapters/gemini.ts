@@ -67,9 +67,7 @@ export interface GeminiSchemaPair<T extends ZodType> {
   responseTransform: (raw: unknown) => unknown;
 }
 
-export function transformSchemaForGemini<T extends ZodType>(
-  schema: T,
-): GeminiSchemaPair<T> {
+export function transformSchemaForGemini<T extends ZodType>(schema: T): GeminiSchemaPair<T> {
   const recordedPaths: PathStep[][] = [];
   const transformed = walk(schema, [], recordedPaths);
   if (recordedPaths.length === 0) {
@@ -125,11 +123,7 @@ function identity(v: unknown): unknown {
  *
  * Unknown / unsupported node types pass through unchanged.
  */
-function walk(
-  schema: ZodType,
-  currentPath: PathStep[],
-  paths: PathStep[][],
-): ZodType {
+function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): ZodType {
   const def = defOf(schema);
   if (!def) return schema;
 

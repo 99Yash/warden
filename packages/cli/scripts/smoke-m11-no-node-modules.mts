@@ -67,7 +67,10 @@ assert(
   r1.reason === "package_not_installed",
   `first call reason is package_not_installed (got ${r1.reason})`,
 );
-assert(degraded.length === 1, `exactly one degraded entry after first call (got ${degraded.length})`);
+assert(
+  degraded.length === 1,
+  `exactly one degraded entry after first call (got ${degraded.length})`,
+);
 assert(
   degraded[0]?.kind === "actionable",
   `degraded[0].kind === "actionable" (got ${degraded[0]?.kind})`,

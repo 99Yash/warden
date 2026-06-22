@@ -1,11 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { EmbeddingProvider } from "@warden/ai";
-import type {
-  ChunkStore,
-  EmbeddingStore,
-  FileChunksStore,
-} from "../../indexing/index.js";
+import type { ChunkStore, EmbeddingStore, FileChunksStore } from "../../indexing/index.js";
 import { SqliteFileChunksStore } from "../../indexing/index.js";
 import type { DegradedEntry } from "../../schema.js";
 import type { Evidence } from "../index.js";
@@ -83,8 +79,7 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
           {
             kind: "warning",
             topic: "context",
-            message:
-              "context: voyage query embed returned no vector — semantic signal disabled",
+            message: "context: voyage query embed returned no vector — semantic signal disabled",
           },
         ],
       };
@@ -158,9 +153,7 @@ export async function semanticSignal(input: SemanticSignalInput): Promise<Semant
     // (post-backfill, every chunk has at least one file_chunks row).
     const attributedFiles = attributions.get(r.chunkHash);
     const filePaths =
-      attributedFiles && attributedFiles.length > 0
-        ? attributedFiles
-        : [record.filePath];
+      attributedFiles && attributedFiles.length > 0 ? attributedFiles : [record.filePath];
     for (const filePath of filePaths) {
       if (!fileExists(filePath)) continue;
       const hit: SemanticHit = {

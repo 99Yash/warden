@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { db, importGraph } from "@warden/db";
+import { assertNever } from "../assert-never.js";
 import type { ChangedFile } from "../diff/index.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, formatErr, parseChangedSourceFile } from "./_shared.js";
@@ -67,6 +68,7 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
       degraded.push(parseResult.entry);
       continue;
     }
+    if (parseResult.kind !== "ok") assertNever(parseResult, "ParseChangedFileResult");
     const { abs, sf, addedLines } = parseResult.parsed;
     const candidates = collectOptionalParamCandidates(sf, addedLines);
     if (candidates.length === 0) continue;
@@ -128,11 +130,7 @@ function collectOptionalParamCandidates(
       for (const decl of stmt.declarationList.declarations) {
         if (!ts.isIdentifier(decl.name)) continue;
         const init = decl.initializer;
-        if (
-          init &&
-          (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) &&
-          init.body
-        ) {
+        if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) {
           collectFromFunctionLike(sf, init, decl.name.text, addedLines, out);
         }
       }
@@ -348,4 +346,3 @@ function hasExportModifier(node: ts.Node): boolean {
   const mods = ts.getModifiers(node) ?? [];
   return mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
-

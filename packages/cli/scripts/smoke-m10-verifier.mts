@@ -137,11 +137,13 @@ const survivedC = result.comments.find((c) => c.id === commentC.id);
 
 assert(survivedA !== undefined, "Comment A (verifiable triple) survives");
 assert(
-  survivedA?.sources.length === 1 &&
-    survivedA.sources[0]?.snippet === "return user === 'admin';",
+  survivedA?.sources.length === 1 && survivedA.sources[0]?.snippet === "return user === 'admin';",
   "Comment A keeps its verified source intact",
 );
-assert(survivedB === undefined, "Comment B (bogus triple) is dropped — its only source was unverifiable");
+assert(
+  survivedB === undefined,
+  "Comment B (bogus triple) is dropped — its only source was unverifiable",
+);
 assert(survivedC !== undefined, "Comment C (snippet-less tool source) passes through unchanged");
 assert(
   survivedC?.sources.length === 1 && survivedC.sources[0]?.type === "tool",

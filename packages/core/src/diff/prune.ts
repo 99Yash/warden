@@ -121,7 +121,8 @@ function pruneDirectories(
         const count = child.fileCount;
         if (count > 0) {
           const reasonName = matchesPrefix
-            ? pathPrefixes.find((p) => child.path === p || child.path.startsWith(`${p}/`)) ?? childName
+            ? (pathPrefixes.find((p) => child.path === p || child.path.startsWith(`${p}/`)) ??
+              childName)
             : childName;
           degraded.push({
             kind: "actionable",

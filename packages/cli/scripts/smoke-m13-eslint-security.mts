@@ -126,12 +126,7 @@ const fakeKey = [
 ].join("");
 writeFileSync(
   resolve(TMP_ROOT, secretsPath),
-  [
-    `module.exports = {`,
-    `  apiKey: "${fakeKey}",`,
-    `};`,
-    ``,
-  ].join("\n"),
+  [`module.exports = {`, `  apiKey: "${fakeKey}",`, `};`, ``].join("\n"),
 );
 const secretsResult = await runEslintSecurity(TMP_ROOT, [secretsPath]);
 const secretsFindings = secretsResult.findings.filter((f) =>
@@ -145,12 +140,7 @@ assert(secretsFindings.length >= 1, `no-secrets finding fires (got ${secretsFind
 // ---------------------------------------------------------------------------
 
 process.stdout.write(`\n[5] to-comment routing → category security, tier 1\n`);
-const all = [
-  ...evalFindings,
-  ...execFindings,
-  ...cryptoFindings,
-  ...secretsFindings,
-];
+const all = [...evalFindings, ...execFindings, ...cryptoFindings, ...secretsFindings];
 assert(all.length > 0, `produced at least one Warden-security finding for routing assertion`);
 for (const f of all) {
   const c = toComment(f);

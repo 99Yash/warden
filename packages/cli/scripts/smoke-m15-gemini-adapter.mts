@@ -84,7 +84,10 @@ assert(origParseNumeric.success, `original schema still accepts numeric input`);
 process.stdout.write(`\n[3] responseTransform coerces strings back to numbers\n`);
 
 const transformed = pair2.responseTransform({ tier: "3" }) as { tier: unknown };
-assert(typeof transformed.tier === "number", `tier coerced to number (got ${typeof transformed.tier})`);
+assert(
+  typeof transformed.tier === "number",
+  `tier coerced to number (got ${typeof transformed.tier})`,
+);
 assert(transformed.tier === 3, `tier value preserved (got ${transformed.tier as number})`);
 
 // Round-trip: original schema accepts the post-transform value.
@@ -100,7 +103,10 @@ const { CommentSchema } = await import("@warden/core");
 const BossOutputSchema = z.object({ comments: z.array(CommentSchema) });
 const pair4 = transformSchemaForGemini(BossOutputSchema);
 
-assert(pair4.requestSchema !== BossOutputSchema, `BossOutputSchema replaced (nested transform fired)`);
+assert(
+  pair4.requestSchema !== BossOutputSchema,
+  `BossOutputSchema replaced (nested transform fired)`,
+);
 
 const wireBoss = {
   comments: [
@@ -140,7 +146,10 @@ const coerced = pair4.responseTransform(reqParse.success ? reqParse.data : wireB
   comments: { tier: unknown }[];
 };
 const tiersAreNumbers = coerced.comments.every((c) => typeof c.tier === "number");
-assert(tiersAreNumbers, `all tier fields coerced to numbers (got: ${coerced.comments.map((c) => typeof c.tier).join(",")})`);
+assert(
+  tiersAreNumbers,
+  `all tier fields coerced to numbers (got: ${coerced.comments.map((c) => typeof c.tier).join(",")})`,
+);
 
 const finalParse = BossOutputSchema.safeParse(coerced);
 assert(finalParse.success, `coerced value round-trips through original BossOutputSchema`);

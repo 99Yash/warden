@@ -51,9 +51,7 @@ export interface ModelCatalogMetadata {
 let cachedCatalog: { fetchedAt: number; value: ModelsDevCatalog } | undefined;
 let pendingCatalog: Promise<ModelsDevCatalog | undefined> | undefined;
 
-export async function modelCatalogMetadata(
-  model: ResolvedLlmModel,
-): Promise<ModelCatalogMetadata> {
+export async function modelCatalogMetadata(model: ResolvedLlmModel): Promise<ModelCatalogMetadata> {
   const catalog = await fetchModelsDevCatalog();
   const entry = catalog?.[model.provider]?.models?.[model.modelId];
   if (!entry) return {};

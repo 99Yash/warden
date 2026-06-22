@@ -49,9 +49,7 @@ export async function runVulnerabilityCheck(
   }
 
   const pkgLines = readPackageJsonLines(repoRoot);
-  const comments = pairs.map(({ advisory, verified }) =>
-    toComment(advisory, verified, pkgLines),
-  );
+  const comments = pairs.map(({ advisory, verified }) => toComment(advisory, verified, pkgLines));
 
   const degraded: DegradedEntry[] = [...audit.degraded];
   if (droppedUnverified > 0) {
@@ -93,7 +91,8 @@ function toComment(
     }
   }
 
-  const explanation = verified.record.summary ?? verified.record.details?.slice(0, 400) ?? advisory.title;
+  const explanation =
+    verified.record.summary ?? verified.record.details?.slice(0, 400) ?? advisory.title;
 
   const file = pkgLines?.relativePath ?? "package.json";
   return {

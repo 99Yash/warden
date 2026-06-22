@@ -77,11 +77,10 @@ const SOURCE_GLOBS = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"];
 
 function gitGrep(repoRoot: string, symbol: string): Promise<GrepMatch[]> {
   return new Promise((resolveP) => {
-    const child = spawn(
-      "git",
-      ["grep", "-wn", "-F", "--", symbol, ...SOURCE_GLOBS],
-      { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn("git", ["grep", "-wn", "-F", "--", symbol, ...SOURCE_GLOBS], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();

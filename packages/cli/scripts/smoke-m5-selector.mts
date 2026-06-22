@@ -41,9 +41,14 @@ async function main() {
   const ctx = await candidatesToRetrievedContext(r2.candidates, repoRoot);
   console.log(`\nchunks: ${ctx.chunks.length}, sameFolderPaths: ${ctx.sameFolderPaths.length}`);
   if (ctx.chunks[0]) {
-    console.log(`first chunk: ${ctx.chunks[0].path}:${ctx.chunks[0].lineStart}-${ctx.chunks[0].lineEnd}`);
+    console.log(
+      `first chunk: ${ctx.chunks[0].path}:${ctx.chunks[0].lineStart}-${ctx.chunks[0].lineEnd}`,
+    );
     console.log(`  reason: ${ctx.chunks[0].reason}`);
     console.log(`  snippet (first 200 chars): ${ctx.chunks[0].snippet.slice(0, 200)}`);
   }
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -7,10 +7,7 @@ import {
   fileChunks as fileChunksTable,
   merkle as merkleTable,
 } from "@warden/db";
-import type {
-  ChunkRecord,
-  Chunker,
-} from "../context/chunker.js";
+import type { ChunkRecord, Chunker } from "../context/chunker.js";
 import {
   computeRepoMerkleRoot,
   writeRepoMerkleRoot,
@@ -108,22 +105,18 @@ export interface ReconcileInput {
   emit?: (event: ReconcileEvent) => void;
 }
 
-export async function reconcileFiles(
-  input: ReconcileInput,
-): Promise<ReconcileSummary> {
+export async function reconcileFiles(input: ReconcileInput): Promise<ReconcileSummary> {
   const startedAt = Date.now();
   const emit = input.emit ?? (() => undefined);
 
-  const backfilledRowCount = await input.fileChunksStore
-    .backfillFromChunksIfNeeded();
+  const backfilledRowCount = await input.fileChunksStore.backfillFromChunksIfNeeded();
   if (backfilledRowCount > 0) {
     emit({ type: "backfilled", rowCount: backfilledRowCount });
   }
 
   const refreshed: string[] = [];
   const skippedOverBudget: string[] = [];
-  let remainingBudget =
-    input.maxUsdBudget ?? Number.POSITIVE_INFINITY;
+  let remainingBudget = input.maxUsdBudget ?? Number.POSITIVE_INFINITY;
   let totalPromptTokens = 0;
   let totalEstimatedUsd = 0;
   let totalActualUsd = 0;
@@ -144,11 +137,7 @@ export async function reconcileFiles(
 
     let chunksNew: ChunkRecord[] = [];
     try {
-      chunksNew = await input.chunker.chunk(
-        file.path,
-        file.content,
-        file.fileSha,
-      );
+      chunksNew = await input.chunker.chunk(file.path, file.content, file.fileSha);
     } catch {
       // Chunker failures are surfaced by the init flow's own degraded path;
       // reconcile keeps going so other files still refresh.
@@ -166,10 +155,7 @@ export async function reconcileFiles(
           );
     const missing = newHashes.filter((h) => !existing.has(h));
 
-    const estimatedUsd = estimateBatchUsd(
-      missing.length,
-      input.lockedModelId,
-    );
+    const estimatedUsd = estimateBatchUsd(missing.length, input.lockedModelId);
     totalEstimatedUsd += estimatedUsd;
     if (estimatedUsd > remainingBudget) {
       skippedOverBudget.push(file.path);
@@ -194,18 +180,12 @@ export async function reconcileFiles(
     if (missing.length > 0) {
       const hashToContent = new Map<string, string>();
       for (const c of chunksNew) {
-        if (!hashToContent.has(c.chunkHash))
-          hashToContent.set(c.chunkHash, c.content);
+        if (!hashToContent.has(c.chunkHash)) hashToContent.set(c.chunkHash, c.content);
       }
-      const batches = chunkArray(
-        missing,
-        input.provider.maxBatchSize(),
-      );
+      const batches = chunkArray(missing, input.provider.maxBatchSize());
       for (const batch of batches) {
         if (fileFailed) break;
-        const batchInputs = batch.map(
-          (h) => hashToContent.get(h) ?? "",
-        );
+        const batchInputs = batch.map((h) => hashToContent.get(h) ?? "");
         try {
           const resp = await input.provider.embed({
             inputs: batchInputs,
@@ -235,10 +215,7 @@ export async function reconcileFiles(
             });
           }
           promptTokens += resp.promptTokens;
-          actualUsd += usdFromTokens(
-            resp.promptTokens,
-            input.lockedModelId,
-          );
+          actualUsd += usdFromTokens(resp.promptTokens, input.lockedModelId);
         } catch {
           failedEmbeds++;
           fileFailed = true;
@@ -291,8 +268,7 @@ export async function reconcileFiles(
     emit({ type: "file-removed", path });
   }
 
-  const { chunksPruned, embeddingsPruned } =
-    await input.fileChunksStore.pruneOrphans();
+  const { chunksPruned, embeddingsPruned } = await input.fileChunksStore.pruneOrphans();
   if (chunksPruned > 0 || embeddingsPruned > 0) {
     emit({
       type: "orphans-pruned",
@@ -317,10 +293,7 @@ export async function reconcileFiles(
   }
 
   const degraded: DegradedEntry[] = [];
-  if (
-    skippedOverBudget.length > 0 &&
-    input.maxUsdBudget !== undefined
-  ) {
+  if (skippedOverBudget.length > 0 && input.maxUsdBudget !== undefined) {
     const plural = skippedOverBudget.length === 1 ? "" : "s";
     degraded.push({
       kind: "actionable",
@@ -408,19 +381,13 @@ function commitFileReconcile(args: {
         chunkHash: e.chunkHash,
         modelId: e.modelId,
         modelVersion: e.modelVersion,
-        vector: Buffer.from(
-          e.vector.buffer,
-          e.vector.byteOffset,
-          e.vector.byteLength,
-        ),
+        vector: Buffer.from(e.vector.buffer, e.vector.byteOffset, e.vector.byteLength),
         createdAt: now,
       }));
       tx.insert(embeddingsTable).values(rows).onConflictDoNothing().run();
     }
     // Junction rows: replace-for-file semantics keep file_chunks authoritative.
-    tx.delete(fileChunksTable)
-      .where(eq(fileChunksTable.filePath, args.filePath))
-      .run();
+    tx.delete(fileChunksTable).where(eq(fileChunksTable.filePath, args.filePath)).run();
     if (args.chunkHashes.length > 0) {
       const seen = new Set<string>();
       const now = new Date();
@@ -441,10 +408,7 @@ function commitFileReconcile(args: {
         });
       }
       if (rows.length > 0) {
-        tx.insert(fileChunksTable)
-          .values(rows)
-          .onConflictDoNothing()
-          .run();
+        tx.insert(fileChunksTable).values(rows).onConflictDoNothing().run();
       }
     }
     // Merkle leaf: keep the file's recorded sha in sync so the next
@@ -471,12 +435,8 @@ function commitFileReconcile(args: {
 function commitFileRemoval(filePath: string): void {
   const conn = db();
   conn.transaction((tx) => {
-    tx.delete(fileChunksTable)
-      .where(eq(fileChunksTable.filePath, filePath))
-      .run();
-    tx.delete(merkleTable)
-      .where(eq(merkleTable.nodePath, filePath))
-      .run();
+    tx.delete(fileChunksTable).where(eq(fileChunksTable.filePath, filePath)).run();
+    tx.delete(merkleTable).where(eq(merkleTable.nodePath, filePath)).run();
   });
 }
 
@@ -503,10 +463,7 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
  * `estimateInit()` math at the chunk-batch granularity so the running
  * budget shares one source-of-truth for the per-million-token price.
  */
-function estimateBatchUsd(
-  missingCount: number,
-  modelId: string,
-): number {
+function estimateBatchUsd(missingCount: number, modelId: string): number {
   if (missingCount <= 0) return 0;
   const tokens = missingCount * ESTIMATE_CONSTANTS.TOKENS_PER_CHUNK;
   const usd = (tokens / 1_000_000) * voyageModelMeta(modelId).usdPerMTokens;

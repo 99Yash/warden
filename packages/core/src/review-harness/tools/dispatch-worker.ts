@@ -71,10 +71,7 @@ export const DEFAULT_TIER_BY_CONCERN: Record<Concern, WorkerTier> = {
  * `getWorker{Strong,Cheap}Model()` getter to call. Single source of
  * truth so the slot and the model match.
  */
-export function resolveWorkerTier(
-  concern: Concern,
-  tier: WorkerTier | undefined,
-): WorkerTier {
+export function resolveWorkerTier(concern: Concern, tier: WorkerTier | undefined): WorkerTier {
   return tier ?? DEFAULT_TIER_BY_CONCERN[concern];
 }
 
@@ -175,9 +172,7 @@ export interface WorkerInvocationResult {
   tier?: "sonnet" | "haiku";
 }
 
-export type WorkerRoute = (
-  invocation: WorkerInvocation,
-) => Promise<WorkerInvocationResult>;
+export type WorkerRoute = (invocation: WorkerInvocation) => Promise<WorkerInvocationResult>;
 
 export interface MakeDispatchWorkerToolOptions {
   repoRoot: string;
@@ -228,9 +223,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
   let dispatchedCount = 0;
   let budgetEntryEmitted = false;
 
-  const runOneDispatch = async (
-    args: DispatchWorkerArgs,
-  ): Promise<DispatchWorkerResult> => {
+  const runOneDispatch = async (args: DispatchWorkerArgs): Promise<DispatchWorkerResult> => {
     // Budget gate: emit a single degraded entry the first time we hit
     // it, then short-circuit subsequent dispatches without invoking
     // the route. This mirrors M11 lookupTypeDef's once-per-review
@@ -271,8 +264,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
     let release: (() => void) | undefined;
     if (opts.concurrency) {
       const resolvedTier = resolveWorkerTier(args.concern, args.tier);
-      const sem =
-        resolvedTier === "sonnet" ? opts.concurrency.strong : opts.concurrency.cheap;
+      const sem = resolvedTier === "sonnet" ? opts.concurrency.strong : opts.concurrency.cheap;
       const acquired = await sem.acquire();
       release = acquired.release;
       opts.scratchpad.recordConcurrencyMetric({ waitMs: acquired.waitMs });

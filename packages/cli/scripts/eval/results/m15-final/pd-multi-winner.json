@@ -141,9 +141,7 @@
               "sample": 1,
               "commentCount": 0,
               "caughtLabels": [],
-              "missedLabels": [
-                "debugger-leftover"
-              ],
+              "missedLabels": ["debugger-leftover"],
               "unlabeledComments": 0,
               "dispatchCount": 2,
               "costUsd": 0.0559,
@@ -155,9 +153,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 2,
               "commentCount": 2,
-              "caughtLabels": [
-                "debugger-leftover"
-              ],
+              "caughtLabels": ["debugger-leftover"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -170,9 +166,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 3,
               "commentCount": 2,
-              "caughtLabels": [
-                "debugger-leftover"
-              ],
+              "caughtLabels": ["debugger-leftover"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 2,
@@ -201,9 +195,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 1,
               "commentCount": 2,
-              "caughtLabels": [
-                "docstring-drift"
-              ],
+              "caughtLabels": ["docstring-drift"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -217,9 +209,7 @@
               "sample": 2,
               "commentCount": 0,
               "caughtLabels": [],
-              "missedLabels": [
-                "docstring-drift"
-              ],
+              "missedLabels": ["docstring-drift"],
               "unlabeledComments": 0,
               "dispatchCount": 2,
               "costUsd": 0.0904,
@@ -231,9 +221,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 3,
               "commentCount": 2,
-              "caughtLabels": [
-                "docstring-drift"
-              ],
+              "caughtLabels": ["docstring-drift"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -262,9 +250,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 1,
               "commentCount": 1,
-              "caughtLabels": [
-                "off-by-one"
-              ],
+              "caughtLabels": ["off-by-one"],
               "missedLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 1,
@@ -277,9 +263,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 2,
               "commentCount": 1,
-              "caughtLabels": [
-                "off-by-one"
-              ],
+              "caughtLabels": ["off-by-one"],
               "missedLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 1,
@@ -292,9 +276,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 3,
               "commentCount": 1,
-              "caughtLabels": [
-                "off-by-one"
-              ],
+              "caughtLabels": ["off-by-one"],
               "missedLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 1,
@@ -323,9 +305,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 1,
               "commentCount": 1,
-              "caughtLabels": [
-                "stringify-clone"
-              ],
+              "caughtLabels": ["stringify-clone"],
               "missedLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 2,
@@ -338,9 +318,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 2,
               "commentCount": 1,
-              "caughtLabels": [
-                "stringify-clone"
-              ],
+              "caughtLabels": ["stringify-clone"],
               "missedLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 2,
@@ -354,9 +332,7 @@
               "sample": 3,
               "commentCount": 0,
               "caughtLabels": [],
-              "missedLabels": [
-                "stringify-clone"
-              ],
+              "missedLabels": ["stringify-clone"],
               "unlabeledComments": 0,
               "dispatchCount": 2,
               "costUsd": 0.0485,
@@ -384,9 +360,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 1,
               "commentCount": 2,
-              "caughtLabels": [
-                "sequential-await"
-              ],
+              "caughtLabels": ["sequential-await"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -399,9 +373,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 2,
               "commentCount": 2,
-              "caughtLabels": [
-                "sequential-await"
-              ],
+              "caughtLabels": ["sequential-await"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -414,9 +386,7 @@
               "config": "programmatic-dispatch-multi",
               "sample": 3,
               "commentCount": 2,
-              "caughtLabels": [
-                "sequential-await"
-              ],
+              "caughtLabels": ["sequential-await"],
               "missedLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -446,9 +416,7 @@
               "sample": 1,
               "commentCount": 0,
               "caughtLabels": [],
-              "missedLabels": [
-                "eval-rce"
-              ],
+              "missedLabels": ["eval-rce"],
               "unlabeledComments": 0,
               "dispatchCount": 2,
               "costUsd": 0.0824,
@@ -461,9 +429,7 @@
               "sample": 2,
               "commentCount": 0,
               "caughtLabels": [],
-              "missedLabels": [
-                "eval-rce"
-              ],
+              "missedLabels": ["eval-rce"],
               "unlabeledComments": 0,
               "dispatchCount": 1,
               "costUsd": 0.0544,
@@ -476,9 +442,7 @@
               "sample": 3,
               "commentCount": 0,
               "caughtLabels": [],
-              "missedLabels": [
-                "eval-rce"
-              ],
+              "missedLabels": ["eval-rce"],
               "unlabeledComments": 0,
               "dispatchCount": 2,
               "costUsd": 0.0815,

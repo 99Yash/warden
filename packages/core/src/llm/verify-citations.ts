@@ -61,9 +61,7 @@ export interface VerifyCitationsOutput {
   degraded: DegradedEntry[];
 }
 
-export async function verifyCitations(
-  input: VerifyCitationsInput,
-): Promise<VerifyCitationsOutput> {
+export async function verifyCitations(input: VerifyCitationsInput): Promise<VerifyCitationsOutput> {
   const fileCache = new Map<string, FileLines | null>();
   const out: Comment[] = [];
   let droppedCitations = 0;

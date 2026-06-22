@@ -143,9 +143,7 @@ const { runBossLoop } = await import("@warden/core/review-harness/boss-loop");
 const { ReviewScratchpad } = await import("@warden/core/review-harness/scratchpad");
 const { makeWorkerRoute } = await import("@warden/core/review-harness/workers/dispatch");
 
-type WorkerInvocation = Parameters<
-  Awaited<ReturnType<typeof makeWorkerRoute>>
->[0];
+type WorkerInvocation = Parameters<Awaited<ReturnType<typeof makeWorkerRoute>>>[0];
 
 let failed = 0;
 function assert(cond: unknown, msg: string): void {
@@ -168,7 +166,10 @@ const detPriors = await runDetPriors({
 process.stdout.write(
   `  → ${detPriors.changed.length} changed file(s); ${detPriors.findings.length} det-prior finding(s)\n`,
 );
-assert(detPriors.changed.length === 3, `det priors picked up 3 files (got ${detPriors.changed.length})`);
+assert(
+  detPriors.changed.length === 3,
+  `det priors picked up 3 files (got ${detPriors.changed.length})`,
+);
 
 // Wrap the route to record every dispatch with a timestamp.
 function makeRecordingRoute(): {
@@ -258,7 +259,9 @@ for (const f of expectedFiles) {
 // call. They should arrive in the FIRST burst (≤ ~2s from start, well
 // before the boss can complete its first thinking pass).
 const round0Window = r2.records.filter((r) => r.ts - startMs2 < 2500);
-process.stdout.write(`  → ${round0Window.length} dispatch(es) within first 2.5s (Round 0 window)\n`);
+process.stdout.write(
+  `  → ${round0Window.length} dispatch(es) within first 2.5s (Round 0 window)\n`,
+);
 assert(
   round0Window.length >= 3,
   `≥3 dispatches in first 2.5s (Round 0 fan-out) — got ${round0Window.length}`,

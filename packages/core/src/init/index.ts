@@ -125,7 +125,10 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
   if (opts.rebuild) {
     rebuilt = true;
     if (existingLock) {
-      const removed = await embeddingStore.deleteByModel(existingLock.modelId, existingLock.modelVersion);
+      const removed = await embeddingStore.deleteByModel(
+        existingLock.modelId,
+        existingLock.modelVersion,
+      );
       if (removed > 0) {
         emit({
           type: "phase-degraded",
@@ -345,8 +348,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
   // version stamp on top of that.
   await writeFormatVersion(CURRENT_FORMAT_VERSION);
 
-  const abortedForCost =
-    reconcile.skippedOverBudget.length > 0 && opts.maxCostUsd !== undefined;
+  const abortedForCost = reconcile.skippedOverBudget.length > 0 && opts.maxCostUsd !== undefined;
 
   const summary = finishSummary({
     startedAt,
@@ -401,7 +403,12 @@ function finishSummary(args: {
 
 export { ensureGitignore } from "./ensure-gitignore.js";
 export { walkRepo, type WalkedFile, type WalkResult } from "./walk.js";
-export { estimateInit, ESTIMATE_CONSTANTS, type EstimateInput, type EstimateResult } from "./estimate.js";
+export {
+  estimateInit,
+  ESTIMATE_CONSTANTS,
+  type EstimateInput,
+  type EstimateResult,
+} from "./estimate.js";
 export {
   reconcileFiles,
   type ReconcileEvent,

@@ -544,9 +544,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     }
 
     if (submittedRaw === undefined) {
-      throw new Error(
-        "boss ended without calling submit_review (no final comment set emitted)",
-      );
+      throw new Error("boss ended without calling submit_review (no final comment set emitted)");
     }
     // Coerce string-form numeric literals back to numbers. No-op when the
     // schema contained no numeric-literal-union (geminiPair is identity).

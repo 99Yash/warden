@@ -119,18 +119,14 @@ process.stdout.write(`\n[2] Strong-cap saturation does not delay cheap acquires\
 // [3] Dispatch tool integration — stubbed route, scratchpad totals match.
 // ---------------------------------------------------------------------------
 
-process.stdout.write(
-  `\n[3] makeDispatchWorkerTool wires the semaphore + scratchpad correctly\n`,
-);
+process.stdout.write(`\n[3] makeDispatchWorkerTool wires the semaphore + scratchpad correctly\n`);
 {
   const strong = new Semaphore(2);
   const cheap = new Semaphore(8); // intentionally loose — only strong should engage
   const scratchpad = new ReviewScratchpad();
 
   let routeCalls = 0;
-  const route = async (
-    _invocation: WorkerInvocation,
-  ): Promise<WorkerInvocationResult> => {
+  const route = async (_invocation: WorkerInvocation): Promise<WorkerInvocationResult> => {
     routeCalls += 1;
     await sleep(SLOT_MS);
     return {
@@ -163,10 +159,7 @@ process.stdout.write(
   const elapsed = Date.now() - start;
   const expected = Math.ceil(N / 2) * SLOT_MS;
 
-  assert(
-    routeCalls === N,
-    `route invoked once per dispatch (${routeCalls}/${N})`,
-  );
+  assert(routeCalls === N, `route invoked once per dispatch (${routeCalls}/${N})`);
   assert(
     near(elapsed, expected, SLACK_MS),
     `dispatch wall-clock ${elapsed}ms near ${expected}ms (±${SLACK_MS}ms)`,
@@ -175,10 +168,7 @@ process.stdout.write(
   const agg = scratchpad.concurrencyAggregate();
   assert(agg !== null, "concurrencyAggregate is non-null when the cap engaged");
   if (agg !== null) {
-    assert(
-      agg.totalDispatches === N,
-      `totalDispatches === ${N} (got ${agg.totalDispatches})`,
-    );
+    assert(agg.totalDispatches === N, `totalDispatches === ${N} (got ${agg.totalDispatches})`);
     assert(
       agg.totalQueued === Math.max(N - 2, 0),
       `totalQueued === max(N-cap, 0) = ${Math.max(N - 2, 0)} (got ${agg.totalQueued})`,
@@ -204,9 +194,7 @@ process.stdout.write(`\n[4] Aggregate stays null when the cap never engages\n`);
   const cheap = new Semaphore(8);
   const scratchpad = new ReviewScratchpad();
 
-  const route = async (
-    _invocation: WorkerInvocation,
-  ): Promise<WorkerInvocationResult> => {
+  const route = async (_invocation: WorkerInvocation): Promise<WorkerInvocationResult> => {
     await sleep(20);
     return {
       findings: [],
@@ -235,10 +223,7 @@ process.stdout.write(`\n[4] Aggregate stays null when the cap never engages\n`);
   );
 
   const agg = scratchpad.concurrencyAggregate();
-  assert(
-    agg === null,
-    `concurrencyAggregate is null on happy path (got ${JSON.stringify(agg)})`,
-  );
+  assert(agg === null, `concurrencyAggregate is null on happy path (got ${JSON.stringify(agg)})`);
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ This is the milestone brief for the agent (or future-me) implementing M7. Self-c
 1. **`./decisions.md`** — focus on **ADR-0021 (this milestone's direction)** plus ADR-0008 (citation thesis — extends to questions in M7), ADR-0012 (review priority order — its successor ADR-0020 lists the four new category slots), ADR-0013 (I/O-pure core), ADR-0017 (LLM provider fallback — applies to the sub-agent), ADR-0019 (M6 — punch-list items 1–14 originate here), ADR-0020 (the four new category names + slot ordering — M7 implements its M7+ upgrade path), **ADR-0022 (M7 placeholder for diff-level noise filter; supersedes ADR-0021 #2's Tier-2 file-count gate).**
 
    Also worth a skim: **`./CONTEXT.md`** — the noun glossary for Warden. The runner / detector / sub-agent vocabulary used throughout this plan is canonicalised there; reach for those terms before inventing new ones.
+
 2. **`./CLAUDE.md`** — package boundary table is load-bearing. M7 adds files in `@warden/core` only; no new workspace package; no new package boundary crossings.
 3. **`./packages/core/src/index.ts`** — current `review()` pipeline. M5 left `RetrievedContext` populated via `candidatesToRetrievedContext()`; M6 added the semantic signal + `runInit`. M7 adds three deterministic detector workers + one sub-agent worker + the question-citation verifier post-pass + the npm-audit collapse logic.
 4. **`./packages/core/src/schema.ts`** — `CategoryEnum` already contains `scalability`, `consistency`, `deadcode`, `committability` (added by ADR-0020). `KindEnum` already discriminates `assertion | question`. No schema changes in M7 beyond the `degradedWorkers` discriminated shape.
@@ -106,7 +107,7 @@ In `packages/db/`:
 - Resolution helper: in `packages/db/src/index.ts`, expose a `migrationsFolder()` function using `import.meta.url` to resolve to the bundled `dist/migrations/` path at runtime. Works whether the consumer is published-warden (`node_modules/@warden/db/dist/migrations/`) or workspace-warden (`packages/db/dist/migrations/` after `pnpm build`).
 - Gate the migration call: a module-scoped `let migrated: Promise<void> | null = null` in `packages/db/src/index.ts`. The first `db()` call sets `migrated = migrate(connection, { migrationsFolder: migrationsFolder() })` and awaits it before returning. Subsequent `db()` calls await the same promise — idempotent, costs ~1ms per call after the first.
 - Fail-forward: a DB ahead of bundled migrations (cache schema is newer than the warden binary) is a hard error. Detect via drizzle's `migrate()` return value / thrown error — capture and rethrow as `Error("Cache schema is newer than this warden version (cache=v<N>, binary=v<M>). Upgrade warden or delete .warden/cache.sqlite to recreate.")`.
-- Acceptance: a fresh repo with no `.warden/cache.sqlite` runs `pnpm warden init` → success. Re-running `init` is idempotent. Deleting `.warden/cache.sqlite` and re-running `init` is also fine. `pnpm db:migrate` (the existing dev-loop command) still works — it targets warden's *own* `.warden/cache.sqlite` and is unrelated to the runtime migration in published `@warden/db`.
+- Acceptance: a fresh repo with no `.warden/cache.sqlite` runs `pnpm warden init` → success. Re-running `init` is idempotent. Deleting `.warden/cache.sqlite` and re-running `init` is also fine. `pnpm db:migrate` (the existing dev-loop command) still works — it targets warden's _own_ `.warden/cache.sqlite` and is unrelated to the runtime migration in published `@warden/db`.
 
 ### 2. `no-embeddings` banner state (item 2 — engine blocker)
 
@@ -187,7 +188,7 @@ In `packages/core/src/index.ts` (where `runVulnerabilityCheck` is called):
 - If `manifestTouched`: today's behavior. Emit per-advisory `Comment`s as before.
 - If `!manifestTouched`: aggregate the vuln runner's output into a single `Comment` with `category: "vulnerability"`, `tier: 3`, `file: "package.json"`, `line: 1`, body `\`Repo has ${count} known vulnerabilities; none introduced by this diff. Run \\\`pnpm audit\\\` (or your package manager's equivalent) for details.\``.
 - Verbose mode (`--verbose`) restores the per-advisory output regardless of `manifestTouched` — users who want the volume can still get it.
-- The verifier discipline (OSV citation per ADR-0008) is unchanged. What changed is the *aggregation*, not the detection.
+- The verifier discipline (OSV citation per ADR-0008) is unchanged. What changed is the _aggregation_, not the detection.
 - Acceptance: a diff that doesn't touch `package.json` produces 1 vuln Comment in default mode + N Comments in verbose mode. A diff that touches `package.json` produces N Comments in both.
 
 ### 7. Scalability detector (`packages/core/src/runners/scalability.ts`)
@@ -211,7 +212,7 @@ export interface ScalabilityRunnerOutput {
 }
 
 export async function runScalability(
-  input: ScalabilityRunnerInput
+  input: ScalabilityRunnerInput,
 ): Promise<ScalabilityRunnerOutput>;
 ```
 
@@ -257,7 +258,7 @@ Detection algorithm:
    - Query M5's `import_graph` (reverse: which files import the file containing this function?) — gives candidate caller files. M5 stores this as `(file_path, file_sha) → imports_json`; the reverse is a derived in-memory index.
    - Limit to one hop: only direct callers, not transitive.
    - For each caller file: parse it with `TsCompilerParser`; find all `CallExpression` nodes whose callee resolves to the function in question; inspect each callsite's argument list.
-   - If the optional param's argument is *never* passed by any callsite: emit one finding.
+   - If the optional param's argument is _never_ passed by any callsite: emit one finding.
 3. Per-finding shape includes a 3-part `evidence` array: `[paramDecl, branch, representativeCallsite]`. Message: `\`Optional parameter '\${paramName}' is never passed by any of \${calleeCount} callsite(s); branch on L\${branchLine} is unreachable from review() callers.\``.
 
 Maps to `{ tier: 2, category: "deadcode", kind: "assertion" }`.
@@ -322,16 +323,16 @@ import type { Comment } from "../schema.js";
 export interface CommittabilityRunnerInput {
   repoRoot: string;
   changed: ChangedFile[];
-  added: ChangedFile[];                // subset of changed where status === "added"
+  added: ChangedFile[]; // subset of changed where status === "added"
 }
 
 export interface CommittabilityRunnerOutput {
-  questions: Comment[];                // kind: "question", category: "committability"
+  questions: Comment[]; // kind: "question", category: "committability"
   degraded: DegradedEntry[];
 }
 
 export async function runCommittability(
-  input: CommittabilityRunnerInput
+  input: CommittabilityRunnerInput,
 ): Promise<CommittabilityRunnerOutput>;
 ```
 
@@ -411,7 +412,7 @@ Algorithm:
    - If yes: keep the source.
    - If no: drop the source from `sources[]`.
 2. After source-pruning: if a `Comment` had ≥ 1 source originally and ends up with 0 sources, drop the whole Comment. Increment a `droppedCount`.
-3. Emit `degraded: [{ kind: "info", topic: "llm", message: \`dropped \${droppedCount} citations without verifiable snippet\` }]` if `droppedCount > 0`.
+3. Emit `degraded: [{ kind: "info", topic: "llm", message: \`dropped \${droppedCount} citations without verifiable snippet\` }]`if`droppedCount > 0`.
 
 Comments with empty `sources[]` from the start (e.g., the main review LLM's questions that don't carry citations) skip verification entirely — empty `sources[]` is the discipline, not a violation.
 
@@ -435,8 +436,14 @@ const parser = new TsCompilerParser();
 const selector: ContextSelector = new CheapSignalsSelector({ db, parser });
 
 const [
-  tscResult, eslintResult, vulnResult, selectorResult,
-  scalabilityResult, deadcodeResult, consistencyResult, committabilityResult,
+  tscResult,
+  eslintResult,
+  vulnResult,
+  selectorResult,
+  scalabilityResult,
+  deadcodeResult,
+  consistencyResult,
+  committabilityResult,
 ] = await Promise.all([
   runTsc(input.repoRoot, ecosystem.tsconfigPaths),
   ecosystem.hasEslint && changedPaths.length > 0
@@ -446,18 +453,27 @@ const [
     ? runVulnerabilityCheck(input.repoRoot, ecosystem.lockfile)
     : Promise.resolve({ comments: [], degraded: [] }),
   selector.select({ repoRoot: input.repoRoot, changed: changed ?? [], ecosystem }),
-  changed ? runScalability({ repoRoot: input.repoRoot, changed, parser }) : { findings: [], degraded: [] },
-  changed ? runDeadcode({ repoRoot: input.repoRoot, changed, parser, db }) : { findings: [], degraded: [] },
-  changed ? runConsistency({ repoRoot: input.repoRoot, changed, parser }) : { findings: [], degraded: [] },
-  changed ? runCommittability({ repoRoot: input.repoRoot, changed, added: addedFiles }) : { questions: [], degraded: [] },
+  changed
+    ? runScalability({ repoRoot: input.repoRoot, changed, parser })
+    : { findings: [], degraded: [] },
+  changed
+    ? runDeadcode({ repoRoot: input.repoRoot, changed, parser, db })
+    : { findings: [], degraded: [] },
+  changed
+    ? runConsistency({ repoRoot: input.repoRoot, changed, parser })
+    : { findings: [], degraded: [] },
+  changed
+    ? runCommittability({ repoRoot: input.repoRoot, changed, added: addedFiles })
+    : { questions: [], degraded: [] },
 ]);
 
 // jscpd unchanged from M5
 const candidatePaths = selectorResult.candidates.map((c) => c.path);
 const scopedForJscpd = uniq([...changedPaths, ...candidatePaths]);
-const jscpdResult = scopedForJscpd.length > 0
-  ? await runJscpd(input.repoRoot, scopedForJscpd, new Set(changedPaths))
-  : { findings: [], degraded: [] };
+const jscpdResult =
+  scopedForJscpd.length > 0
+    ? await runJscpd(input.repoRoot, scopedForJscpd, new Set(changedPaths))
+    : { findings: [], degraded: [] };
 
 // npm-audit collapse (item 10)
 const manifestTouched = changedPaths.some(isManifestPath);
@@ -489,9 +505,7 @@ const formatted = await formatReview({
 });
 
 // Merge: deterministic findings + LLM-formatted output + sub-agent questions
-let comments = [
-  ...applyHardRules([...formatted.comments, ...subagentQuestions], input.config),
-];
+let comments = [...applyHardRules([...formatted.comments, ...subagentQuestions], input.config)];
 
 // Substring-verifier post-pass (ADR-0021 #3)
 const verifierResult = await verifyCitations(comments, input.repoRoot);
@@ -519,8 +533,8 @@ Banner placement (item 6): move the banner-render call from post-comments to pre
 
 - **Item 5** — `packages/core/src/init/index.ts`: split `summary.cachedChunks` from `summary.cachedEmbeddings`. Render line: `\`\${chunkCount} chunks (\${cachedChunks} cached) · \${newlyEmbedded}/\${chunkCount} embeddings · \${failed} failed\``. Three numbers instead of two; covers the "319 cached · 319 newly embedded" ambiguity from M6 dogfood.
 - **Item 6** — banner placement: see §12 above (one block-move).
-- **Item 12** — `packages/core/src/init/index.ts`: move `await ensureGitignore(repoRoot)` to *after* `readLockedModel(db)` (which is the call that triggers schema bootstrap via item 1's runtime migration). On a fresh repo, the order becomes: `db()` (auto-migrates) → `readLockedModel(db)` (now succeeds) → `ensureGitignore(repoRoot)`. If `db()` fails, `ensureGitignore` doesn't run; the side effect is atomic ("either everything happened or nothing did").
-- **Item 14** — `packages/ai/src/embeddings/voyage.ts`: in `fetchOnce()`, after parsing the response JSON, assert `json.model === this._modelId`. On mismatch, throw a hard error with message `\`Voyage served '\${json.model}' but we requested '\${this._modelId}' — index integrity at risk; not embedding to avoid mixing vector spaces.\``. The thrown error propagates up through the embed phase as a normal failure (degraded entry, partial-init handling).
+- **Item 12** — `packages/core/src/init/index.ts`: move `await ensureGitignore(repoRoot)` to _after_ `readLockedModel(db)` (which is the call that triggers schema bootstrap via item 1's runtime migration). On a fresh repo, the order becomes: `db()` (auto-migrates) → `readLockedModel(db)` (now succeeds) → `ensureGitignore(repoRoot)`. If `db()` fails, `ensureGitignore` doesn't run; the side effect is atomic ("either everything happened or nothing did").
+- **Item 14** — `packages/ai/src/embeddings/voyage.ts`: in `fetchOnce()`, after parsing the response JSON, assert `json.model === this._modelId`. On mismatch, throw a hard error with message `\`Voyage served '\${json.model}' but we requested '\${this.\_modelId}' — index integrity at risk; not embedding to avoid mixing vector spaces.\``. The thrown error propagates up through the embed phase as a normal failure (degraded entry, partial-init handling).
 
 ### 14. LLM system prompt update
 
@@ -547,17 +561,17 @@ Banner placement (item 6): move the banner-render call from post-comments to pre
 
 Each slice is a coherent unit that should land + smoke before the next begins. The smoke gate isn't optional — items 1, 2, 8 are "engine-blocker" exactly because subsequent slices assume they're crossed.
 
-| Slice | Scope | Smoke gate |
-|---|---|---|
-| **0** | Read this plan + ADR-0021. Confirm package boundaries against CLAUDE.md. | Plan reviewed. |
-| **1** | Foundations: items 1 (runtime migration), 2 (no-embeddings banner), 7 (discriminated `degradedWorkers`), 8 (repo-root precedence), 11 (`smoke-m7-init.mts`). | Fresh repo `init` + `review` end-to-end. Phase-3-failure simulation produces the new banner state. `findRepoRoot` lands cache.sqlite at workspace root. `degradedWorkers` is fully migrated to discriminated shape across all existing call sites. |
-| **2** | Item 10 (npm-audit collapse). | `warden review` on a non-manifest-touching diff returns 1 vuln Comment. Verbose mode preserves the per-advisory output. |
-| **3** | Scalability detector (`runners/scalability.ts`) + system prompt update (remove scalability from "Pattern shapes worth asking about"). `smoke-m7-detectors.mts` covers it. | Run on warden's M6 PR diff. Confirm at least Copilot #6/#7/#8 fire. |
-| **4** | Deadcode detector (`runners/deadcode.ts`). Smoke covers it. | Run on warden's M6 PR diff. Confirm `computeBannerState`'s `stale` branch finding fires. |
-| **5** | Consistency detector (`runners/consistency.ts`). Smoke covers it. | Run on warden's M6 PR diff. Confirm README's `VOYAGE_API_KEY` claim fires. |
-| **6** | Committability sub-agent (`runners/committability.ts`) + substring-verifier (`llm/verify-citations.ts`) + sub-agent dispatcher (`@warden/ai`). `smoke-m7-subagent.mts` covers it. | Run on synthesized fixture (added file matching `scripts-bootstrap-*.mts` shape with `/Users/...` content). Confirm filename-based + content-based questions fire. Confirm verifier drops a deliberately-malformed citation. |
-| **7** | Polish: items 5 (init summary wording), 6 (banner placement), 12 (ensureGitignore atomicity), 14 (Voyage echo verify). | Final dogfood pass on warden's own M6 PR; on `blair`; on a third fresh repo. Validate at least 4 of the 6 Copilot-caught findings now surface. |
-| **8** | Close-out: dogfood report, follow-up punch-list addendum (items 3, 4, 9, 13 from M7 plus the language-aware review guidance from Q17). ADR-0021 + this plan committed. | M7 ships. |
+| Slice | Scope                                                                                                                                                                             | Smoke gate                                                                                                                                                                                                                                         |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** | Read this plan + ADR-0021. Confirm package boundaries against CLAUDE.md.                                                                                                          | Plan reviewed.                                                                                                                                                                                                                                     |
+| **1** | Foundations: items 1 (runtime migration), 2 (no-embeddings banner), 7 (discriminated `degradedWorkers`), 8 (repo-root precedence), 11 (`smoke-m7-init.mts`).                      | Fresh repo `init` + `review` end-to-end. Phase-3-failure simulation produces the new banner state. `findRepoRoot` lands cache.sqlite at workspace root. `degradedWorkers` is fully migrated to discriminated shape across all existing call sites. |
+| **2** | Item 10 (npm-audit collapse).                                                                                                                                                     | `warden review` on a non-manifest-touching diff returns 1 vuln Comment. Verbose mode preserves the per-advisory output.                                                                                                                            |
+| **3** | Scalability detector (`runners/scalability.ts`) + system prompt update (remove scalability from "Pattern shapes worth asking about"). `smoke-m7-detectors.mts` covers it.         | Run on warden's M6 PR diff. Confirm at least Copilot #6/#7/#8 fire.                                                                                                                                                                                |
+| **4** | Deadcode detector (`runners/deadcode.ts`). Smoke covers it.                                                                                                                       | Run on warden's M6 PR diff. Confirm `computeBannerState`'s `stale` branch finding fires.                                                                                                                                                           |
+| **5** | Consistency detector (`runners/consistency.ts`). Smoke covers it.                                                                                                                 | Run on warden's M6 PR diff. Confirm README's `VOYAGE_API_KEY` claim fires.                                                                                                                                                                         |
+| **6** | Committability sub-agent (`runners/committability.ts`) + substring-verifier (`llm/verify-citations.ts`) + sub-agent dispatcher (`@warden/ai`). `smoke-m7-subagent.mts` covers it. | Run on synthesized fixture (added file matching `scripts-bootstrap-*.mts` shape with `/Users/...` content). Confirm filename-based + content-based questions fire. Confirm verifier drops a deliberately-malformed citation.                       |
+| **7** | Polish: items 5 (init summary wording), 6 (banner placement), 12 (ensureGitignore atomicity), 14 (Voyage echo verify).                                                            | Final dogfood pass on warden's own M6 PR; on `blair`; on a third fresh repo. Validate at least 4 of the 6 Copilot-caught findings now surface.                                                                                                     |
+| **8** | Close-out: dogfood report, follow-up punch-list addendum (items 3, 4, 9, 13 from M7 plus the language-aware review guidance from Q17). ADR-0021 + this plan committed.            | M7 ships.                                                                                                                                                                                                                                          |
 
 ## Acceptance criteria for M7
 
@@ -573,7 +587,7 @@ When all of these pass, M7 is done:
 8. Each of {scalability, deadcode, consistency} detector emits at least one finding on warden's M6 PR diff, matching the Copilot-caught case for that category. The findings carry valid citations that pass substring-verification.
 9. Committability sub-agent emits a question on a fixture's `scripts-bootstrap-blair.mts`-shaped filename + a question on a `/Users/yash/...` content match. Both citations pass substring-verification.
 10. Substring-verifier drops at least one deliberately-malformed citation (test fixture in `smoke-m7-subagent.mts`); emits the corresponding `degraded: { kind: "info", topic: "llm", message: "dropped 1 citation..." }` entry.
-11. Init summary line reads as `\`319 chunks (319 cached) · 0/319 embeddings · 3 failed\`` (or analogous three-number form). Banner prints pre-phase. ensureGitignore runs after `readLockedModel`. Voyage echo verification fires on a model-mismatch test (manually flip `_modelId` after a successful API call to simulate). (Items 5, 6, 12, 14 crossed.)
+11. Init summary line reads as `\`319 chunks (319 cached) · 0/319 embeddings · 3 failed\``(or analogous three-number form). Banner prints pre-phase. ensureGitignore runs after`readLockedModel`. Voyage echo verification fires on a model-mismatch test (manually flip `\_modelId` after a successful API call to simulate). (Items 5, 6, 12, 14 crossed.)
 12. **Dogfood validation gate**: rerun `warden review` against warden's own M6 PR (`#3`); confirm at least 4 of the 6 Copilot findings warden missed at M6 now surface as findings (the three scalability cases + the deadcode case at minimum). The 2 still-missed findings (if any) are documented in the close-out report — either as known limitations (with rationale) or as later-milestone punch-list candidates.
 13. ADR-0021 + `m7-plan.md` committed. ADR-0020 namechecked as predecessor.
 
@@ -597,33 +611,33 @@ If you reach for any of the above, stop and re-read ADR-0021 — the deferral is
 
 These are the non-obvious insights from the design discussion. Worth preserving here because they're the kind of thing you only see by working through the design tree carefully — not the kind that appear in the final ADR text. Pull them into a blog post about category-extension under a citation-discipline thesis.
 
-1. **The category list is *iterative*, not closed.** ADR-0020 added four; M7 promotes three of them to detector-asserted. Later milestones may add more (security-pattern, leverage, api-claim) and may upgrade existing categories. The architectural through-line is the *upgrade path* (categories ship as questions; promote to findings/sub-agent-citations as deterministic producers earn rent), not the specific list. Open-slot LLM questions remain a fallback for cases the detectors don't catch — and they're the *evidence corpus* for which category to add next. Every time another reviewer catches something warden missed, ask "what category did I miss?", not "what bug did I miss?" — the category answer informs future runs; the bug answer is just this PR's diff.
+1. **The category list is _iterative_, not closed.** ADR-0020 added four; M7 promotes three of them to detector-asserted. Later milestones may add more (security-pattern, leverage, api-claim) and may upgrade existing categories. The architectural through-line is the _upgrade path_ (categories ship as questions; promote to findings/sub-agent-citations as deterministic producers earn rent), not the specific list. Open-slot LLM questions remain a fallback for cases the detectors don't catch — and they're the _evidence corpus_ for which category to add next. Every time another reviewer catches something warden missed, ask "what category did I miss?", not "what bug did I miss?" — the category answer informs future runs; the bug answer is just this PR's diff.
 
-2. **Citation discipline generalizes from assertions to questions.** ADR-0008 said "assertions need verifiable sources." ADR-0021 strengthens to "any citation, regardless of lane, needs a verifiable source." Questions without citations stay frictionless (the common case from the main review LLM). Questions with citations (the new sub-agent shape) get the same mechanical verification assertions get. The discipline becomes uniform across lanes; only the *lane semantics* differ (questions ask, assertions claim — but both, when grounded, must echo the source). Substring-match is the cheapest possible verification; second-LLM verification reintroduces the LLM-checks-LLM trust loop.
+2. **Citation discipline generalizes from assertions to questions.** ADR-0008 said "assertions need verifiable sources." ADR-0021 strengthens to "any citation, regardless of lane, needs a verifiable source." Questions without citations stay frictionless (the common case from the main review LLM). Questions with citations (the new sub-agent shape) get the same mechanical verification assertions get. The discipline becomes uniform across lanes; only the _lane semantics_ differ (questions ask, assertions claim — but both, when grounded, must echo the source). Substring-match is the cheapest possible verification; second-LLM verification reintroduces the LLM-checks-LLM trust loop.
 
-3. **Detectors vs. sub-agents fit different points on the deterministic ↔ LLM spectrum.** The rule (canonicalised in `CONTEXT.md`): bounded *and* reliably structural across ecosystems → detector; open-ended *or* nominally bounded but context-dependent → sub-agent. Three categories satisfy the first clause (scalability via AST pattern-match, deadcode via AST + reverse import-graph, consistency via structured-verifier on env-var / CLI / file-path claims). Committability satisfies the second — supposedly-bounded subsets (dirname conventions, dev-script naming) are unreliable across ecosystems and call-sites, so an LLM sub-agent earns its keep. Treating all four uniformly (all detectors *or* all prompts) gets one of them wrong; treating each per its natural shape preserves ADR-0008 where deterministic detection is possible and acknowledges where LLM judgment is the right tool. The sub-agent path is also where later-milestone extensions of committability go (mid-file URLs, accidentally-committed `.env.local`, etc.) — regex sets saturate fast; sub-agents grow with the LLM. (Earlier drafts used a "Type 1 / Type 2 / Type 3" labelling; that taxonomy was dropped during the M7 follow-up grilling — the runner / detector / sub-agent cut in `CONTEXT.md` is the canonical vocabulary.)
+3. **Detectors vs. sub-agents fit different points on the deterministic ↔ LLM spectrum.** The rule (canonicalised in `CONTEXT.md`): bounded _and_ reliably structural across ecosystems → detector; open-ended _or_ nominally bounded but context-dependent → sub-agent. Three categories satisfy the first clause (scalability via AST pattern-match, deadcode via AST + reverse import-graph, consistency via structured-verifier on env-var / CLI / file-path claims). Committability satisfies the second — supposedly-bounded subsets (dirname conventions, dev-script naming) are unreliable across ecosystems and call-sites, so an LLM sub-agent earns its keep. Treating all four uniformly (all detectors _or_ all prompts) gets one of them wrong; treating each per its natural shape preserves ADR-0008 where deterministic detection is possible and acknowledges where LLM judgment is the right tool. The sub-agent path is also where later-milestone extensions of committability go (mid-file URLs, accidentally-committed `.env.local`, etc.) — regex sets saturate fast; sub-agents grow with the LLM. (Earlier drafts used a "Type 1 / Type 2 / Type 3" labelling; that taxonomy was dropped during the M7 follow-up grilling — the runner / detector / sub-agent cut in `CONTEXT.md` is the canonical vocabulary.)
 
-4. **The committability "regex pre-filter" was almost a trap.** Initial sketch: hard-exclude `node_modules/`, `dist/`, `build/`, etc. via regex before the sub-agent sees them. User pushback: those directories *might* be intentional commits (published artifact, workaround for broken dependency). Refining to a Tier-1 hard-skip (only patterns that are *never* intentional: `.git/`, `*.pyc`, `*.swp`, OS temp files) plus letting the sub-agent decide for ambiguous cases is the principled answer. The general lesson: hard exclusions are a form of pre-judging that conflicts with "let the LLM use its judgment." Use exclusions only for *truly* universal noise; trust the sub-agent for the rest.
+4. **The committability "regex pre-filter" was almost a trap.** Initial sketch: hard-exclude `node_modules/`, `dist/`, `build/`, etc. via regex before the sub-agent sees them. User pushback: those directories _might_ be intentional commits (published artifact, workaround for broken dependency). Refining to a Tier-1 hard-skip (only patterns that are _never_ intentional: `.git/`, `*.pyc`, `*.swp`, OS temp files) plus letting the sub-agent decide for ambiguous cases is the principled answer. The general lesson: hard exclusions are a form of pre-judging that conflicts with "let the LLM use its judgment." Use exclusions only for _truly_ universal noise; trust the sub-agent for the rest.
 
-5. **The npm-audit collapse is M3 behavior leaking into M6 dogfood.** The 62-finding-on-`package.json:1` dump existed in M3 and never bothered anyone because there was no diff-relevance signal. M6's semantic signal made *relevant* code float to the top — and the dump drowns the relevance. M7 doesn't fix M3; M7 fixes M6's *visibility* of M3. The general lesson: a behavior is "fine" until a downstream change makes it user-visible in a way it wasn't before. Find the leaks by re-reading old behaviors under new visibility.
+5. **The npm-audit collapse is M3 behavior leaking into M6 dogfood.** The 62-finding-on-`package.json:1` dump existed in M3 and never bothered anyone because there was no diff-relevance signal. M6's semantic signal made _relevant_ code float to the top — and the dump drowns the relevance. M7 doesn't fix M3; M7 fixes M6's _visibility_ of M3. The general lesson: a behavior is "fine" until a downstream change makes it user-visible in a way it wasn't before. Find the leaks by re-reading old behaviors under new visibility.
 
 6. **`degradedWorkers` discriminated shape is more important than it looks.** The flat string array seemed adequate until Q4 + Q11 both demanded different `kind` semantics: actionable (banner-eligible), warning (verbose-only failure), info (forensic count). Substring-prefix matching on string content was the M6 workaround for the missing structure. The discriminated shape is the load-bearing primitive that lets the banner be a `kind`-filter, not a string-startsWith hunt. The renderer's prefix-match list was a code smell; the shape change retires it. Generalizing: when you find yourself substring-matching prefixes to drive control flow, the message is asking you to make the structure explicit.
 
 7. **Item 1 (runtime migration) is the highest-leverage single change in M7.** One function call, gated behind a singleton promise. Without it, every fresh-repo path crashes. With it, M7's quality lift becomes visible to anyone trying warden on a new repo. The biggest gaps between "works for me" and "works for anyone" are usually one missing `migrate()` call, one missing `mkdir -p`, one missing default-config write — pre-installed bootstraps the author never noticed because their environment already had the bits. Worth dogfooding on at least three fresh repos to confirm the migration path works across pnpm-cached vs. npm-cached vs. fresh-install.
 
-8. **The dogfood validation gate is the acceptance criterion that matters.** Items 1–11 are mechanical: they pass or fail. Item 12 (rerun against M6 PR; catch at least 4 of the 6 Copilot findings) is the qualitative gate that says M7 actually *closed the gap that motivated it*. Mechanical pass without qualitative pass means we shipped four detectors that don't, in practice, catch the cases they were built for. Validation against the original motivating evidence is the only honest acceptance signal.
+8. **The dogfood validation gate is the acceptance criterion that matters.** Items 1–11 are mechanical: they pass or fail. Item 12 (rerun against M6 PR; catch at least 4 of the 6 Copilot findings) is the qualitative gate that says M7 actually _closed the gap that motivated it_. Mechanical pass without qualitative pass means we shipped four detectors that don't, in practice, catch the cases they were built for. Validation against the original motivating evidence is the only honest acceptance signal.
 
 9. **Sequencing detectors in increasing-novelty order is risk management.** Scalability is the simplest (single-file AST query). Deadcode adds reverse import-graph traversal. Consistency adds doc parsing + zod schema introspection. Committability adds the sub-agent — a new pipeline shape (LLM call as a worker). Landing them in this order means each new piece sits on top of a stable foundation; the most novel piece (sub-agent) lands last when the worker pipeline is well-exercised. The opposite ordering (sub-agent first) is faster to validate the new shape but compounds integration risk.
 
-10. **Language-aware review guidance is a *separate* milestone, not M7 polish.** TS-quality opinions (Total-TS patterns, SSOT, type reuse) feel like they could ride along in M7's prompt update. Resisting that urge: the language-guidance design space (static prompt section vs. retrieval-augmented vs. hybrid; per-language scoping; corpus curation; how it interacts with M6's chunk store) is its own grilling. Folding a half-formed version into M7 either ships a saturating baseline that inhibits later redesign (the prompt-section trap) or balloons scope (retrieval-augmented at this stage). Deferring to a later milestone keeps the choice coherent. The general lesson: when a question deserves its own grilling, *don't sneak its half-answer into the current grilling's plan*.
+10. **Language-aware review guidance is a _separate_ milestone, not M7 polish.** TS-quality opinions (Total-TS patterns, SSOT, type reuse) feel like they could ride along in M7's prompt update. Resisting that urge: the language-guidance design space (static prompt section vs. retrieval-augmented vs. hybrid; per-language scoping; corpus curation; how it interacts with M6's chunk store) is its own grilling. Folding a half-formed version into M7 either ships a saturating baseline that inhibits later redesign (the prompt-section trap) or balloons scope (retrieval-augmented at this stage). Deferring to a later milestone keeps the choice coherent. The general lesson: when a question deserves its own grilling, _don't sneak its half-answer into the current grilling's plan_.
 
-11. **The M5 selector weight terminology trap.** Q3 of the M7 grilling proposed "flipping" the cheap-signals weights so blast-radius (`imported-by`) wins over contracts (`imports`). The proposal was sound; the labels in the proposal were inverted from the labels in the code. Reading the actual constants showed the desired state was already shipped. The trap: when the *direction* of an asymmetry is hidden behind English labels ("things that depend on" vs. "things depended on by"), it's easy to argue past oneself about which side has the higher weight. The fix: always check the code's actual constants before ratifying a weight change. Generalized: when proposing a numeric tuning, *quote the existing constants* in the proposal.
+11. **The M5 selector weight terminology trap.** Q3 of the M7 grilling proposed "flipping" the cheap-signals weights so blast-radius (`imported-by`) wins over contracts (`imports`). The proposal was sound; the labels in the proposal were inverted from the labels in the code. Reading the actual constants showed the desired state was already shipped. The trap: when the _direction_ of an asymmetry is hidden behind English labels ("things that depend on" vs. "things depended on by"), it's easy to argue past oneself about which side has the higher weight. The fix: always check the code's actual constants before ratifying a weight change. Generalized: when proposing a numeric tuning, _quote the existing constants_ in the proposal.
 
 12. **ADR-0021 amends ADR-0008 by extending citation discipline to questions.** Until now, questions were citation-free by design (asking is not claiming). The committability sub-agent emits citations alongside its questions; ADR-0021 extends the discipline to those citations. The original ADR-0008 invariant ("the LLM cannot author findings without a tool source") is preserved — the sub-agent isn't asserting findings, it's asking grounded questions whose grounding is mechanically checkable. The general principle: when a new emission shape lands (sub-agent questions with citations), the relevant invariant either bends to accommodate it or stays invariant by extending uniformly to the new shape. Uniform extension is almost always the better choice.
 
 13. **The "build the seam, don't fill it" temptation is sometimes just dead architecture.** The M7 grilling's first sketch had a doc-claim-extractor + verifier-phase architecture for consistency. Refining v0 to deterministic-only (env vars / CLI / file paths) collapsed to a single worker — the verifier phase had nothing to do. "Reserve the architectural slot for later-milestone free-form prose" sounds prudent; in practice, empty seams accumulate when there's no consumer testing them. The principle: build seams when you have a concrete consumer about to materialize, not when there's a hypothetical future use case. The relevant later milestone can add the seam itself when free-form prose claims earn rent.
 
-Each of these came out of walking the M7 design tree question-by-question instead of writing the plan top-down. The point of grilling is that the eventual plan is the *survivor* of decisions, not the *first draft* of them.
+Each of these came out of walking the M7 design tree question-by-question instead of writing the plan top-down. The point of grilling is that the eventual plan is the _survivor_ of decisions, not the _first draft_ of them.
 
 ## When you're done
 
@@ -634,4 +648,4 @@ Each of these came out of walking the M7 design tree question-by-question instea
 
 ## Lessons from M7 → M8 transition
 
-*(Empty — append after M7 ships and dogfooding reveals real bugs / refinements / open seams that should inform M8. Mirrors the m5-plan.md / m6-plan.md pattern: the "Lessons from M5 → M6" section in m6-plan.md was populated post-M6-dogfood and became the M7 punch list; this section is the equivalent slot for M7's dogfood evidence.)*
+_(Empty — append after M7 ships and dogfooding reveals real bugs / refinements / open seams that should inform M8. Mirrors the m5-plan.md / m6-plan.md pattern: the "Lessons from M5 → M6" section in m6-plan.md was populated post-M6-dogfood and became the M7 punch list; this section is the equivalent slot for M7's dogfood evidence.)_

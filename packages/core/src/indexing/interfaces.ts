@@ -34,11 +34,7 @@ export interface EmbeddingRecord {
 export interface EmbeddingStore {
   upsert(record: EmbeddingRecord): Promise<void>;
   upsertMany(records: EmbeddingRecord[]): Promise<void>;
-  getByHash(
-    chunkHash: string,
-    modelId: string,
-    modelVersion: string,
-  ): Promise<Float32Array | null>;
+  getByHash(chunkHash: string, modelId: string, modelVersion: string): Promise<Float32Array | null>;
   /** Cosine-similarity search; returns top-K (chunk_hash, similarity) sorted descending. */
   search(
     query: Float32Array,
@@ -47,11 +43,7 @@ export interface EmbeddingStore {
     topK: number,
   ): Promise<{ chunkHash: string; similarity: number }[]>;
   /** Bulk membership test for `(modelId, modelVersion)` — used to plan re-embed work. */
-  whichExist(
-    chunkHashes: string[],
-    modelId: string,
-    modelVersion: string,
-  ): Promise<Set<string>>;
+  whichExist(chunkHashes: string[], modelId: string, modelVersion: string): Promise<Set<string>>;
   count(modelId: string, modelVersion: string): Promise<number>;
   /** Drops all rows for `(modelId, modelVersion)` — supports `--rebuild`. */
   deleteByModel(modelId: string, modelVersion: string): Promise<number>;
@@ -104,11 +96,7 @@ export interface FileChunksStore {
    *  - `fileSha` stored on every row reflects the version that produced them
    * Idempotent (same input → same end state).
    */
-  replaceForFile(
-    filePath: string,
-    fileSha: string,
-    chunkHashes: string[],
-  ): Promise<void>;
+  replaceForFile(filePath: string, fileSha: string, chunkHashes: string[]): Promise<void>;
   /**
    * Delete every row whose `filePath` matches. Used on file removal.
    * Caller invokes `pruneOrphans()` separately to collect orphan chunks.

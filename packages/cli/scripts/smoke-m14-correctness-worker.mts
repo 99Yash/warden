@@ -93,7 +93,9 @@ process.stdout.write(
 );
 for (const f of result.findings) {
   const summary = f.claim.length > 100 ? f.claim.slice(0, 100) + "…" : f.claim;
-  process.stdout.write(`    [${f.category}/${f.kind}/T${f.tier}] ${f.file}:${f.lineStart} — ${summary}\n`);
+  process.stdout.write(
+    `    [${f.category}/${f.kind}/T${f.tier}] ${f.file}:${f.lineStart} — ${summary}\n`,
+  );
 }
 
 assert(result.findings.length >= 1, `worker returned ≥1 finding`);

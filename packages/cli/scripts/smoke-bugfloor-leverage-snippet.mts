@@ -22,14 +22,8 @@ import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-const TMP_ROOT = resolve(
-  tmpdir(),
-  `warden-bugfloor-leverage-${process.pid}-${Date.now()}`,
-);
-const TMP_DB = resolve(
-  tmpdir(),
-  `warden-bugfloor-leverage-${process.pid}-${Date.now()}.sqlite`,
-);
+const TMP_ROOT = resolve(tmpdir(), `warden-bugfloor-leverage-${process.pid}-${Date.now()}`);
+const TMP_DB = resolve(tmpdir(), `warden-bugfloor-leverage-${process.pid}-${Date.now()}.sqlite`);
 process.env["WARDEN_CACHE_PATH"] = TMP_DB;
 
 if (existsSync(TMP_DB)) unlinkSync(TMP_DB);
@@ -72,9 +66,7 @@ const detectorResult = await runLeverage({
   changed: [{ path: MULTI_PATH, addedLines: [1, 2, 3, 4, 5, 6, 7, 8] }],
 });
 
-const cloneFindings = detectorResult.findings.filter(
-  (f) => f.ruleId === "structured-clone",
-);
+const cloneFindings = detectorResult.findings.filter((f) => f.ruleId === "structured-clone");
 assert(
   cloneFindings.length === 1,
   `multi-line structured-clone finding fires (got ${cloneFindings.length})`,
@@ -118,10 +110,7 @@ assert(
   verifyResult.comments.find((c) => c.id === comment.id) !== undefined,
   "Comment survives the global verifier (undefined triple is a pass-through)",
 );
-assert(
-  verifyResult.degraded.length === 0,
-  "no degraded entries — nothing was dropped",
-);
+assert(verifyResult.degraded.length === 0, "no degraded entries — nothing was dropped");
 
 if (existsSync(TMP_DB)) unlinkSync(TMP_DB);
 if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });

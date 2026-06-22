@@ -2,12 +2,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { tool } from "@warden/ai";
 import { z } from "zod";
-import {
-  isGitIgnored,
-  isInSkipDir,
-  isSensitivePath,
-  resolveWithinRoot,
-} from "./safety.js";
+import { isGitIgnored, isInSkipDir, isSensitivePath, resolveWithinRoot } from "./safety.js";
 
 /**
  * M14 (ADR-0030): `readFile` tool exposed to review-harness workers.
@@ -32,8 +27,7 @@ import {
  */
 
 const LINE_CAP = 1000;
-const TRUNCATION_MARKER =
-  "[truncated at 1000 lines — call grepRepo to narrow then readFile again]";
+const TRUNCATION_MARKER = "[truncated at 1000 lines — call grepRepo to narrow then readFile again]";
 
 const InputSchema = z.object({
   path: z
@@ -56,12 +50,7 @@ export type ReadFileResult =
     }
   | {
       ok: false;
-      reason:
-        | "outside_root"
-        | "sensitive_path"
-        | "gitignored"
-        | "not_found"
-        | "read_error";
+      reason: "outside_root" | "sensitive_path" | "gitignored" | "not_found" | "read_error";
       path: string;
       detail?: string;
     };
@@ -154,9 +143,7 @@ async function readBounded(abs: string, relForReport: string): Promise<ReadFileR
     return { ok: true, path: relForReport, content: "", lineCount: 0, truncated: false };
   }
 
-  const content = truncated
-    ? lines.join("\n") + "\n" + TRUNCATION_MARKER
-    : lines.join("\n");
+  const content = truncated ? lines.join("\n") + "\n" + TRUNCATION_MARKER : lines.join("\n");
   return {
     ok: true,
     path: relForReport,

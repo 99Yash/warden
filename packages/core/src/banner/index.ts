@@ -5,6 +5,7 @@ import {
   SqliteMerkleStore,
   readLockedModel,
 } from "../indexing/index.js";
+import { assertNever } from "../assert-never.js";
 import type { ChunkStore, EmbeddingStore, MerkleStore } from "../indexing/index.js";
 import type { DegradedEntry } from "../schema.js";
 
@@ -138,8 +139,7 @@ export function bannerStateToDegraded(state: BannerState): DegradedEntry[] {
         {
           kind: "actionable",
           topic: "context",
-          message:
-            "context: no index — run `warden init` once for context-aware findings",
+          message: "context: no index — run `warden init` once for context-aware findings",
         },
       ];
     case "no-embeddings":
@@ -147,8 +147,7 @@ export function bannerStateToDegraded(state: BannerState): DegradedEntry[] {
         {
           kind: "actionable",
           topic: "embeddings",
-          message:
-            "context: no embeddings yet — re-run `warden init` to complete indexing",
+          message: "context: no embeddings yet — re-run `warden init` to complete indexing",
         },
       ];
     case "stale":
@@ -175,6 +174,8 @@ export function bannerStateToDegraded(state: BannerState): DegradedEntry[] {
           message: `context: locked model ${state.indexedModel} deprecated as of ${state.deprecatedAfter} — \`warden init --rebuild\` to switch`,
         },
       ];
+    default:
+      return assertNever(state, "BannerState");
   }
 }
 

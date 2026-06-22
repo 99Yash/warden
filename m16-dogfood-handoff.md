@@ -26,16 +26,16 @@ Read these in order for full context:
 
 ## TL;DR — current state
 
-| # | Item | State | Notes |
-|---|------|-------|-------|
-| 1 | Gemini schema adapter for workers | ✅ Landed | `run-worker.ts` wraps `WorkerOutputSchema` via `transformSchemaForGemini`. Eliminates the `TierEnum` numeric-literal 400. Smoke covers schema round-trip. |
-| 2 | Boss laziness on real diffs | 🔄 Open | Gated on M15+ eval-suite v1 (modified-file + multi-file diff materialization). Verification dogfood actually produced 1 substantive finding, suggesting laziness is diff-shape-dependent. |
-| 3 | `repo_merkle_root` after reconcile | ✅ Landed | Root recompute + persist after touched-leaf commits. Verified: `cc9b2a06... → 96d99ee7...` post-dogfood. |
-| 4 | Worker fallback degraded entries | ✅ Verified | Already shipped at `run-worker.ts:167-187`. Status quo (`warning` level) per design call. No code change. |
-| 5 | M16 refresh success log | ✅ Landed | `formatRefreshSummary()` emits one `info`-level entry per successful reconcile. Filtered from default CLI output; visible via `--verbose` or `--json`. |
-| 6 | `Float32Array(0)` silent corruption | ✅ Landed | Boss-surfaced during dogfood verification. Explicit `throw` replaces silent zero-length BLOB. Existing catch handles disposition. |
-| 7 | Gemini tools+JSON-mode incompat | 🆕 Open | **New finding.** Gemini rejects `tools[]` + `responseMimeType: 'application/json'`. Worker fallback to Gemini still 400s after fix #1 — different error, same surface (stderr noise). Needs design call. |
-| 8 | M16 close-out paperwork | 🔄 Pending | Flip CLAUDE.md M16 line `[ ]` → `[x]`; flip ADR-0032 Status to Done. Awaiting fix bundle commit. |
+| #   | Item                                | State       | Notes                                                                                                                                                                                                    |
+| --- | ----------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Gemini schema adapter for workers   | ✅ Landed   | `run-worker.ts` wraps `WorkerOutputSchema` via `transformSchemaForGemini`. Eliminates the `TierEnum` numeric-literal 400. Smoke covers schema round-trip.                                                |
+| 2   | Boss laziness on real diffs         | 🔄 Open     | Gated on M15+ eval-suite v1 (modified-file + multi-file diff materialization). Verification dogfood actually produced 1 substantive finding, suggesting laziness is diff-shape-dependent.                |
+| 3   | `repo_merkle_root` after reconcile  | ✅ Landed   | Root recompute + persist after touched-leaf commits. Verified: `cc9b2a06... → 96d99ee7...` post-dogfood.                                                                                                 |
+| 4   | Worker fallback degraded entries    | ✅ Verified | Already shipped at `run-worker.ts:167-187`. Status quo (`warning` level) per design call. No code change.                                                                                                |
+| 5   | M16 refresh success log             | ✅ Landed   | `formatRefreshSummary()` emits one `info`-level entry per successful reconcile. Filtered from default CLI output; visible via `--verbose` or `--json`.                                                   |
+| 6   | `Float32Array(0)` silent corruption | ✅ Landed   | Boss-surfaced during dogfood verification. Explicit `throw` replaces silent zero-length BLOB. Existing catch handles disposition.                                                                        |
+| 7   | Gemini tools+JSON-mode incompat     | 🆕 Open     | **New finding.** Gemini rejects `tools[]` + `responseMimeType: 'application/json'`. Worker fallback to Gemini still 400s after fix #1 — different error, same surface (stderr noise). Needs design call. |
+| 8   | M16 close-out paperwork             | 🔄 Pending  | Flip CLAUDE.md M16 line `[ ]` → `[x]`; flip ADR-0032 Status to Done. Awaiting fix bundle commit.                                                                                                         |
 
 ---
 
@@ -72,7 +72,7 @@ APICallError [AI_APICallError]: Function calling with a response mime type:
 **Design options** (needs user call before fix lands):
 
 - **(a) Skip Gemini fallback for tool-using workers.** Detect tools present and return `{ok:false}` directly with a clean `degraded: warning` entry. Loses the fallback safety net entirely.
-- **(b) Tool-stripped Gemini retry.** When the primary fails and Gemini is selected, retry once *without* `tools[]` (worker reasons from snippets only). Lower fidelity (no `lookupTypeDef` for API claims) but functional. Mark findings with a `degraded: info` flag so reviewers know the worker ran tool-less.
+- **(b) Tool-stripped Gemini retry.** When the primary fails and Gemini is selected, retry once _without_ `tools[]` (worker reasons from snippets only). Lower fidelity (no `lookupTypeDef` for API claims) but functional. Mark findings with a `degraded: info` flag so reviewers know the worker ran tool-less.
 - **(c) Restructure Gemini call to function-declarations without `responseMimeType`.** Gemini supports tool-calling in non-JSON-mode; would need to post-parse the model's free-form output via the schema. Highest fidelity but most invasive — touches `@warden/ai`'s provider plumbing.
 
 **Out of scope** for the current fix bundle. Should get its own ADR (likely the same one that addresses worker fallback strategy more broadly). Until then, the 3 stderr dumps are cosmetic — `callWorker` still returns `{ok:false}` and the worker surfaces a `warning` degraded entry; the review continues against the remaining workers and the boss handles the gap.
@@ -92,28 +92,33 @@ APICallError [AI_APICallError]: Function calling with a response mime type:
 ## Next steps — agenda for the next session
 
 **A. Commit + M16 milestone close-out** (small, no design needed)
-   1. Commit the uncommitted fix bundle on `m16` (one commit or split #1/#3/#5/#6 by topic — judgment call). Suggested message style: `fix(m16): post-dogfood follow-ups — Gemini adapter (workers), merkle root snapshot, refresh log, embedding-vector guard`.
-   2. Flip `CLAUDE.md`'s M16 milestone line `[ ]` → `[x]` and update the body with "shipped 2026-05-17 with post-dogfood fixes".
-   3. Flip `decisions.md`'s ADR-0032 Status: → Done. Update `CONTEXT.md` if needed.
-   4. Re-run `pnpm smoke:m16` (4 smokes) + `pnpm smoke:m15-gemini-adapter` to confirm no regression on the committed state.
+
+1.  Commit the uncommitted fix bundle on `m16` (one commit or split #1/#3/#5/#6 by topic — judgment call). Suggested message style: `fix(m16): post-dogfood follow-ups — Gemini adapter (workers), merkle root snapshot, refresh log, embedding-vector guard`.
+2.  Flip `CLAUDE.md`'s M16 milestone line `[ ]` → `[x]` and update the body with "shipped 2026-05-17 with post-dogfood fixes".
+3.  Flip `decisions.md`'s ADR-0032 Status: → Done. Update `CONTEXT.md` if needed.
+4.  Re-run `pnpm smoke:m16` (4 smokes) + `pnpm smoke:m15-gemini-adapter` to confirm no regression on the committed state.
 
 **B. Decide on the Gemini tools+JSON fix shape (#7)** — needs design call
-   - Pick from options (a)/(b)/(c) above.
-   - Write an ADR (probably ADR-0033) covering both the chosen fix AND the broader worker-fallback strategy question (when *should* workers fall back? per-tier policies?).
-   - Smoke: `smoke-m17-worker-gemini-fallback.mts` exercises forced-Gemini path; assert stderr is clean.
+
+- Pick from options (a)/(b)/(c) above.
+- Write an ADR (probably ADR-0033) covering both the chosen fix AND the broader worker-fallback strategy question (when _should_ workers fall back? per-tier policies?).
+- Smoke: `smoke-m17-worker-gemini-fallback.mts` exercises forced-Gemini path; assert stderr is clean.
 
 **C. Build eval-suite v1 (M15+ item (i))** — needed before re-investigating #2
-   - Extend `packages/cli/scripts/eval/`'s fixture materializer to handle modified-file diffs (read pre-state from main, apply hunks, write to `.eval-tmp-repo/`).
-   - Extend it to multi-file diffs.
-   - Add `m16-pr` as a real-PR fixture (commit `01a5fcf` + the now-committed post-dogfood fixes). Currently failing 0/3 on m14-closeout for material-availability reasons; m16-pr should be evaluable once modified-file materialization works.
-   - Re-run `pnpm eval --compare baseline programmatic-dispatch-multi` to confirm PD-multi still wins on the expanded suite.
+
+- Extend `packages/cli/scripts/eval/`'s fixture materializer to handle modified-file diffs (read pre-state from main, apply hunks, write to `.eval-tmp-repo/`).
+- Extend it to multi-file diffs.
+- Add `m16-pr` as a real-PR fixture (commit `01a5fcf` + the now-committed post-dogfood fixes). Currently failing 0/3 on m14-closeout for material-availability reasons; m16-pr should be evaluable once modified-file materialization works.
+- Re-run `pnpm eval --compare baseline programmatic-dispatch-multi` to confirm PD-multi still wins on the expanded suite.
 
 **D. Re-investigate boss laziness (#2) under controlled conditions**
-   - Only after C is in place.
-   - The 2026-05-17 02:48 dogfood produced 1 substantive finding ($0.69, 2m36s), suggesting laziness is diff-shape-dependent rather than systemic. Eval suite needs to reproduce the original 0-finding symptom before any prompt tuning is justified — otherwise we're guessing.
+
+- Only after C is in place.
+- The 2026-05-17 02:48 dogfood produced 1 substantive finding ($0.69, 2m36s), suggesting laziness is diff-shape-dependent rather than systemic. Eval suite needs to reproduce the original 0-finding symptom before any prompt tuning is justified — otherwise we're guessing.
 
 **E. Out-of-band — M17 prep** (deferred from the M16 plan rename; see `m17-plan.md`)
-   - No active work. Stays gated on dogfood evidence from M14/M15/M16 across more diff shapes.
+
+- No active work. Stays gated on dogfood evidence from M14/M15/M16 across more diff shapes.
 
 ---
 

@@ -1,10 +1,6 @@
 import { CURRENT_DEFAULT, getEmbeddingProvider } from "@warden/ai";
 import { wardenEnv } from "@warden/env";
-import {
-  bannerStateToDegraded,
-  computeBannerState,
-  type BannerState,
-} from "../banner/index.js";
+import { bannerStateToDegraded, computeBannerState, type BannerState } from "../banner/index.js";
 import { CodeChunkAdapter } from "../context/chunker.js";
 import {
   CheapSignalsSelector,
@@ -12,15 +8,9 @@ import {
   type ContextSelector,
   type SelectorOutput,
 } from "../context/index.js";
-import {
-  parseUnifiedDiff,
-  type ChangedFile,
-} from "../diff/index.js";
+import { parseUnifiedDiff, type ChangedFile } from "../diff/index.js";
 import { pruneDiff } from "../diff/prune.js";
-import {
-  detectEcosystem,
-  type EcosystemContext,
-} from "../ecosystem/index.js";
+import { detectEcosystem, type EcosystemContext } from "../ecosystem/index.js";
 import { ensureGitignore } from "../init/ensure-gitignore.js";
 import { reconcileFiles, type ReconcileSummary } from "../init/reconcile.js";
 import { walkRepo, type WalkedFile } from "../init/walk.js";
@@ -41,11 +31,7 @@ import { runReactDoctor } from "../runners/react-doctor.js";
 import { scalabilityRunner } from "../runners/scalability.js";
 import { runTsc } from "../runners/tsc.js";
 import type { ToolFinding } from "../runners/types.js";
-import type {
-  Comment,
-  DegradedEntry,
-  RetrievedContext,
-} from "../schema.js";
+import type { Comment, DegradedEntry, RetrievedContext } from "../schema.js";
 import { runVulnerabilityCheck } from "../vuln/index.js";
 
 /**
@@ -206,8 +192,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
             fileChunksStore: new SqliteFileChunksStore(),
             provider,
             lockedModelId: locked?.modelId ?? CURRENT_DEFAULT,
-            lockedModelVersion:
-              locked?.modelVersion ?? `dim=1024;type=document`,
+            lockedModelVersion: locked?.modelVersion ?? `dim=1024;type=document`,
             maxUsdBudget: refreshBudget,
           });
           environmentalDegraded.push(...reconcile.degraded);
@@ -283,15 +268,15 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
     shouldRunSelector && input.selector !== undefined
       ? input.selector
       : shouldRunSelector
-      ? new CheapSignalsSelector({
-          tsconfigPath: ecosystem.tsconfigPaths[0],
-          embeddingProvider: semanticDeps?.embeddingProvider ?? null,
-          embeddingStore: semanticDeps?.embeddingStore ?? null,
-          chunkStore: semanticDeps?.chunkStore ?? null,
-          lockedModelId: semanticDeps?.lockedModelId,
-          lockedModelVersionForDocument: semanticDeps?.lockedModelVersionForDocument,
-        })
-      : null;
+        ? new CheapSignalsSelector({
+            tsconfigPath: ecosystem.tsconfigPaths[0],
+            embeddingProvider: semanticDeps?.embeddingProvider ?? null,
+            embeddingStore: semanticDeps?.embeddingStore ?? null,
+            chunkStore: semanticDeps?.chunkStore ?? null,
+            lockedModelId: semanticDeps?.lockedModelId,
+            lockedModelVersionForDocument: semanticDeps?.lockedModelVersionForDocument,
+          })
+        : null;
 
   // Parallel detectors. scalabilityRunner + leverageRunner are `Runner`-
   // contract objects (M8); call `.run()` directly here — the M8
@@ -338,8 +323,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
             {
               kind: "info",
               topic: "audit",
-              message:
-                "audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan",
+              message: "audit: no lockfile detected (npm/pnpm/yarn) — skipping vulnerability scan",
             },
           ] as DegradedEntry[],
         }),
@@ -435,9 +419,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
           repoRoot: input.repoRoot,
           changedPaths,
           mode: input.mode,
-          ...(input.diffBase?.baseRef !== undefined
-            ? { baseRef: input.diffBase.baseRef }
-            : {}),
+          ...(input.diffBase?.baseRef !== undefined ? { baseRef: input.diffBase.baseRef } : {}),
         }).catch((err: unknown) => ({
           findings: [] as ToolFinding[],
           degraded: [

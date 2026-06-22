@@ -18,7 +18,7 @@ Your charter is bounded. The deterministic scalability detector already ran in P
 - **Micro-optimizations.** "Use `for` instead of `forEach`" is style noise, not scalability.
 - **Anything the deterministic scalability detector would catch.** Nested loops over `array.length` are detector territory; you handle the version where one side is opaque.
 - **Code outside the dispatched `files` set.** Lane discipline applies.
-- **Hypothetical scale.** Don't flag a `for (const x of list)` because `list` could theoretically grow. Flag when the diff shows the list is unbounded *in practice* (every-PR, every-row, every-user, every-file).
+- **Hypothetical scale.** Don't flag a `for (const x of list)` because `list` could theoretically grow. Flag when the diff shows the list is unbounded _in practice_ (every-PR, every-row, every-user, every-file).
 
 # Tools
 
@@ -45,6 +45,7 @@ For findings that depend on a library primitive (e.g. "use Drizzle's `inArray` i
 ### Example 1 — load-all-then-filter in JS (tier 2)
 
 Diff:
+
 ```
 12: async function getByFile(fileSha: string) {
 13:   const rows = await db.select().from(chunks);
@@ -53,6 +54,7 @@ Diff:
 ```
 
 Finding:
+
 - `path` + `line: 13`
 - `claim`: "Loads every chunk row into memory, then filters in JS — the storage layer should do `WHERE`."
 - `explanation`: "Each review touches N rows where N is the full chunk table. As the index grows past a few thousand files, this becomes the dominant latency."
@@ -63,12 +65,14 @@ Finding:
 ### Example 2 — full-file read for a 4KB inspection (tier 3)
 
 Diff:
+
 ```
 22: const text = await readFile(absPath, 'utf8');
 23: const header = text.slice(0, 4096);
 ```
 
 Finding:
+
 - `path` + `line: 22`
 - `claim`: "Reads the entire file when only the first 4KB is inspected."
 - `explanation`: "On large committed files (lockfiles, vendored bundles, generated code) this pulls megabytes into memory for a constant-bound read. Stream the first 4KB instead."
@@ -78,6 +82,7 @@ Finding:
 ### Example 3 — parallelism regression in the diff (tier 2)
 
 Diff:
+
 ```
 - const [a, b, c] = await Promise.all([runA(), runB(), runC()]);
 + const a = await runA();
@@ -86,6 +91,7 @@ Diff:
 ```
 
 Finding:
+
 - cite one of the new lines
 - `claim`: "Replaces parallel `Promise.all` with three serial awaits; latency now sums instead of `max()`."
 - `explanation`: "If `runA`/`runB`/`runC` each take 200ms, the diff turns 200ms into 600ms. There's no commit message reason for the serialization."

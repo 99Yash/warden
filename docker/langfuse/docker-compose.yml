@@ -1,0 +1,184 @@
+# Self-hosted Langfuse v3 for Warden's LOCAL development observability surface.
+#
+# Per ADR-0048: this stack is reserved for the planned *dev-time*
+# observability surface (live trace inspection + cross-run/eval diffing), NOT
+# ADR-0044 §7's persisted prose-free review trace. Current Warden code does not
+# emit spans yet. Once telemetry wiring lands, reviewed source may flow into
+# spans here, so this stack is self-hosted ONLY and binds to localhost. Do NOT
+# point Warden at Langfuse Cloud, and do NOT reuse these secrets for any hosted
+# deploy — they are local-only throwaways.
+#
+# Fully isolated: its own postgres / redis / clickhouse / minio on the
+# `warden-langfuse` compose project (volumes namespaced, tear down independently).
+# Host ports are deliberately offset from a typical Langfuse stack (3000/3100,
+# 8123, 9090) so this can coexist with a sibling repo's Langfuse stack:
+#   - 3200  -> langfuse-web UI
+#   - 3032  -> langfuse-worker        (localhost only)
+#   - 8124 / 9002 -> clickhouse       (localhost only, debugging)
+#   - 9092 / 9093 -> minio api / console
+# Langfuse's own postgres + redis are NOT published to the host.
+#
+# Usage:
+#   docker compose -f docker/langfuse/docker-compose.yml up -d
+#   open http://localhost:3200   (login: warden@warden.local / warden-local-dev)
+#   # then in warden's .env:
+#   #   LANGFUSE_HOST=http://localhost:3200
+#   #   LANGFUSE_PUBLIC_KEY=pk-lf-2acd0cf8-694d-4eed-8f2f-8e7b3aaf57ea
+#   #   LANGFUSE_SECRET_KEY=sk-lf-d4f36d8f-0372-4f8f-8199-0794be6348ed
+#   docker compose -f docker/langfuse/docker-compose.yml down        # stop
+#   docker compose -f docker/langfuse/docker-compose.yml down -v     # stop + wipe data
+
+name: warden-langfuse
+
+services:
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    restart: always
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:3032:3030
+    environment: &langfuse-worker-env
+      NEXTAUTH_URL: http://localhost:3200
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      SALT: "c1b7bbc3be4f765cdaa7bcf4ddce6dba"
+      ENCRYPTION_KEY: "e1d949ed402ad8860c9714d46287920ca4612c9930e93984df5b127c8d9a9b9e"
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9092
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: myredissecret
+      REDIS_TLS_ENABLED: "false"
+
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    restart: always
+    depends_on: *langfuse-depends-on
+    ports:
+      - 127.0.0.1:3200:3000
+    environment:
+      <<: *langfuse-worker-env
+      NEXTAUTH_SECRET: "6ee8ed0c7776429216aae151fc0879969c76542fcfa40c6d8535104cc2c119ac"
+      # Headless bootstrap: creates the org/project/user and seeds the API
+      # keys on first boot so Warden can be wired immediately (no UI step).
+      # These keys are local-only throwaways — see the header warning.
+      LANGFUSE_INIT_ORG_ID: warden-local
+      LANGFUSE_INIT_ORG_NAME: Warden Local
+      LANGFUSE_INIT_PROJECT_ID: warden
+      LANGFUSE_INIT_PROJECT_NAME: warden
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-2acd0cf8-694d-4eed-8f2f-8e7b3aaf57ea
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-d4f36d8f-0372-4f8f-8199-0794be6348ed
+      LANGFUSE_INIT_USER_EMAIL: warden@warden.local
+      LANGFUSE_INIT_USER_NAME: Warden
+      LANGFUSE_INIT_USER_PASSWORD: warden-local-dev
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server@sha256:07afc18d8a9706eb9d85c5c5d2752e5270f91bbc2894caeaecb73e4d0f603bf5
+    restart: always
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - warden_langfuse_clickhouse_data:/var/lib/clickhouse
+      - warden_langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - 127.0.0.1:8124:8123
+      - 127.0.0.1:9002:9000
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:1fa1317f8a14251743c131d556aadb17efb85e82bcd95b6564044935c8301ae7
+    restart: always
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    ports:
+      - 127.0.0.1:9092:9000
+      - 127.0.0.1:9093:9001
+    volumes:
+      - warden_langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  redis:
+    image: docker.io/redis:7
+    restart: always
+    command: >
+      --requirepass myredissecret
+      --maxmemory-policy noeviction
+    volumes:
+      - warden_langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  postgres:
+    image: docker.io/postgres:17
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - warden_langfuse_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  warden_langfuse_postgres_data:
+    driver: local
+  warden_langfuse_clickhouse_data:
+    driver: local
+  warden_langfuse_clickhouse_logs:
+    driver: local
+  warden_langfuse_minio_data:
+    driver: local
+  warden_langfuse_redis_data:
+    driver: local

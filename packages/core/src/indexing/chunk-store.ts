@@ -28,11 +28,7 @@ export class SqliteChunkStore implements ChunkStore {
   }
 
   async getByHash(chunkHash: string): Promise<ChunkRecord | null> {
-    const row = db()
-      .select()
-      .from(chunksTable)
-      .where(eq(chunksTable.chunkHash, chunkHash))
-      .get();
+    const row = db().select().from(chunksTable).where(eq(chunksTable.chunkHash, chunkHash)).get();
     return row ? rowToRecord(row) : null;
   }
 
@@ -75,7 +71,8 @@ function rowToRecord(row: typeof chunksTable.$inferSelect): ChunkRecord {
   let symbolPath: string[] = [];
   try {
     const parsed = JSON.parse(row.symbolPathJson) as unknown;
-    if (Array.isArray(parsed)) symbolPath = parsed.filter((s): s is string => typeof s === "string");
+    if (Array.isArray(parsed))
+      symbolPath = parsed.filter((s): s is string => typeof s === "string");
   } catch {
     // Malformed JSON is treated as empty scope chain — chunk row stays usable.
   }

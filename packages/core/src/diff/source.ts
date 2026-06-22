@@ -57,12 +57,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
     //     only legal form; three-dot rejects `<tree>...<commit>` and
     //     silently fed an empty diff before repo-audit 2026-05-18 #3.
     const isCommit = (
-      await runGit(opts.repoRoot, [
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        `${opts.baseRef}^{commit}`,
-      ])
+      await runGit(opts.repoRoot, ["rev-parse", "--verify", "--quiet", `${opts.baseRef}^{commit}`])
     ).ok;
     const range = isCommit ? `${opts.baseRef}...HEAD` : `${opts.baseRef}..HEAD`;
     const { diff, degraded } = await runGitDiff(opts.repoRoot, [range]);
@@ -113,11 +108,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
  * `git diff <ref>...HEAD`, or `undefined` if nothing usable resolves.
  */
 async function resolveDefaultBranch(repoRoot: string): Promise<string | undefined> {
-  const symbolic = await runGit(repoRoot, [
-    "symbolic-ref",
-    "--quiet",
-    "refs/remotes/origin/HEAD",
-  ]);
+  const symbolic = await runGit(repoRoot, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
   if (symbolic.ok) {
     const ref = symbolic.stdout.trim();
     if (ref.startsWith("refs/remotes/")) return ref.slice("refs/remotes/".length);

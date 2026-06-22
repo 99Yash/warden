@@ -10,10 +10,10 @@
     "check-types": "tsc -b"
   },
   "dependencies": {
+    "@typescript-eslint/parser": "^8.59.3",
     "@warden/ai": "workspace:*",
     "@warden/db": "workspace:*",
     "@warden/env": "workspace:*",
-    "@typescript-eslint/parser": "^8.59.3",
     "code-chunk": "0.1.14",
     "eslint": "^10.3.0",
     "eslint-plugin-no-secrets": "^2.3.3",

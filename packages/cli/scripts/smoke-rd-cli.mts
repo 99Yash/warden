@@ -27,9 +27,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-const { runReactDoctor, parseReactDoctorStdout } = await import(
-  "@warden/core/runners/react-doctor"
-);
+const { runReactDoctor, parseReactDoctorStdout } =
+  await import("@warden/core/runners/react-doctor");
 const { mapSeverity, toComment } = await import("@warden/core/runners/to-comment");
 
 const TMP_ROOT = resolve(tmpdir(), `warden-rd-cli-${process.pid}`);
@@ -92,7 +91,9 @@ const report = {
       filePath: "src/db.ts",
       plugin: "react-doctor",
       rule: "prefer-named-export",
-      severity: "warning",
+      // Parser robustness: react-doctor may add non-error/warning buckets.
+      // Warden routes by category, so the whole report must not disappear.
+      severity: "info",
       message: "Prefer a named export here",
       help: "Rename the default export",
       line: 1,
@@ -132,8 +133,7 @@ if (secMap.tier !== 1 || secMap.category !== "security") {
   fail(`Security → expected {tier:1, security}, got ${JSON.stringify(secMap)}`);
 }
 // Evidence snippet must be the whitespace-collapsed flagged line (line 3).
-const expectedSnippet =
-  `const rows = await db.query("SELECT * FROM users WHERE id = " + req.params.id);`;
+const expectedSnippet = `const rows = await db.query("SELECT * FROM users WHERE id = " + req.params.id);`;
 if (security!.evidence?.snippet !== expectedSnippet) {
   fail(`Security evidence snippet mismatch — got ${JSON.stringify(security!.evidence)}`);
 }
@@ -152,12 +152,17 @@ const maintMap = mapSeverity(maint!);
 if (maintMap.tier !== 3 || maintMap.category !== "clarity") {
   fail(`Maintainability → expected {tier:3, clarity}, got ${JSON.stringify(maintMap)}`);
 }
+if (maint!.severity !== "info") {
+  fail(`non-error/warning severity should normalize to info, got ${maint!.severity}`);
+}
 console.log("✓ parse + category→{tier,category} mapping + evidence snippet");
 
 // ── 2. toComment on the Security finding ─────────────────────────────────
 const comment = toComment(security!);
 if (comment.tier !== 1 || comment.category !== "security") {
-  fail(`Security Comment → expected tier 1 / security, got tier ${comment.tier} / ${comment.category}`);
+  fail(
+    `Security Comment → expected tier 1 / security, got tier ${comment.tier} / ${comment.category}`,
+  );
 }
 const src = comment.sources[0];
 if (!src || src.snippet !== expectedSnippet) {

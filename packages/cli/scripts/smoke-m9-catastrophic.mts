@@ -97,10 +97,7 @@ assert(
   noiseFilterEntries[0]?.message.includes(String(NODE_MODULES_FILES)),
   `noise-filter message includes the pruned count (${NODE_MODULES_FILES})`,
 );
-assert(
-  elapsedMs < 5_000,
-  `prune wall-clock < 5s (got ${elapsedMs.toFixed(1)}ms)`,
-);
+assert(elapsedMs < 5_000, `prune wall-clock < 5s (got ${elapsedMs.toFixed(1)}ms)`);
 
 process.stdout.write(`\n[3] pruneDiff — baseline noise (.DS_Store + .pyc)\n`);
 const baselineMix: { path: string; addedLines: number[] }[] = [

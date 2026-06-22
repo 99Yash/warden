@@ -32,7 +32,7 @@ import { rmSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runReviewHarness, type CommentSet, type ReviewHarnessInput } from "@warden/core";
-import { configuredReviewLlmProviders, providerApiKey } from "@warden/env";
+import { configuredReviewLlmProviders, loadWardenRuntime, providerApiKey } from "@warden/env";
 import { ALL_CONFIGS } from "./configs/index.js";
 import { aggregateScores, checkThreshold, renderMarkdownTable, scoreFixtureRun } from "./score.mjs";
 import type {
@@ -532,6 +532,7 @@ function scoreOne(
   const matchedCommentIds = new Set<string>();
   for (const label of presentLabels) {
     for (const comment of result.comments) {
+      if (matchedCommentIds.has(comment.id)) continue;
       if (matchesLabel(comment, label)) {
         labelHits.add(label.id);
         matchedCommentIds.add(comment.id);
@@ -602,6 +603,12 @@ function approximateDispatchCount(set: CommentSet): number {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
+  // Bootstrap the Warden runtime the same way the CLI does (index.ts:66) so the
+  // repo-root `.env` is loaded into process.env — the eval runs from
+  // packages/cli, so without this the project `.env` (which holds the keys) is
+  // never picked up and every run self-skips.
+  loadWardenRuntime({ repoRoot: WARDEN_ROOT });
+
   const configuredProviders = configuredReviewLlmProviders().filter(
     (providerId) => providerApiKey(providerId) !== undefined,
   );
@@ -647,7 +654,9 @@ async function main(): Promise<void> {
         const score = scoreOne(fixture, result, i + 1, config.name);
         if (error !== null) score.error = error;
         samples.push(score);
-        const presentLabelCount = fixture.labels.filter((l) => labelExpectation(l) === "present").length;
+        const presentLabelCount = fixture.labels.filter(
+          (l) => labelExpectation(l) === "present",
+        ).length;
         process.stdout.write(
           `      sample ${i + 1}/${args.samples}: ` +
             `caught ${score.caughtLabels.length}/${presentLabelCount}, ` +

@@ -6,7 +6,7 @@ This is the milestone brief for the agent (or future-me) implementing M5. Self-c
 
 1. **`./decisions.md`** — focus on ADR-0008 (citation thesis), ADR-0012 (priority order, `dedup` category), ADR-0013 (I/O-pure core), ADR-0016 (storage discipline), and ADR-0018 (this milestone's direction). Skim the rest.
 2. **`./CLAUDE.md`** — repo orientation. The package boundaries table is load-bearing; M5 must not violate it.
-3. **`./packages/core/src/index.ts`** — current pipeline. Note that `RetrievedContext` is *already* a typed seam in `ReviewInput` (M4 left it as `{ chunks: [] }` for forward-compat). M5 populates it; the surrounding contract doesn't change.
+3. **`./packages/core/src/index.ts`** — current pipeline. Note that `RetrievedContext` is _already_ a typed seam in `ReviewInput` (M4 left it as `{ chunks: [] }` for forward-compat). M5 populates it; the surrounding contract doesn't change.
 4. **`./packages/db/src/schema/external-knowledge.ts`** — schema-file convention. M5's two new schemas mirror this shape.
 5. The "Design nuances captured during planning" section at the bottom of this doc — captures the non-obvious refinements from the planning grilling. Worth reading before writing code, not after.
 
@@ -61,16 +61,16 @@ Public shape:
 
 ```ts
 export interface ImportRef {
-  module: string;          // 'react' | './session' | '@warden/core'
-  resolved?: string;       // absolute path; undefined for unresolved external (e.g. node_modules)
+  module: string; // 'react' | './session' | '@warden/core'
+  resolved?: string; // absolute path; undefined for unresolved external (e.g. node_modules)
   kind: "value" | "type"; // import vs import type
-  symbols: string[];       // [] for default/namespace-only; ['foo','bar'] for named imports
+  symbols: string[]; // [] for default/namespace-only; ['foo','bar'] for named imports
   startLine: number;
   endLine: number;
 }
 
 export interface ExportRef {
-  symbol: string;          // 'login' | 'default'
+  symbol: string; // 'login' | 'default'
   startLine: number;
   endLine: number;
 }
@@ -98,15 +98,21 @@ Why this interface, not direct `ts.*` calls inside the selector: the entire poin
 import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
-export const importGraph = sqliteTable("import_graph", {
-  filePath: text("file_path").notNull(),
-  fileSha: text("file_sha").notNull(),
-  importsJson: text("imports_json").notNull(),       // JSON.stringify(ImportRef[])
-  exportsJson: text("exports_json").notNull(),       // JSON.stringify(ExportRef[])
-  computedAt: integer("computed_at", { mode: "timestamp" }).notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (t) => ({
-  pk: primaryKey({ columns: [t.filePath, t.fileSha] }),
-}));
+export const importGraph = sqliteTable(
+  "import_graph",
+  {
+    filePath: text("file_path").notNull(),
+    fileSha: text("file_sha").notNull(),
+    importsJson: text("imports_json").notNull(), // JSON.stringify(ImportRef[])
+    exportsJson: text("exports_json").notNull(), // JSON.stringify(ExportRef[])
+    computedAt: integer("computed_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.filePath, t.fileSha] }),
+  }),
+);
 ```
 
 `packages/db/src/schema/file-state.ts`:
@@ -115,7 +121,9 @@ export const importGraph = sqliteTable("import_graph", {
 export const fileState = sqliteTable("file_state", {
   filePath: text("file_path").primaryKey(),
   currentSha: text("current_sha").notNull(),
-  observedAt: integer("observed_at", { mode: "timestamp" }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  observedAt: integer("observed_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
 });
 ```
 
@@ -130,20 +138,20 @@ import type { EcosystemContext } from "../ecosystem/index.js";
 export type Evidence = { startLine: number; endLine: number };
 
 export type Reason =
-  | { kind: "imported-by"; from: string; evidence?: Evidence[] }     // lines in candidate where exported symbols live
-  | { kind: "imports"; target: string; evidence?: Evidence[] }       // import-statement line(s) + usage call sites in candidate
-  | { kind: "same-folder"; sibling: string }                         // path-only signal, no evidence
-  | { kind: "symbol-ref"; symbol: string; evidence: Evidence[] };    // grep-hit lines in candidate
+  | { kind: "imported-by"; from: string; evidence?: Evidence[] } // lines in candidate where exported symbols live
+  | { kind: "imports"; target: string; evidence?: Evidence[] } // import-statement line(s) + usage call sites in candidate
+  | { kind: "same-folder"; sibling: string } // path-only signal, no evidence
+  | { kind: "symbol-ref"; symbol: string; evidence: Evidence[] }; // grep-hit lines in candidate
 
 export type ContextCandidate = {
-  path: string;            // repo-relative
-  score: number;           // 0..1, higher = more relevant
+  path: string; // repo-relative
+  score: number; // 0..1, higher = more relevant
   reasons: Reason[];
 };
 
 export type SelectorOutput = {
   candidates: ContextCandidate[];
-  degraded: string[];      // surfaced via metadata.degradedWorkers
+  degraded: string[]; // surfaced via metadata.degradedWorkers
 };
 
 export interface ContextSelector {
@@ -207,7 +215,7 @@ import { JSCPD } from "jscpd";
 
 export async function runJscpd(
   repoRoot: string,
-  scopedPaths: string[],          // changed ∪ selector.candidates
+  scopedPaths: string[], // changed ∪ selector.candidates
   changedPaths: Set<string>,
 ): Promise<{ findings: ToolFinding[]; degraded: string[] }> {
   if (scopedPaths.length === 0) return { findings: [], degraded: [] };
@@ -217,7 +225,7 @@ export async function runJscpd(
     minLines: 5,
     silent: true,
   });
-  const clones = await jscpd.detectInFiles(scopedPaths.map(p => path.join(repoRoot, p)));
+  const clones = await jscpd.detectInFiles(scopedPaths.map((p) => path.join(repoRoot, p)));
 
   const findings: ToolFinding[] = [];
   for (const clone of clones) {
@@ -225,10 +233,10 @@ export async function runJscpd(
     const bRel = relFromRepoRoot(clone.duplicationB.sourceId);
     const aChanged = changedPaths.has(aRel);
     const bChanged = changedPaths.has(bRel);
-    if (!aChanged && !bChanged) continue;        // pair must touch the diff
+    if (!aChanged && !bChanged) continue; // pair must touch the diff
 
     // Side that touches the diff is the "site" of the comment.
-    const site  = aChanged ? clone.duplicationA : clone.duplicationB;
+    const site = aChanged ? clone.duplicationA : clone.duplicationB;
     const other = aChanged ? clone.duplicationB : clone.duplicationA;
     findings.push({
       source: "jscpd",
@@ -313,7 +321,7 @@ const degraded = [
 
 `packages/core/src/llm/prompts/user-template.md` (or whichever file M4 settled on per ADR-0015's prompts-as-files rule) gets a new section before the diff. Sketch:
 
-```
+````
 ## Adjacent files (with evidence)
 {{#each contentBearing}}
 {{this.path}}
@@ -321,14 +329,18 @@ const degraded = [
   [{{this.kind}}{{#if this.label}} {{this.label}}{{/if}}] L{{this.startLine}}–L{{this.endLine}}
   ```{{this.languageHint}}
   {{this.codeExcerpt}}
-  ```
-  {{/each}}
+````
+
+{{/each}}
 {{/each}}
 
 ## Same-folder neighbors (paths only)
+
 {{#each sameFolder}}
+
 - {{this}}
-{{/each}}
+  {{/each}}
+
 ```
 
 The system prompt grows a paragraph instructing the LLM to:
@@ -413,3 +425,4 @@ Each of these came out of a single planning session by walking the design tree q
 ## Lessons from M5 → M6 transition
 
 *(Empty — append after M5 ships and dogfooding reveals real bugs / refinements / open seams that should inform M6. Mirrors Alfred's pattern.)*
+```

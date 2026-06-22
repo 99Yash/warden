@@ -19,7 +19,9 @@ export function formatCommentSet(
     lines.push(pc.green(`warden ${mode}: no findings.`));
   } else {
     lines.push(
-      pc.bold(`warden ${mode}: ${result.comments.length} finding${result.comments.length === 1 ? "" : "s"}`),
+      pc.bold(
+        `warden ${mode}: ${result.comments.length} finding${result.comments.length === 1 ? "" : "s"}`,
+      ),
     );
     for (const c of result.comments) {
       const sev = tierSwatch(c.tier);
@@ -73,9 +75,7 @@ function renderSummaryLine(result: CommentSet): string {
   }
   const breakdown = renderCostBreakdown(result.metadata.costByTier, result.metadata.costLabels);
   const costStr = formatUsd(cost);
-  return breakdown
-    ? `Done in ${wall} · ${costStr} (${breakdown})`
-    : `Done in ${wall} · ${costStr}`;
+  return breakdown ? `Done in ${wall} · ${costStr} (${breakdown})` : `Done in ${wall} · ${costStr}`;
 }
 
 function renderCostBreakdown(

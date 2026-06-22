@@ -100,7 +100,11 @@ handle
   .run();
 handle
   .insert(indexMeta)
-  .values({ key: "embedding_model_version", value: "dim=1024;type=document", updatedAt: new Date() })
+  .values({
+    key: "embedding_model_version",
+    value: "dim=1024;type=document",
+    updatedAt: new Date(),
+  })
   .onConflictDoUpdate({
     target: indexMeta.key,
     set: { value: "dim=1024;type=document", updatedAt: new Date() },
