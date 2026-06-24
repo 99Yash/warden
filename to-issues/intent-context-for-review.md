@@ -1,47 +1,33 @@
 # Feed stated intent (PR description / ADR) into review as adjudication context — lever B
 
-**Severity:** high (recall). **Needs an ADR.**
+> **GRADUATED → ADR-0049** (2026-06-24, decisions.md). This file is now a pointer;
+> the design lives in the ADR. **Delete when ADR-0049 lands in code.**
 
-## Problem
+ADR-0049 carries the full design. In brief:
 
-Some of the highest-value bugs are _intent-relative invariant violations_ —
-the code is internally plausible and only wrong against a contract stated
-outside the code. On alfred PR#235 these were the two findings warden could
-**not** have caught regardless of prompt quality:
+- **Acquire** intent via a deterministic cascade — resolved-PR `gh pr view`
+  (matched by the diff's head+base or an explicit `--pr`/URL, never bare
+  "current branch") → referenced docs → commit subjects over the diff's
+  **merge-base commit set**.
+- **Compress** to a claimed-intent digest via a **summarizer routing policy**
+  over the existing cheap review tier (Anthropic/OpenAI only in v0;
+  deterministic-excerpt fallback; Google only via a future explicit
+  `routing.intentSummarizer` knob, never the default LLM fallback chain).
+- **Inject** the digest (inject-don't-discover, ADR-0047 §2); **trust** it as a
+  hypothesis to verify against code — code is authority, intent never enters
+  `sources[]`.
+- **Eval gate** (four legs, before default-on): digest fidelity + recall on
+  PR#235 prose-only labels + precision (no PR#131 regression) + stale /
+  future-work FP traps.
 
-- `pinnedDemanding` accepted but no caller passes it → violates the "security
-  pins stay" invariant stated in ADR-0064 / the PR description.
-- recurrence assigned by input order → violates the "recurrence decays repeats"
-  guarantee, also stated in prose, not code.
+Bound: ADR-0050 (init-time repo-intent digest), ADR-0051 (Lever C).
 
-The OpenAI harness caught both because it was given the PR description, the
-ADR, and recent journals, plus a "review code against stated intent" stance.
-Warden's boss and workers see only the diff + the files they `readFile` — never
-the PR's stated purpose. So they cannot check code-vs-contract; they can only
-check code-vs-code.
-
-## Proposal sketch
-
-Plumb an optional **intent block** into the boss (and into worker context)
-sourced from, in priority order: the PR/MR description (when run in a CI/bot
-context), a linked ADR id found in the commit message or diff, and/or the most
-recent design-doc/journal touching the changed area. The boss already has
-`diffBase.description` (ADR-0046); extend that into a richer, optional
-`reviewIntent` the workers can consult. The diligent preamble already tells
-workers to "review code against stated intent" — but today there is no intent
-to read.
-
-## Tension to resolve in the ADR
-
-- Citation discipline: an intent-relative finding cites the violated invariant
-  (prose) + the in-diff code. Decide how prose sources fit the
-  evidence/sources model (ties into ADR-0044 reasoned-lane / citation demotion).
-- Trust: a stale or aspirational PR description is not ground truth (cf.
-  `project_warden_stale_doccomment_fp`). Treat intent as a _hypothesis to
-  verify against code_, not as fact.
+**Correction to the original sketch (now superseded):** the boss does **not**
+already have intent — `diffBase.description` (ADR-0046) is a range label
+("vs main"), not intent; no intent text flows anywhere today.
 
 ## Refs
 
 - memories `project_warden_recall_is_agency_gap`, `project_warden_context_selection`
-- ADR-0046 (`diffBase.description`), ADR-0044 (citation demotion)
+- ADR-0049 (this design), ADR-0046 (`diffBase.description`), ADR-0044 (citation demotion)
 - fixture `alfred-pr235-misses-a99d732f` labels tagged `[intent]`
