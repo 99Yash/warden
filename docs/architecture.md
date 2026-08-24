@@ -1,6 +1,6 @@
 # Architecture
 
-See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index. Read [`decisions.md`](../decisions.md) before proposing architectural changes — 21 ADRs cover every major choice and rejection. [`CONTEXT.md`](../CONTEXT.md) is the noun glossary; every domain concept named below has its canonical definition there.
+See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index. Read [`decisions.md`](../decisions.md) before proposing architectural changes — ADRs cover every major choice and rejection. [`CONTEXT.md`](../CONTEXT.md) is the noun glossary; every domain concept named below has its canonical definition there.
 
 ## What each package owns
 
@@ -18,7 +18,7 @@ Future surfaces under `apps/` (GitHub PR bot, Slack bot, ClickUp integration —
 ## How a request flows
 
 1. **CLI parses arguments** and assembles a **`ReviewInput`** — diff source (auto-detects per verb: uncommitted for `check`, vs default-branch for `review`), repo root, config.
-2. **`@warden/core` runs det priors in parallel** — TSC, user-config ESLint, ESLint security, jscpd, vuln (npm audit + OSV verification), and the scalability / deadcode / consistency / leverage detectors. The M5/M6 context selector runs alongside. `warden check` stops here.
+2. **`@warden/core` runs det priors in parallel** — TSC, user-config ESLint, ESLint security, jscpd, vuln (npm audit + OSV verification), and the scalability / deadcode / consistency / leverage detectors, plus the opt-in react-doctor det-prior (`WARDEN_REACT_DOCTOR`, default off). The M5/M6 context selector runs alongside. `warden check` stops here.
 3. **`warden review` enters the boss loop** — an Opus-tier boss reads the det-prior bundle and dispatches per-`(file, concern)` workers via the `dispatch_worker` tool. Worker concerns are `correctness`, `scalability`, `consistency`, `security` (Sonnet tier) and `committability`, `leverage` (Haiku tier). Workers reach into the repo through `lookupTypeDef` + `readFile` + `grepRepo` tools. M15's **programmatic dispatch** (PD-multi) seeds Round 0 deterministically; the boss adjudicates from there.
 4. **Citation verify post-pass** confirms every quoted snippet substring-matches the cited file. Sources that fail drop; comments left without sources drop.
 5. **`applyHardRules()`** enforces tier × category × confidence-floor logic and returns the **`CommentSet`** the CLI formats.
@@ -95,7 +95,7 @@ stateDiagram-v2
     MaybeRefreshIndex --> RefreshReconcile: stale index within refresh surface
     RefreshReconcile --> RefreshSkipped: reconcile degraded entries captured
     RefreshSkipped --> ParallelPriors
-    ParallelPriors --> ScopedJscpd: TSC, ESLint, security ESLint, vuln, selector, deadcode, consistency, scalability, leverage
+    ParallelPriors --> ScopedJscpd: TSC, ESLint, security ESLint, vuln, selector, deadcode, consistency, scalability, leverage (+ opt-in react-doctor)
     ScopedJscpd --> AssembleContext
     AssembleContext --> [*]
   }

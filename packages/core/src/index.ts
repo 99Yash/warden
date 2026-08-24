@@ -33,7 +33,6 @@ export { shutdownObservability, isObservabilityEnabled } from "@warden/ai";
 export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosystem/index.js";
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 export { pruneDiff, type PruneResult } from "./diff/prune.js";
-export { buildDiffTree, MAX_DEPTH as DIFF_TREE_MAX_DEPTH, type DiffTreeNode } from "./diff/tree.js";
 export {
   resolveDiff,
   type DiffMode,
