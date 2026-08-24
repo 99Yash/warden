@@ -19,7 +19,7 @@ export type { LanguageModel } from "ai-retry";
 // without taking a direct dep (same boundary rule as `ai` itself). The
 // experimental `condition().action()` API is opted into deliberately — it's
 // what ADR-0017's cascade is expressed in.
-export { getModelKey, isErrorAttempt, isResultAttempt } from "ai-retry";
+export { getModelKey } from "ai-retry";
 export {
   aborted,
   createRetryable,
