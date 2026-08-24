@@ -6,7 +6,9 @@ head-to-head (warden 2 findings — one FP — vs an OpenAI staff-engineer-promp
 harness's 5). See memories `project_warden_pr235_openai_headhead` and
 `project_warden_recall_is_agency_gap` for origin.
 
-All six are mirrored as GitHub issues on `99Yash/warden` (filed 2026-06-21).
+The original six are mirrored as GitHub issues on `99Yash/warden` (filed
+2026-06-21). Later recall levers follow the same canonical-file + trackable-GH
+issue pattern.
 The markdown files stay the canonical longform; the GH issues are the trackable
 surface.
 
@@ -15,6 +17,7 @@ surface.
 | [openai-worker-false-clean](./openai-worker-false-clean.md)                               | [#29](https://github.com/99Yash/warden/issues/29) | high (correctness)        | no                                        |
 | [intent-context-for-review](./intent-context-for-review.md)                               | [#30](https://github.com/99Yash/warden/issues/30) | high (recall)             | yes — lever B                             |
 | [lane-discipline-cross-file-evidence](./lane-discipline-cross-file-evidence.md)           | [#31](https://github.com/99Yash/warden/issues/31) | medium (recall)           | yes — lever C                             |
+| [structural-ceiling-pass](./structural-ceiling-pass.md)                                   | [#37](https://github.com/99Yash/warden/issues/37) | high (recall + precision) | proposed ADR-0052 — lever D               |
 | [review-observability](./review-observability.md)                                         | [#32](https://github.com/99Yash/warden/issues/32) | medium (tooling)          | ✅ ADR-0048 (locked, shipping)            |
 | [resume-from-review-run](./resume-from-review-run.md)                                     | [#33](https://github.com/99Yash/warden/issues/33) | medium (cost + iteration) | designed in ADR-0048 §8; impl ADR pending |
 | [prune-transparency-large-generated-drops](./prune-transparency-large-generated-drops.md) | [#34](https://github.com/99Yash/warden/issues/34) | low                       | no                                        |
