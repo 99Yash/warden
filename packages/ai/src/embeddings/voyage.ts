@@ -129,8 +129,6 @@ export class VoyageProvider implements EmbeddingProvider {
         }),
         signal: controller.signal,
       });
-    } catch (err) {
-      throw err;
     } finally {
       clearTimeout(timer);
     }

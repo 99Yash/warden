@@ -279,8 +279,8 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
         : null;
 
   // Parallel detectors. scalabilityRunner + leverageRunner are `Runner`-
-  // contract objects (M8); call `.run()` directly here — the M8
-  // `dispatch()` is retired from the review codepath in a later commit.
+  // contract objects; call `.run()` directly — the M8 `dispatch()` was
+  // retired in the M14 close-out (ADR-0030).
   const runnerInput = {
     repoRoot: input.repoRoot,
     changed,

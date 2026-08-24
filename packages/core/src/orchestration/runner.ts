@@ -1,24 +1,28 @@
 import type { ChangedFile } from "../diff/index.js";
-import type { Comment, DegradedEntry, RetrievedContext } from "../schema.js";
+import type { Comment, DegradedEntry } from "../schema.js";
 import type { ToolFinding } from "../runners/types.js";
 
 /**
- * The orchestration `Runner` contract (ADR-0023). Every runner — deterministic
- * detector, LLM cheap-tier sub-agent, future specialist worker — speaks the
- * same input/output shape so the dispatcher can route them uniformly and the
- * scratchpad can store their outputs without per-runner branches.
+ * The orchestration `Runner` contract (ADR-0023): `{ name, run(input) }` so a
+ * deterministic detector speaks one input/output shape and callers store its
+ * output without per-runner branches.
  *
- * M8 ships the spine; only `committability` and `scalability` migrate to
- * the contract. The remaining 6 runners (TSC, ESLint, jscpd, vuln, deadcode,
- * consistency) keep their inline call sites in `runReview()` and have their
- * outputs recorded directly into the scratchpad — the synthesizer sees a
- * uniform scratchpad regardless of which runners came through `dispatch()`
- * and which were inline. M9 (likely) closes this when the noise filter
- * touches the same runner-input surface.
+ * Post-M14-close-out (ADR-0030), this contract no longer implies any
+ * orchestration machinery — the spine's `dispatch()`/`Scratchpad`/
+ * `synthesize` are retired. Its only consumers are the deterministic
+ * detectors that implement it directly (`scalabilityRunner`,
+ * `leverageRunner`), invoked via plain `.run()` inside
+ * `det-priors.ts`'s `Promise.all` block. It remains the right shape for
+ * future Phase 1 det-prior additions; it does NOT shape the review-harness
+ * worker tier — M14+ workers are built around the `dispatch_worker`
+ * invocation envelope instead.
  *
  * Input shape is `path[]`-based (β per ADR-0023 #5) — no current runner
  * benefits from tree-aware input. The diff tree stays internal to `diff/`
- * until a tree-aware consumer materializes.
+ * until a tree-aware consumer materializes. Retrieved context is not part
+ * of this contract: the selector runs alongside the detectors in Phase 1
+ * and its output flows to the worker tier, never back into det-prior
+ * detectors.
  */
 
 export interface RunnerInput {
@@ -26,7 +30,6 @@ export interface RunnerInput {
   /** Pre-pruned post-M9; raw in M8. */
   changed: ChangedFile[];
   changedPaths: string[];
-  retrievedContext?: RetrievedContext;
 }
 
 /**
