@@ -3023,6 +3023,31 @@ The same session that surfaced this also scoped "remote SQLite" — which, on in
 
 **Locus.** `packages/mcp` (new) — stdio transport, tool descriptors, versioned result envelopes; a `warden mcp` subcommand in `@warden/cli`; `run_det_priors` / `search_index` / `lookup_type_def` tool handlers wrapping existing core functions (`runDetPriors()`, the semantic selector, the ADR-0026 resolver). The **post-pass host** is deliberately not yet fixed (§Caveats), but it must own **publication** — a driver that can only publish the post-pass result enforces the guarantee architecturally; one that posts raw session text does not. Slice order and the parity gate: `to-issues/opencode-mcp-00-adr-sweep.md` (landed) plus `to-issues/opencode-mcp-01` … `-10` + issues #39–#48; **#45** (index export/import) is independent and unblocked.
 
+**OpenCode client setup (#39).** Launch in the repository being reviewed; stdio is exclusively JSON-RPC (no banner or spinner). The resolver lazily opens `.warden/cache.sqlite` through `@warden/db`, which auto-migrates a fresh cache; no separate `warden check` or DB setup is needed. The first slice exposes only `lookup_type_def`, with version-1 envelopes and structured not-found/error reasons. Each JSON tool-content block is capped at 16 KiB (UTF-8); an oversized result returns a bounded `internal_error` envelope with a size-limit hint rather than truncating a citation.
+
+The compatibility config from the slice brief is:
+
+```jsonc
+{ "mcp": { "warden": { "type": "local", "command": ["npx", "-y", "warden", "mcp"] } } }
+```
+
+For native [OpenCode V2 configuration](https://opencode.ai/v2/docs/mcp-servers), put servers under `mcp.servers` in `opencode.jsonc`:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "warden": { "type": "local", "command": ["npx", "-y", "warden", "mcp"] },
+    },
+  },
+}
+```
+
+The `npx` form requires a published CLI containing this slice. To verify an unpublished checkout, replace the command with `["node", "--import", "tsx/esm", "/absolute/path/to/warden/packages/cli/src/index.ts", "mcp"]` and set `cwd` to `/absolute/path/to/warden/packages/cli` (where `tsx` is installed). Run `opencode mcp list` to check the connection; the discovered tool is `warden_lookup_type_def` (Code Mode: `tools.warden.lookup_type_def`). The protocol smoke is `pnpm --filter @warden/cli smoke:mcp-server`; it starts the CLI as a child, asserts discovery and success/not-found/invalid-input envelopes, and verifies both positive and negative cache rows in a fresh database.
+
+Verified 2026-10-03 against running OpenCode 2.0.22 using a temporary runtime connection to the checkout: `opencode mcp list` reported `warden connected`, Code Mode discovered `tools.warden.lookup_type_def`, and a call for `oxlint#defineConfig` returned `status: "ok"`, `envelopeVersion: 1`, and the pre-shaped `api_def` citation. The checkout was launched with Node 22 to match its installed SQLite addon's ABI. The temporary connection was removed afterward; the published `npx` command was not tested.
+
 **Eval gate — the parity slice is the acceptance gate for the entire pivot.** The existing harness (`packages/cli/scripts/eval/`) scores the client path: `*-misses-*` fixtures for **recall**, `*-falsepos-*` + clean fixtures for **precision**, with the existing config-comparison and threshold scorer. Its go/no-go is **binding on the CI runner, structural lane, and trace bridge** (#46–#48). New seams, no new framework: (a) **MCP request-handler** — speak the protocol against a spawned server, assert discovery, result envelope, size bound, version field, degraded behavior; (b) the **reused** eval harness as the parity gate; (c) **smoke-*.mts** for export/import round-trip and bundle serialization, per the repo's no-unit-framework convention. Scope rules (§4, §7) are asserted **independently of `runReviewHarness`** — that independence is the thing being tested.
 
 **Why.**

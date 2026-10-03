@@ -1,0 +1,23 @@
+{
+  "name": "@warden/mcp",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@warden/core": "workspace:*",
+    "@warden/db": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@warden/config": "workspace:*",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}
