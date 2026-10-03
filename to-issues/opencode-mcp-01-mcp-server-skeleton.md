@@ -30,4 +30,6 @@ the review engine.
 
 ## Blocked by
 
-None — can start immediately.
+#49 — the doc-only ADR sweep (methodology/tool-provider + state authority). The
+slice file originally read "None", which contradicted `to-issues/README.md`
+claiming the sweep precedes slice 1; #49 settles that.

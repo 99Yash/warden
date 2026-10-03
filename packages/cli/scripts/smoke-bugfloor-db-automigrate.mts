@@ -9,13 +9,15 @@
  *   2. Every M6 schema table is queryable post-boot (sample: `chunks`,
  *      `embeddings`, `merkle`, `index_meta`, `jobs`).
  *   3. The cache file is physically created at the override path.
+ *   4. Statement GC across async file reads does not abort the process (#39).
  *
  * Usage: pnpm --filter @warden/cli smoke:bugfloor-db-automigrate
  */
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const TEST_DB = resolve(tmpdir(), `warden-bugfloor-db-${process.pid}-${Date.now()}.sqlite`);
 
@@ -67,6 +69,85 @@ for (const [name, table] of [
 }
 
 closeDb();
+
+process.stdout.write(`\n[3] failed initialization releases descriptors and permits retry\n`);
+// Count descriptors for this cache, not unrelated runtime files. No explicit GC:
+// cleanup must happen synchronously even when initialization never publishes _db.
+function cacheDescriptorCount(): number {
+  // macOS reports /private/var/... for a /var/... temporary path.
+  const cachePath = realpathSync(TEST_DB);
+  return execFileSync("lsof", ["-a", "-p", String(process.pid), "-Ffn"], {
+    encoding: "utf8",
+  })
+    .split("\n")
+    .filter((line) => line === `n${cachePath}`).length;
+}
+writeFileSync(TEST_DB, "not a SQLite database");
+const before = cacheDescriptorCount();
+let initializationFailures = 0;
+for (let i = 0; i < 30; i++) {
+  try {
+    db();
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not a database")) initializationFailures++;
+  }
+}
+const afterFailures = cacheDescriptorCount();
+closeDb();
+const afterClose = cacheDescriptorCount();
+process.stdout.write(
+  `  descriptors: ${before} -> ${afterFailures} after 30 failures -> ${afterClose} after closeDb()\n`,
+);
+assert(initializationFailures === 30, "all 30 corrupt-cache initializations fail as expected");
+assert(afterFailures === before, "failed initialization has no descriptor growth without GC");
+assert(afterClose === before, "closeDb() leaves no unpublished cache descriptors");
+rmSync(TEST_DB, { force: true });
+try {
+  const retry = db();
+  assert(
+    Array.isArray(retry.select().from(jobs).all()),
+    "retry bootstraps a repaired cache after failed initialization",
+  );
+} catch (err) {
+  assert(false, `retry failed: ${err instanceof Error ? err.message : String(err)}`);
+} finally {
+  closeDb();
+}
+
+process.stdout.write(`\n[4] SQLite statement GC across async file reads\n`);
+// Run in a child: the old V8 ObjectWrap addon aborts natively, so a try/catch
+// cannot observe the failure. Automatic GC during a file-close microtask is
+// essential here — explicit global.gc() runs with a different context.
+const gc = spawnSync(
+  process.execPath,
+  [
+    "--import",
+    import.meta.resolve("tsx/esm"),
+    "--input-type=module",
+    "-e",
+    `
+      import { readFile } from "node:fs/promises";
+      import { db, closeDb, jobs } from "@warden/db";
+      try {
+        for (let i = 0; i < 200; i++) {
+          db().select().from(jobs).all();
+          await readFile("package.json");
+          const pressure = Array.from({ length: 100_000 }, (_, n) => ({ n }));
+          if (pressure.length !== 100_000) throw new Error("Allocation failed");
+        }
+        console.log("200 automatic-GC passes");
+      } finally {
+        closeDb();
+      }
+    `,
+  ],
+  { env: { ...process.env, WARDEN_CACHE_PATH: TEST_DB }, encoding: "utf8" },
+);
+assert(
+  gc.status === 0 && gc.signal === null && gc.stdout.includes("200 automatic-GC passes"),
+  "child survives 200 statement/read/allocation cycles without a native crash",
+);
+if (gc.status !== 0) process.stderr.write(gc.stderr || String(gc.error ?? gc.signal));
 if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
 
 if (failed > 0) {

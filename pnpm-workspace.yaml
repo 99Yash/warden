@@ -6,6 +6,7 @@ catalog:
   "@ai-sdk/anthropic": ^3.0.0
   "@ai-sdk/google": ^3.0.0
   "@ai-sdk/openai": ^3.0.0
+  "@modelcontextprotocol/sdk": ^1.32.0
   "@opentelemetry/api": ^1.9.0
   "@opentelemetry/sdk-node": ^0.219.0
   ai-retry: ^1.7.3
@@ -13,7 +14,7 @@ catalog:
   "@types/better-sqlite3": ^7.6.13
   "@types/node": ^22.13.11
   ai: 6.0.77
-  better-sqlite3: ^11.10.0
+  better-sqlite3: ^13.0.3
   commander: ^14.0.0
   dotenv: ^17.2.2
   drizzle-kit: ^0.31.2

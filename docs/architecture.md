@@ -7,7 +7,9 @@ See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index. Read [`decisions.md`](
 All workspace packages publish under `@warden/*`. The CLI binary is `warden`.
 
 - **`@warden/cli`** — Argument parsing, terminal output, the published `warden` binary. The single in-tree consumer of `@warden/core` in v0.
-- **`@warden/core`** — The review engine. Takes a **`ReviewInput`**, returns a **`CommentSet`**. Owns the **review harness** (M14), **det priors** (parallel deterministic runners), the **boss loop** with **`dispatch_worker`** tool, the six **worker concerns**, **citation discipline** + the **substring-verifier** post-pass, and the M16 **`reconcileFiles`** indexing primitive. I/O-pure (ADR-0013).
+> **Current vs adopted target.** Everything in this section describes what **ships today**: `warden review` runs the ADR-0030 boss loop, and that is accurate, not stale. **ADR-0053** adopts a different target — warden becomes the methodology + deterministic tool-provider exposed over MCP (`warden mcp`), and an external client runs the lanes. That pivot has **zero implementation code**; the boss loop is retained as the parity baseline until #43 clears. Where this doc and ADR-0053 differ, this doc describes *current*, ADR-0053 describes *target*. See [`CONTEXT.md`](../CONTEXT.md) §6 *current vs adopted target*.
+
+- **`@warden/core`** — The review engine. Takes a **`ReviewInput`**, returns a **`CommentSet`**. Owns the **review harness** (M14), **det priors** (parallel deterministic runners), the **boss loop** with **`dispatch_worker`** tool, the six **worker concerns**, **citation discipline** + the **substring-verifier** post-pass, and the M16 **`reconcileFiles`** indexing primitive. I/O-pure (ADR-0013). Under ADR-0053's target, the boss loop + worker concerns move out to the client; det priors and the deterministic post-pass stay and become MCP tools.
 - **`@warden/ai`** — The provider-dispatch seam. Exposes `getBossModel()` / `getWorkerStrongModel()` / `getWorkerCheapModel()` / `getApexModel()` (M18), the **embedding provider** abstraction, the AI-SDK `tool()` re-export, and the M15 **`transformSchemaForGemini`** adapter. The single place that imports AI SDK provider packages.
 - **`@warden/db`** — Drizzle schema + migrations + the better-sqlite3 connection singleton over **`.warden/cache.sqlite`**. Re-exports drizzle-orm operators (`eq`, `and`, `gt`, …) so consumers don't pull `drizzle-orm` into their own deps.
 - **`@warden/env`** — Warden config/env runtime: built-in defaults, global `~/.config/warden/config.jsonc`, project `warden.jsonc`, env-file loading, provider readiness, and Zod-validated env-var access via `wardenEnv()`. Importable from any package. The only sanctioned reader of `process.env`. See [`environment.md`](./environment.md).
@@ -23,7 +25,7 @@ Future surfaces under `apps/` (GitHub PR bot, Slack bot, ClickUp integration —
 4. **Citation verify post-pass** confirms every quoted snippet substring-matches the cited file. Sources that fail drop; comments left without sources drop.
 5. **`applyHardRules()`** enforces tier × category × confidence-floor logic and returns the **`CommentSet`** the CLI formats.
 
-The boss loop, det priors, and citation verifier are three explicit phases — same primitive `runDetPriors()` powers `warden check` (skips phases 2 + 3).
+The boss loop, det priors, and citation verifier are three explicit phases — same primitive `runDetPriors()` powers `warden check` (skips phases 2 + 3). **Under ADR-0053's target, phase 2 leaves warden** and phase 3's lane filter must be extracted out of phase 2's dispatch path rather than inherited (see ADR-0053 §4).
 
 ## Command state machines
 

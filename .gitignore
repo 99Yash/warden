@@ -59,3 +59,8 @@ temp
 # Eval scratch checkouts (sparse temp repo + real-PR worktrees)
 packages/cli/scripts/eval/.eval-tmp-repo/
 packages/cli/scripts/eval/.eval-worktrees/
+
+# Campaign workspace: per-run queue state, item files, and raw lane reports.
+# Verdict + must-fix outcomes go in the commit message / PR body; the raw
+# subagent transcripts are working state, matching alfred's convention.
+.campaign/

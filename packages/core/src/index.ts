@@ -54,6 +54,9 @@ export {
 } from "./confidence.js";
 export {
   lookupTypeDef,
+  LookupTypeDefFoundResultSchema,
+  SuggestedApiDefSourceSchema,
+  type LookupTypeDefFoundResult,
   type LookupTypeDefResult,
   type NotFoundReason as TypeDefNotFoundReason,
   type SuggestedApiDefSource,

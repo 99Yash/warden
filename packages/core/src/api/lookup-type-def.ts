@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { and, db, eq, typeDefCache } from "@warden/db";
+import { z } from "zod";
 
 /**
  * `lookupTypeDef` — M11 (ADR-0026) `.d.ts` resolver.
@@ -30,16 +31,19 @@ import { and, db, eq, typeDefCache } from "@warden/db";
  * because the version is unknown.
  */
 
-export type TypeDefKind =
-  | "function"
-  | "class"
-  | "interface"
-  | "type"
-  | "variable"
-  | "namespace"
-  | "method"
-  | "property"
-  | "enum";
+const TypeDefKindSchema = z.enum([
+  "function",
+  "class",
+  "interface",
+  "type",
+  "variable",
+  "namespace",
+  "method",
+  "property",
+  "enum",
+]);
+
+export type TypeDefKind = z.infer<typeof TypeDefKindSchema>;
 
 export type NotFoundReason =
   | "package_not_installed"
@@ -55,30 +59,48 @@ export type NotFoundReason =
  *   - `path` / `line` / `snippet` field-name confusion.
  * The resolver constructs this object; the LLM does not assemble fields.
  */
-export interface SuggestedApiDefSource {
-  type: "api_def";
-  id: string;
-  title: string;
-  path: string;
-  line: number;
-  snippet: string;
-  retrievedAt: string;
-}
+export const SuggestedApiDefSourceSchema = z.strictObject({
+  type: z.literal("api_def"),
+  id: z.string(),
+  title: z.string(),
+  path: z.string(),
+  line: z.number(),
+  snippet: z.string(),
+  retrievedAt: z.string(),
+});
+
+export type SuggestedApiDefSource = z.infer<typeof SuggestedApiDefSourceSchema>;
+
+/**
+ * Zod schema for the `found: true` variant of the resolver result — the
+ * single definition of that shape. The type is *inferred from the schema*,
+ * so protocol wrappers (`@warden/mcp`'s tool result schema) derive from this
+ * instead of re-declaring fields: editing here moves the resolver, the type,
+ * and the wire contract together. The `found: false` variant has no schema
+ * here because the MCP adapter never exposes it as success `data` — it maps
+ * negatives onto the envelope's `reason` union. Note this is MCP-adapter
+ * behaviour, not a property of the shared resolver contract: the LLM tool
+ * path (packages/core/src/llm/tools/lookup-type-def.ts) returns the raw
+ * negative object, and the AI SDK serializes it as ordinary tool-result data.
+ */
+export const LookupTypeDefFoundResultSchema = z.strictObject({
+  found: z.literal(true),
+  package: z.string(),
+  version: z.string(),
+  symbol: z.string(),
+  signature: z.string(),
+  kind: TypeDefKindSchema,
+  jsdoc: z.string().nullable(),
+  dts_file: z.string(),
+  line_start: z.number(),
+  line_end: z.number(),
+  suggestedSource: SuggestedApiDefSourceSchema,
+});
+
+export type LookupTypeDefFoundResult = z.infer<typeof LookupTypeDefFoundResultSchema>;
 
 export type LookupTypeDefResult =
-  | {
-      found: true;
-      package: string;
-      version: string;
-      symbol: string;
-      signature: string;
-      kind: TypeDefKind;
-      jsdoc: string | null;
-      dts_file: string;
-      line_start: number;
-      line_end: number;
-      suggestedSource: SuggestedApiDefSource;
-    }
+  | LookupTypeDefFoundResult
   | {
       found: false;
       package: string;
