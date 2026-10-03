@@ -1,4 +1,4 @@
-import { lookupTypeDef, SuggestedApiDefSourceSchema, type LookupTypeDefResult } from "@warden/core";
+import { lookupTypeDef, LookupTypeDefFoundResultSchema } from "@warden/core";
 import { z } from "zod";
 import {
   TOOL_NAME_LOOKUP_TYPE_DEF,
@@ -38,30 +38,14 @@ export type LookupTypeDefInput = z.infer<typeof LookupTypeDefInputSchema>;
 /**
  * Tool result schema, exported so a client (and the smoke test) can validate
  * against the same definition the server advertises.
+ *
+ * This is a re-binding, not a declaration: `@warden/core` owns the resolver's
+ * result contract (`LookupTypeDefFoundResultSchema`, from which the
+ * `found: true` variant type is inferred), so the wire schema and the
+ * resolver share one definition and cannot drift. Do not hand-copy fields
+ * here — a copied schema is a bug waiting for the next resolver change.
  */
-export const LookupTypeDefResultSchema = z.strictObject({
-  found: z.literal(true),
-  package: z.string(),
-  version: z.string(),
-  symbol: z.string(),
-  signature: z.string(),
-  kind: z.enum([
-    "function",
-    "class",
-    "interface",
-    "type",
-    "variable",
-    "namespace",
-    "method",
-    "property",
-    "enum",
-  ]),
-  jsdoc: z.string().nullable(),
-  dts_file: z.string(),
-  line_start: z.number(),
-  line_end: z.number(),
-  suggestedSource: SuggestedApiDefSourceSchema,
-}) satisfies z.ZodType<Extract<LookupTypeDefResult, { found: true }>>;
+export const LookupTypeDefResultSchema = LookupTypeDefFoundResultSchema;
 
 /**
  * Map the resolver's not-found reasons onto the envelope's closed union.

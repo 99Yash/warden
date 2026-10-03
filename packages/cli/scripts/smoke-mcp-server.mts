@@ -88,6 +88,10 @@ async function call(name: string, args: Record<string, unknown>, caller: Client 
     JSON.stringify(result.structuredContent) === JSON.stringify(JSON.parse(content[0].text)),
     `${name} preserves the full envelope in structuredContent and JSON text`,
   );
+  // tautology-ok: wire-shape check — both sides reference the server's own
+  // constants, so these can only fail if JSON-RPC serialization drops or
+  // renames a field in transit; the behavioural oracle is the surrounding
+  // status / reason / isError assertions, not these two.
   assert(envelope.envelopeVersion === TOOL_ENVELOPE_VERSION, `${name} envelope is versioned`);
   assert(envelope.tool === name, `${name} envelope identifies the tool`);
   return envelope;

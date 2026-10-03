@@ -19,5 +19,8 @@
     "@warden/config": "workspace:*",
     "tsdown": "catalog:",
     "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
   }
 }

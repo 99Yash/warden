@@ -28,6 +28,8 @@ import {
  */
 
 export const MCP_SERVER_NAME = "warden";
+// keep in sync with package.json — hardcoded, matching how the CLI hardcodes
+// its own `.version("0.0.1")` in packages/cli/src/index.ts.
 export const MCP_SERVER_VERSION = "0.0.1";
 
 /**
@@ -122,12 +124,41 @@ export function createMcpServer(repoRoot: string): Server {
   return server;
 }
 
-/** Start the server on stdio and resolve when it disconnects. */
+/**
+ * Start the server on stdio and resolve when the serving session ends.
+ *
+ * One lifetime owner: every close path the SDK exposes — an explicit
+ * `server.close()`, and the transport's self-close after a read-buffer
+ * failure — fans through `server.onclose`, so the serving lifetime is
+ * exactly "connect() resolved → onclose fired". The notification is bound
+ * here, once; no other code touches the server after hand-off.
+ *
+ * EOF and in-flight behaviour, established by experiment against
+ * `@modelcontextprotocol/sdk@1.32.0` (spawn `warden mcp`, handshake, then
+ * hang up): `StdioServerTransport` subscribes to stdin `data`/`error` only,
+ * so client EOF never fires `onclose` and never aborts in-flight requests —
+ * an in-flight tools/call still runs to completion and writes its response
+ * (observed: response delivered ~100ms after EOF), after which the process
+ * exits code 0 because an EOF'd stdin no longer pins the event loop
+ * (observed: clean exit ~50ms after a quiet-session EOF). Resolving on
+ * `onclose` therefore does not delay normal shutdown; it only makes the
+ * close path honest.
+ */
 export async function startMcpServer(options: StartMcpServerOptions = {}): Promise<void> {
   const repoRoot = options.repoRoot ?? process.cwd();
   const server = createMcpServer(repoRoot);
   const transport = new StdioServerTransport();
-  await server.connect(transport);
-  // stdio is the lifetime: when the client closes the pipe the transport
-  // closes, and the process is free to exit. Nothing to tear down by hand.
+  const sessionClosed = new Promise<void>((resolve) => {
+    server.onclose = () => resolve();
+  });
+  try {
+    await server.connect(transport);
+  } catch (err) {
+    // connect() rejected before the session began: nothing else owns the
+    // transport's stdin listeners yet, so close it explicitly rather than
+    // leave them pinning the event loop, then surface the real failure.
+    await transport.close().catch(() => {});
+    throw err;
+  }
+  await sessionClosed;
 }

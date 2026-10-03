@@ -31,16 +31,19 @@ import { z } from "zod";
  * because the version is unknown.
  */
 
-export type TypeDefKind =
-  | "function"
-  | "class"
-  | "interface"
-  | "type"
-  | "variable"
-  | "namespace"
-  | "method"
-  | "property"
-  | "enum";
+const TypeDefKindSchema = z.enum([
+  "function",
+  "class",
+  "interface",
+  "type",
+  "variable",
+  "namespace",
+  "method",
+  "property",
+  "enum",
+]);
+
+export type TypeDefKind = z.infer<typeof TypeDefKindSchema>;
 
 export type NotFoundReason =
   | "package_not_installed"
@@ -68,20 +71,33 @@ export const SuggestedApiDefSourceSchema = z.strictObject({
 
 export type SuggestedApiDefSource = z.infer<typeof SuggestedApiDefSourceSchema>;
 
+/**
+ * Zod schema for the `found: true` variant of the resolver result — the
+ * single definition of that shape. The type is *inferred from the schema*,
+ * so protocol wrappers (`@warden/mcp`'s tool result schema) derive from this
+ * instead of re-declaring fields: editing here moves the resolver, the type,
+ * and the wire contract together. The `found: false` variant has no schema
+ * because it never crosses a wire as data — the MCP layer maps it onto the
+ * envelope's `reason` union.
+ */
+export const LookupTypeDefFoundResultSchema = z.strictObject({
+  found: z.literal(true),
+  package: z.string(),
+  version: z.string(),
+  symbol: z.string(),
+  signature: z.string(),
+  kind: TypeDefKindSchema,
+  jsdoc: z.string().nullable(),
+  dts_file: z.string(),
+  line_start: z.number(),
+  line_end: z.number(),
+  suggestedSource: SuggestedApiDefSourceSchema,
+});
+
+export type LookupTypeDefFoundResult = z.infer<typeof LookupTypeDefFoundResultSchema>;
+
 export type LookupTypeDefResult =
-  | {
-      found: true;
-      package: string;
-      version: string;
-      symbol: string;
-      signature: string;
-      kind: TypeDefKind;
-      jsdoc: string | null;
-      dts_file: string;
-      line_start: number;
-      line_end: number;
-      suggestedSource: SuggestedApiDefSource;
-    }
+  | LookupTypeDefFoundResult
   | {
       found: false;
       package: string;
