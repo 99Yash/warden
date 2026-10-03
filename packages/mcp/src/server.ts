@@ -81,13 +81,41 @@ export interface StartMcpServerOptions {
   repoRoot?: string;
 }
 
-export function createMcpServer(repoRoot: string): Server {
+/**
+ * Server with an in-flight tracker. `whenIdle` resolves once no registered
+ * request handler is running; used by `startMcpServer` to let already-started
+ * requests finish (and write their responses) before closing on client EOF.
+ */
+export interface WardenMcpServer extends Server {
+  whenIdle(): Promise<void>;
+}
+
+export function createMcpServer(repoRoot: string): WardenMcpServer {
   const server = new Server(
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
+  let inFlight = 0;
+  const idleWaiters: Array<() => void> = [];
+  const trackedHandler = <Args extends unknown[], Result>(
+    fn: (...args: Args) => Promise<Result>,
+  ): ((...args: Args) => Promise<Result>) => {
+    return async (...args: Args): Promise<Result> => {
+      inFlight++;
+      try {
+        return await fn(...args);
+      } finally {
+        inFlight--;
+        if (inFlight === 0) {
+          for (const wake of idleWaiters.splice(0)) wake();
+        }
+      }
+    };
+  };
+  const whenIdle = (): Promise<void> =>
+    inFlight === 0 ? Promise.resolve() : new Promise<void>((r) => idleWaiters.push(r));
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler(ListToolsRequestSchema, trackedHandler(async () => ({
     tools: TOOL_DEFINITIONS.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -96,9 +124,9 @@ export function createMcpServer(repoRoot: string): Server {
       // not bare success data; structuredContent below mirrors the JSON text.
       outputSchema: { type: "object" as const, ...toOutputJsonSchema(tool.resultSchema) },
     })),
-  }));
+  })));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, trackedHandler(async (request) => {
     const name = request.params.name;
     const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
     return degrade(
@@ -119,30 +147,35 @@ export function createMcpServer(repoRoot: string): Server {
       },
       tool?.resultSchema,
     );
-  });
+  }));
 
-  return server;
+  return Object.assign(server, { whenIdle });
 }
 
 /**
  * Start the server on stdio and resolve when the serving session ends.
  *
- * One lifetime owner: every close path the SDK exposes — an explicit
- * `server.close()`, and the transport's self-close after a read-buffer
- * failure — fans through `server.onclose`, so the serving lifetime is
- * exactly "connect() resolved → onclose fired". The notification is bound
- * here, once; no other code touches the server after hand-off.
+ * One lifetime owner: explicit `server.close()`, the transport's self-close
+ * after a read-buffer failure, and the client-EOF path below all fan through
+ * `server.onclose`, so `sessionClosed` is the single completion signal.
  *
- * EOF and in-flight behaviour, established by experiment against
- * `@modelcontextprotocol/sdk@1.32.0` (spawn `warden mcp`, handshake, then
- * hang up): `StdioServerTransport` subscribes to stdin `data`/`error` only,
- * so client EOF never fires `onclose` and never aborts in-flight requests —
- * an in-flight tools/call still runs to completion and writes its response
- * (observed: response delivered ~100ms after EOF), after which the process
- * exits code 0 because an EOF'd stdin no longer pins the event loop
- * (observed: clean exit ~50ms after a quiet-session EOF). Resolving on
- * `onclose` therefore does not delay normal shutdown; it only makes the
- * close path honest.
+ * Client EOF is the one terminal path the SDK does not surface: against the
+ * installed `@modelcontextprotocol/sdk@1.32.0`, `StdioServerTransport.start()`
+ * subscribes stdin to `data`/`error` only (packages/mcp/node_modules/
+ * @modelcontextprotocol/sdk/dist/esm/server/stdio.js:32-39), so stdin `end`
+ * never reaches `onclose`. On EOF we therefore wait for already-started
+ * request handlers to settle (`server.whenIdle()`) — closing first would
+ * abort them, since `Protocol._onclose` aborts every in-flight request
+ * controller (shared/protocol.js, "Abort all in-flight request handlers"
+ * block in `_onclose`) and a handler whose signal aborted never writes its
+ * response — and only then close the server. After `close()`, stdin
+ * listeners are removed and paused (server/stdio.js:54-67), so nothing
+ * else keeps the event loop alive and the process exits naturally unless
+ * the caller holds a referenced resource.
+ *
+ * Verified this session with the real CLI: a cold `lookup_type_def` issued
+ * immediately before hanging up still writes its full response and then the
+ * child exits 0.
  */
 export async function startMcpServer(options: StartMcpServerOptions = {}): Promise<void> {
   const repoRoot = options.repoRoot ?? process.cwd();
@@ -154,11 +187,39 @@ export async function startMcpServer(options: StartMcpServerOptions = {}): Promi
   try {
     await server.connect(transport);
   } catch (err) {
-    // connect() rejected before the session began: nothing else owns the
-    // transport's stdin listeners yet, so close it explicitly rather than
-    // leave them pinning the event loop, then surface the real failure.
+    // connect() assigns the transport and installs its callbacks before
+    // awaiting transport.start() (shared/protocol.js:219-250), so on failure
+    // the transport may already hold stdin listeners — close it explicitly
+    // to remove them, then surface the real failure.
     await transport.close().catch(() => {});
     throw err;
   }
+
+  const stdinEnded = new Promise<void>((resolve) => {
+    let settled = false;
+    const once = (): void => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    process.stdin.once("end", once);
+    process.stdin.once("close", once);
+  });
+
+  const tick = (): Promise<void> => new Promise((r) => setImmediate(r));
+  await Promise.race([
+    sessionClosed,
+    stdinEnded
+      // Let the message dispatch that the final data chunk may have queued
+      // (SDK handlers start on a microtask after 'data') reach whenIdle,
+      // and, after the last handler settles, give the SDK's own post-handler
+      // continuation (result validation + stdout write, also microtasks) one
+      // macrotask before close() aborts the request's transport.
+      .then(() => tick())
+      .then(() => server.whenIdle())
+      .then(() => tick())
+      .then(() => server.close().catch(() => {})),
+  ]);
   await sessionClosed;
 }

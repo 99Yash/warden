@@ -232,6 +232,11 @@ program
     // Do not use sharedOpts, runReview, or the phase renderer here: stdin and
     // stdout belong exclusively to the MCP transport, not diff input or logs.
     await startMcpServer({ repoRoot });
+    // Post-session continuation: startMcpServer now only resolves after the
+    // session actually ends (client EOF drains in-flight calls, then the
+    // server closes), so this marker doubles as the smoke's observable proof
+    // that post-session cleanup runs.
+    process.stderr.write("warden mcp: session ended\n");
   });
 
 program

@@ -88,10 +88,12 @@ async function call(name: string, args: Record<string, unknown>, caller: Client 
     JSON.stringify(result.structuredContent) === JSON.stringify(JSON.parse(content[0].text)),
     `${name} preserves the full envelope in structuredContent and JSON text`,
   );
-  // tautology-ok: wire-shape check — both sides reference the server's own
-  // constants, so these can only fail if JSON-RPC serialization drops or
-  // renames a field in transit; the behavioural oracle is the surrounding
-  // status / reason / isError assertions, not these two.
+  // tautology-ok: partial correlation, not serialization-only. The version
+  // assertion repeats the shared envelope schema's literal check (the parse
+  // above already rejects a wrong version), and the tool-name assertion
+  // checks request/result correlation — it fails if the handler returns an
+  // envelope built for a different tool than the one requested, even though
+  // JSON-RPC transmitted every field faithfully.
   assert(envelope.envelopeVersion === TOOL_ENVELOPE_VERSION, `${name} envelope is versioned`);
   assert(envelope.tool === name, `${name} envelope identifies the tool`);
   return envelope;
@@ -404,6 +406,71 @@ try {
     assert(corruptErrors.length === 0, "corrupt cache never escapes as a protocol error");
   } finally {
     await corruptClient.close();
+  }
+
+  process.stdout.write("\n[10] MCP — EOF drains in-flight work, post-session path runs\n");
+  {
+    const { spawn } = await import("node:child_process");
+    const child = spawn(
+      process.execPath,
+      ["--import", import.meta.resolve("tsx/esm"), resolve(CLI_ROOT, "src/index.ts"), "mcp"],
+      { cwd: TMP_ROOT, env: { ...process.env, WARDEN_CACHE_PATH: CACHE_PATH }, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let childOut = "";
+    let childErr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (c: string) => { childOut += c; });
+    child.stderr.on("data", (c: string) => { childErr += c; });
+    const send = (msg: Record<string, unknown>): void => {
+      child.stdin.write(`${JSON.stringify(msg)}\n`);
+    };
+    const waitFor = (id: number, timeoutMs = 10_000): Promise<Record<string, unknown>> =>
+      new Promise((resolveWait, rejectWait) => {
+        const started = Date.now();
+        const poll = (): void => {
+          const line = childOut.split("\n").find((l) => {
+            try {
+              return (JSON.parse(l) as { id?: number }).id === id;
+            } catch {
+              return false;
+            }
+          });
+          if (line) {
+            resolveWait(JSON.parse(line) as Record<string, unknown>);
+          } else if (Date.now() - started > timeoutMs) {
+            rejectWait(new Error(`timeout waiting for response id ${id}; stderr so far: ${childErr}`));
+          } else {
+            setTimeout(poll, 25);
+          }
+        };
+        poll();
+      });
+    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "smoke-eof", version: "0.0.1" } } });
+    await waitFor(1);
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "lookup_type_def", arguments: { package: "typescript", symbol: "ts.createProgram" } } });
+    // Hang up immediately: EOF races the in-flight cold lookup. The response
+    // must still be written, and only then may the server close.
+    child.stdin.end();
+    const response = await waitFor(2);
+    const parsed = response as { result?: { content?: Array<{ text?: string }> } };
+    const textBlock = parsed.result?.content?.[0]?.text;
+    let toolEnvelope: { status?: string } | undefined;
+    try {
+      toolEnvelope = textBlock ? (JSON.parse(textBlock) as { status?: string }) : undefined;
+    } catch {
+      toolEnvelope = undefined;
+    }
+    assert(toolEnvelope?.status === "ok", "in-flight tools/call response is written after client EOF");
+    const exitCode = await new Promise<number | null>((resolveExit) => {
+      child.on("exit", (code) => resolveExit(code));
+    });
+    assert(exitCode === 0, `child exits 0 after EOF-driven drain (got ${exitCode})`);
+    assert(
+      childErr.includes("warden mcp: session ended"),
+      "post-session continuation runs after EOF (session ended marker on stderr)",
+    );
   }
 } catch (err) {
   assert(false, `MCP smoke threw: ${err instanceof Error ? err.message : String(err)}`);

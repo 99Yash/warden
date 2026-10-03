@@ -77,8 +77,11 @@ export type SuggestedApiDefSource = z.infer<typeof SuggestedApiDefSourceSchema>;
  * so protocol wrappers (`@warden/mcp`'s tool result schema) derive from this
  * instead of re-declaring fields: editing here moves the resolver, the type,
  * and the wire contract together. The `found: false` variant has no schema
- * because it never crosses a wire as data — the MCP layer maps it onto the
- * envelope's `reason` union.
+ * here because the MCP adapter never exposes it as success `data` — it maps
+ * negatives onto the envelope's `reason` union. Note this is MCP-adapter
+ * behaviour, not a property of the shared resolver contract: the LLM tool
+ * path (packages/core/src/llm/tools/lookup-type-def.ts) returns the raw
+ * negative object, and the AI SDK serializes it as ordinary tool-result data.
  */
 export const LookupTypeDefFoundResultSchema = z.strictObject({
   found: z.literal(true),
