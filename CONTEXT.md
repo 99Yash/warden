@@ -256,6 +256,18 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **security depth tiers** — Always-on fast pass + default review + on-demand deep mode. Critical findings short-circuit through the gate regardless of mode. → memory: `project_warden_security_depth_tiers.md`.
 
+**engine boundary** — Warden is the **methodology + deterministic tool-provider**; an external **MCP client** is the execution engine. The seam is MCP over stdio (`warden mcp`, `@warden/mcp`), not a client plugin hook, so any MCP client can consume warden's ground truth. Warden keeps the two deterministic phases and sheds the agentic one. → ADR-0053, PRD #38.
+
+**motion** — One of the method's three review directions, the top-level lane taxonomy: **up** (structural search), **down** (invariant proof), **surface** (rule-guided sweep), plus **judge** (synthesis/adjudication). The six `ConcernEnum` concerns (correctness / scalability / consistency / security / committability / leverage) are **focus areas inside a motion**, not peers of it. Distinct from ADR-0030's per-`(file, concern-subset)` worker, which is a *phase-2 dispatch* unit — a motion is a method-level axis and outlives whichever runtime executes it. → ADR-0053 §6, ADR-0052's motion vocabulary.
+
+**lane** — One agent-sized unit of review work, shaped as a motion, executed by the client runtime. A lane returns findings in `CommentSet` shape (or something trivially mapped to it) and carries its own sourcing rule. → ADR-0053 §6.
+
+**post-pass** — The deterministic gate stage that runs **outside the model's discretion** against whatever findings the lanes produced, emitting the canonical `CommentSet`. Comprises `verifyCitations` + `scopeCommentsToDiff` + `applyHardRules` + `applyConfidenceFloor` (Phase 3). **Not an MCP tool** — a model can decline to call a tool, so a model-invoked gate is not a gate. Hosted either by a client plugin intercepting the terminal submit or by a driver step after the session returns; the host is unfixed. → ADR-0053 §4, ADR-0044, ADR-0047.
+
+**tool envelope** — The versioned, size-bounded, degrading result shape every MCP tool returns. Carries an explicit schema version (a runtime upgrade must not silently change a result's shape), is bounded because MCP tool schemas are injected into the client's context, and returns a structured degraded / not-found result rather than throwing across the transport. Public API once shipped. → ADR-0053 §5.
+
+**state authority** — Warden owns the canonical `CommentSet` **and** the persisted review trace / run record (`reviewRuns`). The client runtime's session database is **execution telemetry**, never a second record of the same review — two records that can disagree are worse than one thin record. Per-finding provenance (producing lane, backing tool calls, `sourced`/`reasoned`, which transform changed or dropped it) must survive the hop, without model prose. → ADR-0053 §7, ADR-0044 §7, ADR-0048.
+
 ---
 
 ## 7. Quality metrics
