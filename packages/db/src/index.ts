@@ -23,28 +23,29 @@ let _db: ReturnType<typeof drizzle> | undefined;
 export function db() {
   if (!_db) {
     const cachePath = resolveCachePath();
-    const sqlite = new Database(cachePath);
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("foreign_keys = ON");
-    const handle = drizzle(sqlite);
+    let sqlite: Database.Database | undefined;
     try {
+      sqlite = new Database(cachePath);
+      sqlite.pragma("journal_mode = WAL");
+      sqlite.pragma("foreign_keys = ON");
+      const handle = drizzle(sqlite);
       migrate(handle, { migrationsFolder: MIGRATIONS_DIR });
+      _sqlite = sqlite;
+      _db = handle;
     } catch (err) {
       // Don't leave a half-initialized cache visible to subsequent db() calls —
       // close the connection and keep _db undefined so the next attempt retries.
       try {
-        sqlite.close();
+        sqlite?.close();
       } catch {
-        // Ignore close errors during cleanup; the migrate failure is what we
+        // Ignore close errors during cleanup; the initialization failure is what we
         // want to surface.
       }
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `Cache schema migration failed (${message}). If the cache is newer than this warden version, upgrade warden or delete \`${cachePath}\` to recreate.`,
+        `Cache initialization failed (${message}). If the cache is newer than this warden version, upgrade warden or delete \`${cachePath}\` to recreate.`,
       );
     }
-    _sqlite = sqlite;
-    _db = handle;
   }
   return _db;
 }

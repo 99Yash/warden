@@ -4,11 +4,15 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { type ZodType, z } from "zod";
 import {
   TOOL_NAME_LOOKUP_TYPE_DEF,
-  TOOL_ENVELOPE_VERSION,
-  envelopeToContent,
-  type ToolResultEnvelope,
+  degrade,
+  errorEnvelope,
+  toolResultEnvelopeSchema,
 } from "./envelope.js";
-import { LookupTypeDefInputSchema, runLookupTypeDef } from "./tools/lookup-type-def.js";
+import {
+  LookupTypeDefInputSchema,
+  LookupTypeDefResultSchema,
+  runLookupTypeDef,
+} from "./tools/lookup-type-def.js";
 
 /**
  * Warden's MCP server — ADR-0053 §2/§3.
@@ -39,6 +43,10 @@ const TOOL_DEFINITIONS = [
       "citation to copy verbatim. Use before claiming an API's shape — this is ground truth, not a guess. " +
       "A negative result is a complete answer, not a failure: branch on the returned `reason`.",
     inputSchema: LookupTypeDefInputSchema,
+    resultSchema: toolResultEnvelopeSchema(
+      LookupTypeDefResultSchema,
+      z.literal(TOOL_NAME_LOOKUP_TYPE_DEF),
+    ),
     handler: runLookupTypeDef,
   },
 ] as const;
@@ -61,6 +69,11 @@ function toInputJsonSchema(schema: ZodType): Record<string, unknown> {
   return rest as Record<string, unknown>;
 }
 
+function toOutputJsonSchema(schema: ZodType): Record<string, unknown> {
+  const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { io: "output" });
+  return rest as Record<string, unknown>;
+}
+
 export interface StartMcpServerOptions {
   /** Repository root the tools resolve against. Defaults to the launch cwd. */
   repoRoot?: string;
@@ -77,37 +90,34 @@ export function createMcpServer(repoRoot: string): Server {
       name: tool.name,
       description: tool.description,
       inputSchema: toInputJsonSchema(tool.inputSchema),
+      // MCP requires an object root. The union validates the *full envelope*,
+      // not bare success data; structuredContent below mirrors the JSON text.
+      outputSchema: { type: "object" as const, ...toOutputJsonSchema(tool.resultSchema) },
     })),
   }));
 
-  server.setRequestHandler(
-    CallToolRequestSchema,
-    async (
-      request,
-    ): Promise<{
-      content: { type: "text"; text: string }[];
-      isError: boolean;
-    }> => {
-      const name = request.params.name;
-      const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
+    return degrade(
+      name,
+      async () => {
+        if (tool === undefined) {
+          // An unknown tool name is a client error, not a degraded result — but it
+          // still returns an envelope rather than a protocol throw, so a client
+          // that probes for an optional tool degrades instead of erroring out.
+          return errorEnvelope(
+            name,
+            "invalid_input",
+            `Unknown tool "${name}". Available: ${TOOL_DEFINITIONS.map((t) => t.name).join(", ")}.`,
+          );
+        }
 
-      if (tool === undefined) {
-        // An unknown tool name is a client error, not a degraded result — but it
-        // still returns an envelope rather than a protocol throw, so a client
-        // that probes for an optional tool degrades instead of erroring out.
-        const envelope: ToolResultEnvelope = {
-          envelopeVersion: TOOL_ENVELOPE_VERSION,
-          tool: name,
-          status: "error",
-          reason: "invalid_input",
-          hint: `Unknown tool "${name}". Available: ${TOOL_DEFINITIONS.map((t) => t.name).join(", ")}.`,
-        };
-        return envelopeToContent(envelope);
-      }
-
-      return envelopeToContent(await tool.handler(repoRoot, request.params.arguments));
-    },
-  );
+        return await tool.handler(repoRoot, request.params.arguments);
+      },
+      tool?.resultSchema,
+    );
+  });
 
   return server;
 }

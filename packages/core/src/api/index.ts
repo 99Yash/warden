@@ -1,5 +1,6 @@
 export {
   lookupTypeDef,
+  SuggestedApiDefSourceSchema,
   type LookupTypeDefOptions,
   type LookupTypeDefResult,
   type NotFoundReason,

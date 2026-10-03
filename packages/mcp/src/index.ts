@@ -22,6 +22,7 @@ export {
   TOOL_NAME_LOOKUP_TYPE_DEF,
   ToolErrorReasonSchema,
   ToolResultEnvelopeSchema,
+  toolResultEnvelopeSchema,
   degrade,
   envelopeToContent,
   errorEnvelope,

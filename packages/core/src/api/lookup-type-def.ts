@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { and, db, eq, typeDefCache } from "@warden/db";
+import { z } from "zod";
 
 /**
  * `lookupTypeDef` — M11 (ADR-0026) `.d.ts` resolver.
@@ -55,15 +56,17 @@ export type NotFoundReason =
  *   - `path` / `line` / `snippet` field-name confusion.
  * The resolver constructs this object; the LLM does not assemble fields.
  */
-export interface SuggestedApiDefSource {
-  type: "api_def";
-  id: string;
-  title: string;
-  path: string;
-  line: number;
-  snippet: string;
-  retrievedAt: string;
-}
+export const SuggestedApiDefSourceSchema = z.strictObject({
+  type: z.literal("api_def"),
+  id: z.string(),
+  title: z.string(),
+  path: z.string(),
+  line: z.number(),
+  snippet: z.string(),
+  retrievedAt: z.string(),
+});
+
+export type SuggestedApiDefSource = z.infer<typeof SuggestedApiDefSourceSchema>;
 
 export type LookupTypeDefResult =
   | {

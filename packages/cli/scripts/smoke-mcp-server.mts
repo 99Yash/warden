@@ -29,6 +29,9 @@ import {
   TOOL_ENVELOPE_VERSION,
   TOOL_ERROR_REASONS,
   ToolResultEnvelopeSchema,
+  degrade,
+  okEnvelope,
+  toolResultEnvelopeSchema,
 } from "@warden/mcp";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -64,9 +67,8 @@ client.onerror = (err) => {
   protocolErrors.push(err.message);
 };
 
-async function call(name: string, args: Record<string, unknown>) {
-  const result = CallToolResultSchema.parse(await client.callTool({ name, arguments: args }));
-  assert(result.isError !== true, `${name} returns a normal protocol result`);
+async function call(name: string, args: Record<string, unknown>, caller: Client = client) {
+  const result = CallToolResultSchema.parse(await caller.callTool({ name, arguments: args }));
   const content = result.content;
   if (content.length !== 1 || content[0]?.type !== "text") {
     throw new Error(`Expected one JSON text block from ${name}`);
@@ -75,6 +77,17 @@ async function call(name: string, args: Record<string, unknown>) {
     throw new Error(`${name} exceeded the tool-content byte limit`);
   }
   const envelope = ToolResultEnvelopeSchema.parse(JSON.parse(content[0].text));
+  const expectedError =
+    envelope.status === "error" &&
+    !["symbol_not_found", "no_types", "package_not_installed"].includes(envelope.reason);
+  assert(
+    result.isError === expectedError,
+    `${name} isError is ${expectedError} for ${envelope.status === "ok" ? "success" : envelope.reason}`,
+  );
+  assert(
+    JSON.stringify(result.structuredContent) === JSON.stringify(JSON.parse(content[0].text)),
+    `${name} preserves the full envelope in structuredContent and JSON text`,
+  );
   assert(envelope.envelopeVersion === TOOL_ENVELOPE_VERSION, `${name} envelope is versioned`);
   assert(envelope.tool === name, `${name} envelope identifies the tool`);
   return envelope;
@@ -122,6 +135,23 @@ try {
     "exactly lookup_type_def is discovered",
   );
   const schema = tools[0]?.inputSchema;
+  const outputSchema = tools[0]?.outputSchema;
+  assert(outputSchema?.type === "object", "output schema advertises an object envelope");
+  assert(
+    Array.isArray(outputSchema?.oneOf) &&
+      outputSchema.oneOf.length === 2 &&
+      outputSchema.oneOf.every(
+        (branch) =>
+          typeof branch === "object" &&
+          branch !== null &&
+          "required" in branch &&
+          Array.isArray(branch.required) &&
+          branch.required.includes("envelopeVersion") &&
+          branch.required.includes("tool") &&
+          branch.required.includes("status"),
+      ),
+    "output schema advertises both full envelope branches, not bare lookup data",
+  );
   assert(schema?.type === "object", "input schema is a JSON Schema object");
   const packageProperty = schema?.properties?.package;
   const symbolProperty = schema?.properties?.symbol;
@@ -259,6 +289,118 @@ try {
     closeDb();
   }
   assert(protocolErrors.length === 0, "no protocol errors or non-JSON stdout");
+
+  process.stdout.write("\n[8] MCP — contract validation + serialization degradation\n");
+  const common = { envelopeVersion: TOOL_ENVELOPE_VERSION, tool: "lookup_type_def" };
+  for (const [label, candidate] of [
+    ["success without data", { ...common, status: "ok" }],
+    ["error without reason", { ...common, status: "error" }],
+    ["mixed error and data", { ...common, status: "error", reason: "internal_error", data: {} }],
+    ["mixed success and reason", { ...common, status: "ok", data: {}, reason: "internal_error" }],
+  ] as const) {
+    assert(!ToolResultEnvelopeSchema.safeParse(candidate).success, `schema rejects ${label}`);
+  }
+  if (known.status !== "ok") throw new Error("Known lookup required for contract regression");
+  const malformedData = { ...known.data, suggestedSource: {} };
+  assert(
+    !LookupTypeDefResultSchema.safeParse(malformedData).success,
+    "lookup schema rejects an empty suggestedSource",
+  );
+  const malformed = await degrade(
+    "lookup_type_def",
+    async () => okEnvelope("lookup_type_def", malformedData),
+    toolResultEnvelopeSchema(LookupTypeDefResultSchema),
+  );
+  assert(
+    malformed.isError &&
+      malformed.structuredContent.status === "error" &&
+      malformed.structuredContent.reason === "internal_error",
+    "dispatch boundary degrades invalid per-tool success data",
+  );
+  const thrown = await degrade("lookup_type_def", async () => {
+    throw new Error("handler fault");
+  });
+  assert(
+    thrown.isError &&
+      thrown.structuredContent.status === "error" &&
+      thrown.structuredContent.reason === "internal_error" &&
+      thrown.structuredContent.hint === "handler fault",
+    "dispatch boundary preserves recovery content for a thrown handler",
+  );
+  const serialization = await degrade("lookup_type_def", async () =>
+    okEnvelope("lookup_type_def", { value: 1n }),
+  );
+  assert(
+    serialization.isError &&
+      serialization.structuredContent.status === "error" &&
+      serialization.structuredContent.reason === "internal_error",
+    "dispatch boundary degrades final JSON serialization failure",
+  );
+  const alteredWire = await degrade("lookup_type_def", async () =>
+    okEnvelope("lookup_type_def", {
+      toJSON: () => undefined,
+    }),
+  );
+  assert(
+    alteredWire.isError &&
+      alteredWire.structuredContent.status === "error" &&
+      alteredWire.structuredContent.reason === "internal_error",
+    "serialization boundary validates the actual wire envelope after toJSON",
+  );
+
+  process.stdout.write("\n[9] MCP — corrupt cache internal_error + repaired-cache retry\n");
+  const corruptCache = resolve(TMP_ROOT, "corrupt.sqlite");
+  writeFileSync(corruptCache, "not a SQLite database");
+  const corruptClient = new Client({ name: "warden-mcp-corrupt-smoke", version: "0.0.1" });
+  const corruptTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["--import", import.meta.resolve("tsx/esm"), resolve(CLI_ROOT, "src/index.ts"), "mcp"],
+    cwd: TMP_ROOT,
+    env: { ...getDefaultEnvironment(), WARDEN_CACHE_PATH: corruptCache },
+    stderr: "pipe",
+  });
+  const corruptErrors: string[] = [];
+  corruptClient.onerror = (err) => {
+    corruptErrors.push(err.message);
+  };
+  corruptTransport.stderr?.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  try {
+    await corruptClient.connect(corruptTransport, { timeout: 15_000 });
+    await corruptClient.listTools();
+    const corruptPid = corruptTransport.pid;
+    for (let i = 0; i < 3; i++) {
+      const broken = await call(
+        "lookup_type_def",
+        { package: "typescript", symbol: SYMBOL },
+        corruptClient,
+      );
+      assert(
+        broken.status === "error" &&
+          broken.reason === "internal_error" &&
+          broken.hint?.includes("not a database"),
+        `corrupt cache lookup ${i + 1} returns internal_error with recovery content`,
+      );
+    }
+    rmSync(corruptCache, { force: true });
+    const repaired = await call(
+      "lookup_type_def",
+      { package: "typescript", symbol: SYMBOL },
+      corruptClient,
+    );
+    assert(
+      repaired.status === "ok" && LookupTypeDefResultSchema.safeParse(repaired.data).success,
+      "same server retries successfully after corrupt cache is removed",
+    );
+    assert(
+      corruptPid !== null && corruptTransport.pid === corruptPid,
+      "corrupt-cache recovery keeps the same server process",
+    );
+    assert(corruptErrors.length === 0, "corrupt cache never escapes as a protocol error");
+  } finally {
+    await corruptClient.close();
+  }
 } catch (err) {
   assert(false, `MCP smoke threw: ${err instanceof Error ? err.message : String(err)}`);
   if (stderr) process.stderr.write(stderr);

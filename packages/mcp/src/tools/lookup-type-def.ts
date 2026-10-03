@@ -1,11 +1,11 @@
-import { lookupTypeDef } from "@warden/core";
+import { lookupTypeDef, SuggestedApiDefSourceSchema, type LookupTypeDefResult } from "@warden/core";
 import { z } from "zod";
 import {
   TOOL_NAME_LOOKUP_TYPE_DEF,
-  degrade,
   errorEnvelope,
   okEnvelope,
   type ToolErrorReason,
+  type ToolResultEnvelope,
 } from "../envelope.js";
 
 /**
@@ -39,19 +39,29 @@ export type LookupTypeDefInput = z.infer<typeof LookupTypeDefInputSchema>;
  * Tool result schema, exported so a client (and the smoke test) can validate
  * against the same definition the server advertises.
  */
-export const LookupTypeDefResultSchema = z.object({
+export const LookupTypeDefResultSchema = z.strictObject({
   found: z.literal(true),
   package: z.string(),
   version: z.string(),
   symbol: z.string(),
   signature: z.string(),
-  kind: z.string(),
+  kind: z.enum([
+    "function",
+    "class",
+    "interface",
+    "type",
+    "variable",
+    "namespace",
+    "method",
+    "property",
+    "enum",
+  ]),
   jsdoc: z.string().nullable(),
   dts_file: z.string(),
   line_start: z.number(),
   line_end: z.number(),
-  suggestedSource: z.record(z.string(), z.unknown()),
-});
+  suggestedSource: SuggestedApiDefSourceSchema,
+}) satisfies z.ZodType<Extract<LookupTypeDefResult, { found: true }>>;
 
 /**
  * Map the resolver's not-found reasons onto the envelope's closed union.
@@ -89,7 +99,7 @@ function notFoundHint(pkg: string, symbol: string, reason: ToolErrorReason): str
 export async function runLookupTypeDef(
   repoRoot: string,
   input: unknown,
-): Promise<Awaited<ReturnType<typeof degrade>>> {
+): Promise<ToolResultEnvelope> {
   const parsed = LookupTypeDefInputSchema.safeParse(input);
   if (!parsed.success) {
     return errorEnvelope(
@@ -101,29 +111,15 @@ export async function runLookupTypeDef(
 
   const { package: pkg, symbol } = parsed.data;
 
-  return degrade(TOOL_NAME_LOOKUP_TYPE_DEF, async () => {
-    const result = await lookupTypeDef(repoRoot, pkg, symbol);
+  const result = await lookupTypeDef(repoRoot, pkg, symbol);
 
-    // A negative lookup is a *correct, complete* answer — the symbol may
-    // genuinely not exist. It rides the error envelope so a client can branch
-    // on `reason`, but it is not a protocol failure and not `internal_error`.
-    if (!result.found) {
-      const reason = mapNotFoundReason(result.reason);
-      return errorEnvelope(TOOL_NAME_LOOKUP_TYPE_DEF, reason, notFoundHint(pkg, symbol, reason));
-    }
+  // A negative lookup is a *correct, complete* answer — the symbol may
+  // genuinely not exist. It rides the error envelope so a client can branch
+  // on `reason`, but it is not a protocol failure and not `internal_error`.
+  if (!result.found) {
+    const reason = mapNotFoundReason(result.reason);
+    return errorEnvelope(TOOL_NAME_LOOKUP_TYPE_DEF, reason, notFoundHint(pkg, symbol, reason));
+  }
 
-    return okEnvelope(TOOL_NAME_LOOKUP_TYPE_DEF, {
-      found: true,
-      package: result.package,
-      version: result.version,
-      symbol: result.symbol,
-      signature: result.signature,
-      kind: result.kind,
-      jsdoc: result.jsdoc,
-      dts_file: result.dts_file,
-      line_start: result.line_start,
-      line_end: result.line_end,
-      suggestedSource: result.suggestedSource as unknown as Record<string, unknown>,
-    });
-  });
+  return okEnvelope(TOOL_NAME_LOOKUP_TYPE_DEF, result);
 }

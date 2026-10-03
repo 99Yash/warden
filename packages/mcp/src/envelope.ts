@@ -20,9 +20,11 @@ import { z } from "zod";
  * Bump `TOOL_ENVELOPE_VERSION` whenever the *shape* of any envelope changes —
  * a new required field, a renamed field, a narrowed enum. Adding an optional
  * field is additive and does not require a bump, but should still be reflected
- * in the per-tool schema so clients can detect it.
+ * in the per-tool schema so clients can detect it. Validation cannot prove a
+ * version bump happened: that remains a human review responsibility.
  */
-export const TOOL_ENVELOPE_VERSION = 1 as const;
+// Version 2 narrows the accepted contract to complete, exclusive branches.
+export const TOOL_ENVELOPE_VERSION = 2 as const;
 
 /** ADR-0053 §5(a): cap each JSON tool-content block, measured as UTF-8 bytes. */
 export const MAX_TOOL_RESULT_BYTES = 16 * 1024;
@@ -44,36 +46,46 @@ export type ToolErrorReason = (typeof TOOL_ERROR_REASONS)[number];
 
 export const ToolErrorReasonSchema = z.enum(TOOL_ERROR_REASONS);
 
-/**
- * Successful result. `data` is deliberately a loose record here — each tool
- * owns its own `data` schema and exports it (see `tools/lookup-type-def.ts`),
- * so the envelope stays transport-level and the tool-level schema stays
- * testable on its own.
- */
-export const ToolResultEnvelopeSchema = z.object({
-  /** Envelope contract version. See `TOOL_ENVELOPE_VERSION`. */
-  envelopeVersion: z.literal(TOOL_ENVELOPE_VERSION),
-  tool: z.string(),
-  status: z.enum(["ok", "error"]),
-  /** Present iff `status === "ok"`. */
-  data: z.record(z.string(), z.unknown()).optional(),
-  /** Present iff `status === "error"`. */
-  reason: ToolErrorReasonSchema.optional(),
-  /** Human-actionable half of an error. Never the only channel — a model reads `reason`. */
-  hint: z.string().optional(),
-});
+/** Each descriptor binds its success data to the same exclusive envelope. */
+export function toolResultEnvelopeSchema<Data extends Record<string, unknown>>(
+  dataSchema: z.ZodType<Data>,
+  toolSchema: z.ZodType<string> = z.string(),
+) {
+  const common = {
+    envelopeVersion: z.literal(TOOL_ENVELOPE_VERSION),
+    tool: toolSchema,
+  };
+  return z.discriminatedUnion("status", [
+    z.strictObject({
+      ...common,
+      status: z.literal("ok"),
+      data: dataSchema,
+      reason: z.never().optional(),
+      hint: z.never().optional(),
+    }),
+    z.strictObject({
+      ...common,
+      status: z.literal("error"),
+      reason: ToolErrorReasonSchema,
+      hint: z.string().optional(),
+      data: z.never().optional(),
+    }),
+  ]);
+}
+
+export const ToolResultEnvelopeSchema = toolResultEnvelopeSchema(z.record(z.string(), z.unknown()));
 
 export type ToolResultEnvelope = z.infer<typeof ToolResultEnvelopeSchema>;
 
-export function okEnvelope(tool: string, data: Record<string, unknown>): ToolResultEnvelope {
-  return { envelopeVersion: TOOL_ENVELOPE_VERSION, tool, status: "ok", data };
+export function okEnvelope<Data extends Record<string, unknown>>(tool: string, data: Data) {
+  return { envelopeVersion: TOOL_ENVELOPE_VERSION, tool, status: "ok" as const, data };
 }
 
 export function errorEnvelope(
   tool: string,
   reason: ToolErrorReason,
   hint?: string,
-): ToolResultEnvelope {
+): Extract<ToolResultEnvelope, { status: "error" }> {
   return {
     envelopeVersion: TOOL_ENVELOPE_VERSION,
     tool,
@@ -84,10 +96,8 @@ export function errorEnvelope(
 }
 
 /**
- * Run `fn`, converting any thrown error into a structured `internal_error`
- * envelope. This is the ADR-0053 §5(c) "degrade, don't throw" rule enforced at
- * the single boundary every tool call passes through, rather than trusting each
- * tool to remember.
+ * Server dispatch boundary: run the handler, validate its full result, and
+ * serialize it inside the same try. Tools must not own this wrapper.
  *
  * `fn` returns an envelope directly rather than bare data, so a tool can
  * return a *structured* not-found — a legitimate complete answer, `status:
@@ -100,20 +110,27 @@ export function errorEnvelope(
 export async function degrade(
   tool: string,
   fn: () => Promise<ToolResultEnvelope>,
-): Promise<ToolResultEnvelope> {
+  schema: z.ZodType<ToolResultEnvelope> = ToolResultEnvelopeSchema,
+): Promise<ToolContent> {
   try {
-    return await fn();
+    return envelopeToContent(schema.parse(await fn()), schema);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return errorEnvelope(tool, "internal_error", message);
+    return envelopeToContent(errorEnvelope(tool, "internal_error", message));
   }
 }
 
-/** Render an envelope as MCP tool content: one JSON text block. */
-export function envelopeToContent(envelope: ToolResultEnvelope): {
+export type ToolContent = {
   content: { type: "text"; text: string }[];
+  structuredContent: ToolResultEnvelope;
   isError: boolean;
-} {
+};
+
+/** Render and validate the actual wire value, not just the pre-JSON object. */
+export function envelopeToContent(
+  envelope: ToolResultEnvelope,
+  schema: z.ZodType<ToolResultEnvelope> = ToolResultEnvelopeSchema,
+): ToolContent {
   let text = JSON.stringify(envelope, null, 2);
   if (Buffer.byteLength(text, "utf8") > MAX_TOOL_RESULT_BYTES) {
     // Never truncate citation snippets: a partial citation is not ground truth.
@@ -128,11 +145,14 @@ export function envelopeToContent(envelope: ToolResultEnvelope): {
       2,
     );
   }
+  const serialized = schema.parse(JSON.parse(text));
   return {
     content: [{ type: "text", text }],
-    // A structured error is still a *successful* protocol call — the tool ran
-    // and reported a degraded result. Marking isError would make clients
-    // discard the envelope instead of branching on `reason`.
-    isError: false,
+    structuredContent: serialized,
+    // Domain negatives completed the lookup. Operational failures should drive
+    // standard MCP client recovery; isError does not discard recovery content.
+    isError:
+      serialized.status === "error" &&
+      !["package_not_installed", "no_types", "symbol_not_found"].includes(serialized.reason),
   };
 }
