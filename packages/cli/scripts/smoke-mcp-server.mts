@@ -114,6 +114,7 @@ try {
 
   process.stdout.write("\n[1] MCP — initialize + tools/list\n");
   await client.connect(transport, { timeout: 15_000 });
+  const serverPid = transport.pid;
   assert(transport.pid !== null, "server runs in a child process");
   const { tools } = await client.listTools();
   assert(
@@ -192,14 +193,49 @@ try {
   });
   assert(
     oversized.status === "error" &&
-      oversized.reason === "internal_error" &&
+      oversized.reason === "result_too_large" &&
       oversized.data === undefined,
     "oversized result degrades without returning a truncated citation",
   );
   assert(oversized.hint?.includes("content limit"), "overflow envelope explains the size limit");
+  assert(
+    oversized.hint?.includes("node_modules") && !oversized.hint.includes("narrower symbol"),
+    "overflow hint directs a single-symbol lookup to local declarations",
+  );
+
+  process.stdout.write("\n[6] MCP — sequential calls after degradation\n");
+  // Keep the same child alive through uncached parses and positive/negative
+  // cache hits. Later-call native crashes must fail, not be hidden by respawns.
+  const sequential = [
+    { symbol: "ts.createPrinter", found: true },
+    { symbol: "ts.__warden_missing_later_1__", found: false },
+    { symbol: "ts.isIdentifier", found: true },
+    { symbol: "ts.__warden_missing_later_2__", found: false },
+    { symbol: SYMBOL, found: true },
+    { symbol: MISSING_SYMBOL, found: false },
+  ];
+  for (const { symbol, found } of sequential) {
+    const result = await call("lookup_type_def", { package: "typescript", symbol });
+    if (found) {
+      const data = LookupTypeDefResultSchema.safeParse(result.data);
+      assert(
+        result.status === "ok" && data.success && data.data.symbol === symbol,
+        `later lookup resolves ${symbol}`,
+      );
+    } else {
+      assert(
+        result.status === "error" && result.reason === "symbol_not_found",
+        `later lookup reports symbol_not_found for ${symbol}`,
+      );
+    }
+  }
+  assert(
+    serverPid !== null && transport.pid === serverPid,
+    "same server survives all eleven sequential tools/call requests",
+  );
 
   await client.close();
-  process.stdout.write("\n[6] MCP — cache persistence + clean transport\n");
+  process.stdout.write("\n[7] MCP — cache persistence + clean transport\n");
   // Only open in the parent after proving the child created the DB. db() also
   // auto-migrates, so opening it earlier would hide a server initialization bug.
   process.env["WARDEN_CACHE_PATH"] = CACHE_PATH;

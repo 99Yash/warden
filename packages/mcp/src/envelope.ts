@@ -36,6 +36,7 @@ export const TOOL_ERROR_REASONS = [
   "no_types",
   "symbol_not_found",
   "lookup_error",
+  "result_too_large",
   "internal_error",
 ] as const;
 
@@ -120,8 +121,8 @@ export function envelopeToContent(envelope: ToolResultEnvelope): {
     text = JSON.stringify(
       errorEnvelope(
         envelope.tool.slice(0, 128),
-        "internal_error",
-        `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte content limit. Try a narrower symbol.`,
+        "result_too_large",
+        `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte content limit. Read the package's local .d.ts files in node_modules directly; this single-symbol result cannot be returned without truncating its citation.`,
       ),
       null,
       2,
