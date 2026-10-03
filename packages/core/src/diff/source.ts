@@ -22,6 +22,14 @@ export interface ResolveDiffOptions {
   mode: DiffMode;
   /** Explicit override (`--base <ref>`). Bypasses auto-detection. */
   baseRef?: string;
+  /**
+   * Right-hand side of the diffed range. Defaults to `HEAD`, which is every
+   * pre-2026-10 call site's behavior — the range strings are byte-identical
+   * when this is unset. Exists for the MCP seam (#40), where a client names a
+   * review target like `{base, head}`; the CLI has no `--head` and never sets
+   * it. Ignored in `check` mode, which always diffs the working tree.
+   */
+  headRef?: string;
 }
 
 export interface ResolvedDiff {
@@ -47,6 +55,9 @@ export interface ResolvedDiff {
 }
 
 export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDiff> {
+  // `HEAD` unless the caller named a right-hand side. Keeping the default
+  // literal means every existing range string below is unchanged.
+  const head = opts.headRef ?? "HEAD";
   if (opts.baseRef) {
     // PR-style merge-base semantic (three-dot) for commit refs, raw two-dot
     // comparison for tree-only refs. Probe `<ref>^{commit}` to decide:
@@ -59,7 +70,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
     const isCommit = (
       await runGit(opts.repoRoot, ["rev-parse", "--verify", "--quiet", `${opts.baseRef}^{commit}`])
     ).ok;
-    const range = isCommit ? `${opts.baseRef}...HEAD` : `${opts.baseRef}..HEAD`;
+    const range = isCommit ? `${opts.baseRef}...${head}` : `${opts.baseRef}..${head}`;
     const { diff, degraded } = await runGitDiff(opts.repoRoot, [range]);
     return {
       diff,
@@ -94,7 +105,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
       ...(degraded ? { degraded: [degraded] } : {}),
     };
   }
-  const { diff, degraded } = await runGitDiff(opts.repoRoot, [`${base}...HEAD`]);
+  const { diff, degraded } = await runGitDiff(opts.repoRoot, [`${base}...${head}`]);
   return {
     diff,
     description: `vs ${base}`,

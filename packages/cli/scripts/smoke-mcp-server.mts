@@ -136,12 +136,16 @@ try {
   const serverPid = transport.pid;
   assert(transport.pid !== null, "server runs in a child process");
   const { tools } = await client.listTools();
+  const names = tools.map((t) => t.name).sort();
   assert(
-    tools.length === 1 && tools[0]?.name === "lookup_type_def",
-    "exactly lookup_type_def is discovered",
+    names.length === 2 && names[0] === "lookup_type_def" && names[1] === "run_det_priors",
+    `both tools are discovered (${names.join(", ")})`,
   );
-  const schema = tools[0]?.inputSchema;
-  const outputSchema = tools[0]?.outputSchema;
+  // Selected by name, not index: discovery order is not part of the contract,
+  // and index 0 stopped meaning "the lookup tool" once #40 added a second.
+  const lookup = tools.find((t) => t.name === "lookup_type_def");
+  const schema = lookup?.inputSchema;
+  const outputSchema = lookup?.outputSchema;
   assert(outputSchema?.type === "object", "output schema advertises an object envelope");
   assert(
     Array.isArray(outputSchema?.oneOf) &&

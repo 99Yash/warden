@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { type ZodType, z } from "zod";
 import {
   TOOL_NAME_LOOKUP_TYPE_DEF,
+  TOOL_NAME_RUN_DET_PRIORS,
   degrade,
   errorEnvelope,
   toolResultEnvelopeSchema,
@@ -13,6 +14,12 @@ import {
   LookupTypeDefResultSchema,
   runLookupTypeDef,
 } from "./tools/lookup-type-def.js";
+import {
+  RunDetPriorsInputSchema,
+  RunDetPriorsResultSchema,
+  runRunDetPriors,
+} from "./tools/run-det-priors.js";
+import { createReviewResultCache, type ReviewResultCache } from "./review-cache.js";
 
 /**
  * Warden's MCP server — ADR-0053 §2/§3.
@@ -33,10 +40,17 @@ export const MCP_SERVER_NAME = "warden";
 export const MCP_SERVER_VERSION = "0.0.1";
 
 /**
- * Tool descriptors. Kept as data rather than closures so the advertised schema
- * and the handler cannot drift — one source, two projections.
+ * Tool descriptors. Kept as data rather than inline closures in the dispatch
+ * handler so the advertised schema and the handler cannot drift — one source,
+ * two projections.
+ *
+ * A function of the review cache rather than a module constant, because
+ * `run_det_priors` needs per-server retention to page findings. The cache is
+ * created inside `createMcpServer`, so each server in a process (and each
+ * process) gets its own — the stdio transport is one server per child.
  */
-const TOOL_DEFINITIONS = [
+function toolDefinitions(reviewCache: ReviewResultCache) {
+  return [
   {
     name: TOOL_NAME_LOOKUP_TYPE_DEF,
     description:
@@ -51,7 +65,26 @@ const TOOL_DEFINITIONS = [
     ),
     handler: runLookupTypeDef,
   },
-] as const;
+  {
+    name: TOOL_NAME_RUN_DET_PRIORS,
+    description:
+      "Run Warden's Phase 1 deterministic review (tsc, eslint, jscpd, security, consistency, " +
+      "scalability, deadcode, leverage, react-doctor) over a review target and return the pruned " +
+      "changed-file set, the findings with their tier/category and verified citations, context " +
+      "locators, and any degraded runners. This is ground truth, not a guess — a clean result is a " +
+      "real answer. Results are size-bounded per component: `findings` holds one page and " +
+      "`findingsTotal`/`nextOffset` page the rest, and `omissions` names anything capped. " +
+      "Changed files carry `addedLineCount`, never the raw line list. Call again with `offset` to " +
+      "continue paging; the server retains the result for the session.",
+    inputSchema: RunDetPriorsInputSchema,
+    resultSchema: toolResultEnvelopeSchema(
+      RunDetPriorsResultSchema,
+      z.literal(TOOL_NAME_RUN_DET_PRIORS),
+    ),
+    handler: (root: string, args: unknown) => runRunDetPriors(root, args, { cache: reviewCache }),
+  },
+  ] as const;
+}
 
 /**
  * Convert a tool's zod input schema to the JSON Schema MCP advertises.
@@ -95,6 +128,10 @@ export function createMcpServer(repoRoot: string): WardenMcpServer {
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
+  // Bounded, session-scoped retention so `run_det_priors` can page findings
+  // without re-running tsc/eslint/jscpd per page. See review-cache.ts.
+  const reviewCache = createReviewResultCache();
+  const tools = toolDefinitions(reviewCache);
   let inFlight = 0;
   const idleWaiters: Array<() => void> = [];
   const trackedHandler = <Args extends unknown[], Result>(
@@ -116,7 +153,7 @@ export function createMcpServer(repoRoot: string): WardenMcpServer {
     inFlight === 0 ? Promise.resolve() : new Promise<void>((r) => idleWaiters.push(r));
 
   server.setRequestHandler(ListToolsRequestSchema, trackedHandler(async () => ({
-    tools: TOOL_DEFINITIONS.map((tool) => ({
+    tools: tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: toInputJsonSchema(tool.inputSchema),
@@ -128,7 +165,7 @@ export function createMcpServer(repoRoot: string): WardenMcpServer {
 
   server.setRequestHandler(CallToolRequestSchema, trackedHandler(async (request) => {
     const name = request.params.name;
-    const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
+    const tool = tools.find((t) => t.name === name);
     return degrade(
       name,
       async () => {
@@ -139,7 +176,7 @@ export function createMcpServer(repoRoot: string): WardenMcpServer {
           return errorEnvelope(
             name,
             "invalid_input",
-            `Unknown tool "${name}". Available: ${TOOL_DEFINITIONS.map((t) => t.name).join(", ")}.`,
+            `Unknown tool "${name}". Available: ${tools.map((t) => t.name).join(", ")}.`,
           );
         }
 

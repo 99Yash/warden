@@ -20,6 +20,7 @@ export {
   TOOL_ENVELOPE_VERSION,
   TOOL_ERROR_REASONS,
   TOOL_NAME_LOOKUP_TYPE_DEF,
+  TOOL_NAME_RUN_DET_PRIORS,
   ToolErrorReasonSchema,
   ToolResultEnvelopeSchema,
   toolResultEnvelopeSchema,
@@ -32,8 +33,22 @@ export {
 } from "./envelope.js";
 
 export {
+  DEFAULT_REVIEW_CACHE_CAPACITY,
+  createReviewResultCache,
+  type ReviewResultCache,
+} from "./review-cache.js";
+
+export {
   LookupTypeDefInputSchema,
   LookupTypeDefResultSchema,
   runLookupTypeDef,
   type LookupTypeDefInput,
 } from "./tools/lookup-type-def.js";
+
+export {
+  RunDetPriorsInputSchema,
+  RunDetPriorsResultSchema,
+  runRunDetPriors,
+  type RunDetPriorsDeps,
+  type RunDetPriorsInput,
+} from "./tools/run-det-priors.js";

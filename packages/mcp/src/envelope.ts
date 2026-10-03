@@ -26,10 +26,27 @@ import { z } from "zod";
 // Version 2 narrows the accepted contract to complete, exclusive branches.
 export const TOOL_ENVELOPE_VERSION = 2 as const;
 
-/** ADR-0053 §5(a): cap each JSON tool-content block, measured as UTF-8 bytes. */
-export const MAX_TOOL_RESULT_BYTES = 16 * 1024;
+/**
+ * Hard byte backstop per JSON tool-content block, measured as UTF-8 bytes.
+ *
+ * Raised 16 KiB → 64 KiB on 2026-10-03 with a measurement behind it. The old
+ * value was not a safety rail but a tripwire on normal input: `runDetPriors` on
+ * a 332-file diff produces 86,304 B even in its leanest defensible shape, so
+ * the 16 KiB cap made `envelopeToContent` substitute a `result_too_large`
+ * envelope and return *no review at all* for any substantial change. This is
+ * the opposite of §5(c)'s degrading intent.
+ *
+ * It is now a **backstop, not the sizing mechanism**. Results are bounded by
+ * construction — `BUNDLE_LIMITS` in `@warden/core` caps each component and
+ * emits an explicit omitted-count — so the normal worst case lands near 30 KB
+ * and this constant only fires on pathological single-item payloads (a finding
+ * whose `message` is itself kilobytes). Raising it does not license an
+ * unbounded return shape; it is the last line of defence, not the first.
+ */
+export const MAX_TOOL_RESULT_BYTES = 64 * 1024;
 
 export const TOOL_NAME_LOOKUP_TYPE_DEF = "lookup_type_def" as const;
+export const TOOL_NAME_RUN_DET_PRIORS = "run_det_priors" as const;
 
 /** Structured failure reasons. Closed union so clients can branch. */
 export const TOOL_ERROR_REASONS = [
@@ -39,6 +56,15 @@ export const TOOL_ERROR_REASONS = [
   "symbol_not_found",
   "lookup_error",
   "result_too_large",
+  /**
+   * A paging cursor referenced a Phase 1 result the server no longer holds —
+   * evicted from the bounded LRU, or the server restarted since the first page.
+   * Distinct from `internal_error` because the recovery is known and cheap:
+   * re-issue the original request without a cursor. `runDetPriors` shells out
+   * to `tsc`/`eslint`/`jscpd`, so the re-run is not free, which is why the
+   * cursor rides a retained result at all.
+   */
+  "review_expired",
   "internal_error",
 ] as const;
 
@@ -139,7 +165,7 @@ export function envelopeToContent(
       errorEnvelope(
         envelope.tool.slice(0, 128),
         "result_too_large",
-        `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte content limit. Read the package's local .d.ts files in node_modules directly; this single-symbol result cannot be returned without truncating its citation.`,
+        `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte content limit. That limit is a backstop against a pathologically large single item, not the normal size budget — results are capped per component and any omission is reported in \`omissions\`. Read the package's local .d.ts files in node_modules directly, or narrow the request.`,
       ),
       null,
       2,
@@ -151,8 +177,13 @@ export function envelopeToContent(
     structuredContent: serialized,
     // Domain negatives completed the lookup. Operational failures should drive
     // standard MCP client recovery; isError does not discard recovery content.
+    // `review_expired` is a domain negative: the server knows exactly why the
+    // page is gone and the recovery (re-issue without a cursor) is cheap to
+    // state, so it rides the same non-error path as a missing symbol.
     isError:
       serialized.status === "error" &&
-      !["package_not_installed", "no_types", "symbol_not_found"].includes(serialized.reason),
+      !["package_not_installed", "no_types", "symbol_not_found", "review_expired"].includes(
+        serialized.reason,
+      ),
   };
 }

@@ -171,6 +171,19 @@ export {
   type TriageGateResult,
 } from "./security/index.js";
 export { toComment } from "./runners/to-comment.js";
+export {
+  BUNDLE_LIMITS,
+  REVIEW_BUNDLE_VERSION,
+  buildReviewBundlePage,
+  computeReviewHandle,
+  toBundleFinding,
+  type BundleChangedFile,
+  type BundleContextHandle,
+  type BundleFinding,
+  type BundleFindingLimits,
+  type BundleOmission,
+  type ReviewBundlePage,
+} from "./review-bundle.js";
 
 export interface ReviewConfig {
   mode: "check" | "review";
