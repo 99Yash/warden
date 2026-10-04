@@ -3096,33 +3096,46 @@ pnpm --filter @warden/cli measure:review-bundle -- eecefea 92fe52d
 
 against the pinned range `eecefea...92fe52d` (332 files, 120,318 added lines). The script is retained in the repo (`packages/cli/scripts/measure-review-bundle.mts`) precisely because round 0 falsified the first version of these numbers: the original measurement was taken with a throwaway script that was then deleted, so nothing could regenerate the ADR's figures. Sizes are `JSON.stringify(x, null, 2)` UTF-8 bytes — the format `envelopeToContent` actually emits. Compact figures are printed alongside, because the choice is not neutral.
 
-**What the measurement shows.**
+**What the measurement shows — `check` mode, which is the reproducible baseline.** Check mode runs no selector and touches no index, so its figures are stable across runs and index state:
 
-| component | review (wire B) | check (wire B) |
+| component | wire B | share |
 | --- | ---: | ---: |
-| `changed` | 1,410,562 (**76.5%**) | 1,410,562 (**78.1%**) |
-| `findings` | 30,422 | 73,102 |
-| `vulnComments` | 52,066 | 52,066 |
-| `retrievedContext` | 44,781 | 43 |
-| `selectorOutput` | 34,544 | 40 |
-| `changedPaths` | 15,819 | 15,819 |
-| **total `DetPriors`** | **1,844,273** | **1,806,954** |
-| total, compact | 702,672 | 678,743 |
+| `changed` | 1,410,562 | **78.1%** |
+| `findings` | 73,102 | 4.0% |
+| `vulnComments` | 52,066 | 2.9% |
+| `changedPaths` | 15,819 | 0.9% |
+| `degraded` | 1,719 | 0.1% |
+| `ecosystem` | 641 | 0.0% |
+| `retrievedContext` | 43 | 0.0% |
+| `selectorOutput` | 40 | 0.0% |
+| **total `DetPriors`** | **1,806,954** | **100.0%** |
+| total, compact | 678,743 | — |
+
+**Review-mode figures are deliberately not tabulated here.** They depend on index state rather than the pinned diff: across three consecutive runs of the same command, `retrievedContext` measured 43 B, then 44,781 B, then 54,032 B, and `selectorOutput` 40 B → 34,544 B → 35,959 B, moving the total between ~1.81 MB and ~1.86 MB. Only `changed`, `findings`, `vulnComments` and `changedPaths` are diff-determined and therefore stable. Quoting a single review-mode total as fact would repeat exactly the error this amendment exists to correct — so `measure:review-bundle` prints both, and the check-mode table above is the one to regenerate the ADR from (`--md` emits it as markdown).
 
 `ChangedFile.addedLines` is the dominant cost: a JSON array of 120,318 bare line-number integers, **1,410,562 B** standalone. Pretty-printing is a large multiplier here specifically because every element lands on its own indented line — `changed` is 2.52x larger in wire format than compact.
 
 **Two claims in the first version of this amendment were FALSE, and are withdrawn:**
 
 - ~~"The chunk payload's structural worst case is ~6 KB."~~ **Withdrawn.** `MAX_CONTENT_BEARING = 8` and `SAME_FOLDER_CAP = 12` cap **candidates**, not chunks, and prompt assembly emits one chunk per merged evidence range with **no snippet-byte ceiling** (`context/prompt.ts`). Measured on the pinned range: **14 chunks / 44,321 B**, largest single snippet **5,693 B**. A constructed case reached **115,537 B from one selected candidate**. There is no structural worst case to quote; the figure must be measured. Context therefore ships as `{path, lineStart, lineEnd}` locators, which is a stronger reason than the one originally given.
-- ~~"`addedLines` has only two consumers, both inside warden."~~ **Withdrawn as stated.** It has at least eight: `scopeToDiff`, `scopeCommentsToDiff`, `comment-scope`, `_shared.parseFile` (feeding the scalability/deadcode/leverage detectors), `pruneDiff`, `boss-loop`, and `file-snippet`. **The conclusion survives** — every one is internal to warden and none is reachable from the MCP wire — but the stated reason was wrong.
+- ~~"`addedLines` has only two consumers, both inside warden."~~ **Withdrawn as stated, and the count corrected twice.** Round 1 found the first correction ("at least eight") double-counted, because `scopeCommentsToDiff` **is** `comment-scope.ts` — the first version had located it at `harness.ts:196`, which is the *call site*, not the definition. The accurate inventory is **six files**: `runners/to-comment.ts` (`scopeToDiff`), `review-harness/comment-scope.ts` (`scopeCommentsToDiff`), `runners/_shared.ts` (feeding the scalability/deadcode/leverage detectors), `diff/prune.ts`, `review-harness/boss-loop.ts`, and `review-harness/workers/file-snippet.ts`. **The conclusion survives every correction** — all six are internal to warden and none is reachable from the MCP wire — but three successive versions of this sentence were wrong about it, which is the point of recording it.
 
 **And the headline ratio was wrong.** The first version claimed a **647x** reduction from shipping counts instead of the line array. That compared 1,410,562 B of path-bearing `ChangedFile` objects against a **2,145 B bare array of counts** — two different shapes, not two serializations of one. The like-for-like figure is **46.13x**: 1,410,562 B → **30,578 B** for the same data as `{path, addedLineCount}` objects. Still the single largest win available, and still enough to matter, but not the number first recorded.
 
 **Decisions that follow.**
 
 1. **§5(a)'s bundle-vs-handles binary is retired; the split is per-component.** Findings ship inline — they are the product, capped and paged. `addedLines` never crosses the wire; only `path` + `addedLineCount`. Context ships as locators.
-2. **The byte bound becomes shape-by-construction, with the hard cap demoted to a backstop.** Per-component count caps (`BUNDLE_LIMITS`) **plus a `pageByteBudget`**, because count caps alone are not sufficient: 50 findings carrying a 24-line source window serialize to ~80 KB. The budget halves the most-droppable component until the page fits — **whole entries only, never a truncated citation**, since a partial citation is not ground truth. `MAX_TOOL_RESULT_BYTES` goes **16 KiB → 64 KiB** and now only fires on pathological input. The old 16 KiB value was a **tripwire on normal input, not a safety rail**: `envelopeToContent` does not truncate, it *substitutes* a `result_too_large` envelope and discards the result, so any substantial review returned an error instead of a review.
+2. **The byte bound becomes shape-by-construction, with the hard cap demoted to a backstop.** Per-component count caps (`BUNDLE_LIMITS`) **plus a `pageByteBudget`**, because count caps alone are not sufficient. The budget is spent by a **page planner** rather than by halving a finished page: it reserves room for findings, shrinks the other components to make space, then walks findings forward from the requested offset, packing those that fit and **skipping past any that cannot fit even alone**, counting those as `unretrievable`. Whole entries only — never a truncated citation, since a partial citation is not ground truth. Because every entry examined is either delivered or rejected, **the cursor always advances**; there is no reachable state that hands back a non-progressing cursor. `MAX_TOOL_RESULT_BYTES` goes **16 KiB → 64 KiB** and now only fires on pathological input. The old 16 KiB value was a **tripwire on normal input, not a safety rail**: `envelopeToContent` does not truncate, it *substitutes* a `result_too_large` envelope and discards the result, so any substantial review returned an error instead of a review.
 3. **Paging requires warden-side retention.** `runDetPriors` shells out to `tsc`/`eslint`/`jscpd`, so paging cannot mean re-running it. The server retains results in a bounded LRU keyed by a handle allocated **per completed run** — not derived from the request, because keying on the request lets a later run silently replace the pages of a review already in progress. This is §7 state authority: warden owns the canonical record.
+
+**Amendment 2026-10-04 (later — review round 1).** Round 1 reviewed only the round-0 fixes and found the fixes had introduced a **new P1, worse in shape than the one they closed**: trimming the page from the end (`page.slice(0, next)`) kept the oversized entry sitting at the front and discarded the small findings behind it, then labelled the whole suffix `unretrievable`. Verified: `[200 KB finding, small, small]` returned **zero findings, no cursor, `unretrievable: 3`** — while offset 1 delivered both small findings in **1,363 B**. Round 0 lost findings silently; round 1 withheld them and asserted they did not exist. Decision 2's page planner is the replacement.
+
+Two more round-1 corrections, both now folded in above:
+
+- **An empty literal diff was rejected.** `.min(1)` on `diff` refused `""`, which is exactly what `git diff` returns on a clean checkout, so an empty literal diff disagreed with an empty git-resolved one. A clean review target is a legitimate answer.
+- **The advertised request shape did not match the schema.** The tool description told the model to pass `{diff}` and `{reviewHandle, offset}` while the schema required `{request: {target, …}}`. Verified through real MCP discovery and calls. The description and every error hint now show executable requests.
+
+**Not fixed here, deliberately** (recorded so they are not mistaken for oversights): a page of retained results is still bounded by an LRU rather than by review lifecycle, so independently-running lanes can evict a review mid-read — the correct fix is host-owned leases, which belongs to #41; retrieved-context assembly has no byte ceiling of its own, so a bounded response can still sit in front of an unbounded retained payload; and the owning schema validates structure rather than paging invariants, so a page with contradictory counts would pass `degrade()`.
 
 **The completeness finding, which the size work nearly buried.** At the pinned range Phase 1 produced **90 tool findings and 59 vulnerability comments**. The first implementation of this serializer read only `det.findings` — the `vulnComments` stream (audit + OSV) never entered the bundle, exactly as the CLI merges both at `core/src/index.ts` (`[...toolComments, ...vulnComments]`). A vulnerability-only result therefore reported `findingsTotal: 0`. **59 of 149 deterministic findings — 40% — were invisible to any MCP client**, with no omission recorded. That is the silent-false-clean shape issue #29 exists to prevent, and it was introduced by the very slice whose acceptance criteria said "findings preserve the existing category and tier mapping."
 

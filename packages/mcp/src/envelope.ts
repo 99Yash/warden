@@ -37,11 +37,12 @@ export const TOOL_ENVELOPE_VERSION = 2 as const;
  * the opposite of §5(c)'s degrading intent.
  *
  * It is now a **backstop, not the sizing mechanism**. Results are bounded by
- * construction — `BUNDLE_LIMITS` in `@warden/core` caps each component and
- * emits an explicit omitted-count — so the normal worst case lands near 30 KB
- * and this constant only fires on pathological single-item payloads (a finding
- * whose `message` is itself kilobytes). Raising it does not license an
- * unbounded return shape; it is the last line of defence, not the first.
+ * construction — `BUNDLE_LIMITS` in `@warden/core` caps each component, reserves
+ * room for findings, and emits an explicit omitted-count plus an unretrievable
+ * count — so this constant only fires on pathological single-item payloads. It
+ * has no asserted worst-case figure: the previous "~30 KB" was never measured.
+ * Raising it does not license an unbounded return shape; it is the last line of
+ * defence, not the first.
  */
 export const MAX_TOOL_RESULT_BYTES = 64 * 1024;
 

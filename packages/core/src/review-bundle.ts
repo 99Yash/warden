@@ -21,22 +21,24 @@ import type { DetPriors } from "./review-harness/harness.js";
  * Measured on this repo's own history (pinned in the ADR amendment), the full
  * `DetPriors` serializes to ~1.8 MB pretty, and the component breakdown is
  * dominated by one field: `ChangedFile.addedLines`, a JSON array of bare
- * line-number integers, was **~1.4 MB standalone** — roughly 78-93% of the
- * payload depending on whether you measure the component standalone or embedded.
+ * line-number integers, was **1,410,562 B standalone** — **76.5%** of the
+ * review-mode total and **78.1%** of the check-mode total at the pinned range
+ * `eecefea...92fe52d`. Reproduce with `measure:review-bundle`.
  *
  * So the components get three different treatments:
  *
  * - **Findings ship inline**, capped and paged. They are the product; handing
  *   back a handle instead of the finding would make the tool useless.
  * - **`addedLines` does not cross the wire** — only `path` + `addedLineCount`.
- *   It has at least eight consumers in this repo (`scopeToDiff`,
- *   `scopeCommentsToDiff`, `comment-scope`, `_shared.parseFile` and the
- *   scalability/deadcode/leverage detectors, `pruneDiff`, `boss-loop`,
- *   `file-snippet`) and **all of them are internal to warden** — none is
- *   reachable from the MCP wire. An external caller needs the file list and a
- *   count, not 120,318 integers. (Round 0 caught an earlier version of this
- *   comment claiming there were only two consumers; the conclusion held, the
- *   stated reason did not.)
+ *   Six files in this repo consume it — `runners/to-comment.ts` (`scopeToDiff`),
+ *   `review-harness/comment-scope.ts` (`scopeCommentsToDiff`, called from
+ *   `harness.ts`), `runners/_shared.ts` plus the scalability/deadcode/leverage
+ *   detectors, `diff/prune.ts`, `review-harness/boss-loop.ts`, and
+ *   `review-harness/workers/file-snippet.ts`. **All of them are internal to
+ *   warden** and none is reachable from the MCP wire. An external caller needs
+ *   the file list and a count, not 120,318 integers. (Round 0 caught an earlier
+ *   version of this comment claiming there were only two consumers; the
+ *   conclusion held, the stated reason did not.)
  * - **Retrieved context ships as locators**, not snippets — and this one is
  *   *not* bounded by the constants round 0 hoped. See the note below.
  *
@@ -44,12 +46,15 @@ import type { DetPriors } from "./review-harness/harness.js";
  *
  * `MAX_CONTENT_BEARING = 8` and `SAME_FOLDER_CAP = 12` cap **candidates**, not
  * chunks, and prompt assembly emits one chunk per merged evidence range with no
- * snippet-byte ceiling (`context/prompt.ts:37-51`). A single candidate with ten
- * widely-spaced evidence ranges produces ten chunks; a constructed case reached
- * **115,537 B** of retrieved context from *one* selected candidate. So context
- * size is bounded in practice by the selector's candidate caps but has no byte
- * guarantee of its own — which is precisely why it ships as `{path, lineStart,
- * lineEnd}` locators here and the caller fetches code on demand.
+ * snippet-byte ceiling (`context/prompt.ts:37-51`). Measured on the pinned
+ * range: **14 chunks / 44,321 B**, largest single snippet **5,693 B**. A
+ * hand-built adversarial fixture (one candidate, ten widely-spaced 1,000-char
+ * lines) reached **115,537 B from a single selected candidate** — that figure
+ * comes from a constructed case rather than a retained measurement, so read it
+ * as an illustration that no bound exists, not as a reproducible number. There
+ * is no structural worst case to quote; the figure must be measured. Context
+ * therefore ships as `{path, lineStart, lineEnd}` locators, which is a stronger
+ * reason than the one originally given.
  */
 
 /**
@@ -89,8 +94,10 @@ export const BUNDLE_LIMITS = {
    * `MAX_TOOL_RESULT_BYTES` is: UTF-8 bytes of `JSON.stringify(page, null, 2)`,
    * which is exactly what `@warden/mcp` puts on the wire.
    *
-   * The count caps above are **not** sufficient alone: 50 findings carrying a
-   * 24-line source window serialize to ~80 KB, over the 64 KiB backstop.
+   * The count caps above are **not** sufficient alone: the smoke's synthetic
+   * case of 50 findings each carrying a 400-character evidence snippet
+   * serializes past the 64 KiB backstop without any of them being individually
+   * unrepresentable. `smoke:mcp-run-det-priors` asserts that case.
    *
    * This budget closes that gap **without truncating a citation** — ADR-0053
    * forbids that, because a partial citation is not ground truth. Whole entries
@@ -261,13 +268,31 @@ function bodyBytes(body: ReviewBundleBody): number {
 /**
  * Components in the order they are sacrificed when the page is over budget.
  *
- * `findings` goes first because a trimmed remainder is *recoverable* — the client
- * pages on with `nextOffset`, or asks for a smaller `limit`. `degraded` goes
- * **last**, deliberately: a silently-dropped degradation is exactly the "one
- * unavailable detector fails quietly" failure ADR-0053 §5(c) exists to prevent,
- * so it outlives the droppable payload components.
+ * `findings` goes **first** despite being last in `OMITTED_COMPONENTS` — round 1
+ * aliased this to the component enum and thereby inverted the priority, so a
+ * 40-finding page that delivered 20 findings also delivered **zero** changed
+ * files where round 0 delivered all ten. Findings still go first because a
+ * trimmed finding remainder is *recoverable*: the client pages on with
+ * `nextOffset`. `degraded` goes **last**, deliberately — a silently-dropped
+ * degradation is exactly the "one unavailable detector fails quietly" failure
+ * ADR-0053 §5(c) exists to prevent.
  */
-const TRIM_ORDER = OMITTED_COMPONENTS;
+const TRIM_ORDER = ["findings", "changedFiles", "contextHandles", "degraded"] as const;
+
+/** Serialized size of one entry, measured the way the wire measures it. */
+function entryBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value, null, 2), "utf8") + 10;
+}
+
+/**
+ * Headroom held back for the `omissions` array itself.
+ *
+ * The budget is enforced against the page *body*, but the emitted page also
+ * carries `omissions` — up to four entries of roughly 150 B. Without this
+ * reserve the serialized result overran `pageByteBudget` by exactly the size of
+ * the array reporting the overrun.
+ */
+const OMISSION_RESERVE_BYTES = 1024;
 
 /**
  * Build one bounded page of the review bundle.
@@ -325,16 +350,16 @@ export function buildReviewBundlePage(
   };
 
   /** Findings known to be individually too large to ever fit the byte budget. */
-  let unretrievable = 0;
+  /**
+   * Where traversal stopped: the index of the first finding neither delivered nor
+   * rejected as oversized. Computed by the planner, not derived from
+   * `page.length` — round 1 derived it from the delivered count, which is only
+   * equivalent when nothing is skipped.
+   */
+  let nextOffset = start;
 
   const compose = (): ReviewBundleBody => {
-    const delivered = page.length;
-    const nextOffset = start + delivered;
-    const undelivered = allFindings.length - nextOffset;
-    // Progress is only advertised when the page actually advanced. Withholding
-    // it when `delivered === 0 && undelivered > 0` is what stops a client
-    // looping on an unpageable finding.
-    const more = undelivered > 0 && delivered > 0;
+    const more = nextOffset < allFindings.length;
     return {
       schemaVersion: REVIEW_BUNDLE_VERSION,
       reviewHandle,
@@ -352,38 +377,123 @@ export function buildReviewBundlePage(
     };
   };
 
-  // Byte-budget enforcement: halve the most-droppable component until the page
-  // fits. Halving (not decrementing) keeps this O(log n) and keeps the rule
-  // statable in one sentence — "the page is halved until it fits the budget."
-  // Whole entries only; no citation is ever truncated to make room.
+  // ---- Phase 1: make room for findings -----------------------------------
+  //
+  // The non-finding components are trimmed first *in effect* (findings are
+  // trimmed last), so shrink them until the page with zero findings leaves a
+  // usable reserve. Without the reserve a bulky `contextHandles.reason` could
+  // consume the entire budget, leave zero capacity, make every finding look
+  // oversized, and then be trimmed away itself — leaving a 525-byte page that
+  // claimed nothing was retrievable (round 1).
+  const RESERVE_FRACTION = 0.5;
+  const reserve = Math.floor(BUNDLE_LIMITS.pageByteBudget * RESERVE_FRACTION);
+  const shrinkTo = (component: "changedFiles" | "contextHandles" | "degraded"): number =>
+    component === "changedFiles"
+      ? changed.included.length
+      : component === "contextHandles"
+        ? handles.included.length
+        : degraded.included.length;
+  const shrink = (component: "changedFiles" | "contextHandles" | "degraded", next: number): void => {
+    if (component === "changedFiles") {
+      changed = { included: changed.included.slice(0, next), total: totals.changedFiles };
+    } else if (component === "contextHandles") {
+      handles = { included: handles.included.slice(0, next), total: totals.contextHandles };
+    } else {
+      degraded = { included: degraded.included.slice(0, next), total: totals.degraded };
+    }
+  };
+
+  page = [];
   let body = compose();
-  for (const component of TRIM_ORDER) {
+  for (const component of ["changedFiles", "contextHandles", "degraded"] as const) {
     for (;;) {
-      if (bodyBytes(body) <= BUNDLE_LIMITS.pageByteBudget) break;
-      const current =
-        component === "findings"
-          ? page.length
-          : component === "changedFiles"
-            ? changed.included.length
-            : component === "contextHandles"
-              ? handles.included.length
-              : degraded.included.length;
+      if (bodyBytes(body) + OMISSION_RESERVE_BYTES <= BUNDLE_LIMITS.pageByteBudget - reserve) break;
+      const current = shrinkTo(component);
       if (current === 0) break;
-      const next = Math.floor(current / 2);
-      if (component === "findings") {
-        // Dropping from the *end* of the page, so `nextOffset` still addresses
-        // the first undelivered finding rather than skipping past the drop.
-        if (next === 0 && current === 1) unretrievable++;
-        page = page.slice(0, next);
-      } else if (component === "changedFiles") {
-        changed = { included: changed.included.slice(0, next), total: totals.changedFiles };
-      } else if (component === "contextHandles") {
-        handles = { included: handles.included.slice(0, next), total: totals.contextHandles };
-      } else {
-        degraded = { included: degraded.included.slice(0, next), total: totals.degraded };
-      }
+      shrink(component, Math.floor(current / 2));
       body = compose();
     }
+  }
+
+  // ---- Phase 2: pack the findings ----------------------------------------
+  //
+  // Walk forward from `start`, classifying each entry against the capacity left
+  // over once everything else is placed:
+  //
+  //   - too big even alone  -> **skip it and keep going**, counting it as
+  //     unretrievable. Round 1 stopped here, or kept it and dropped the small
+  //     findings behind it, and in both cases reported the small findings as
+  //     impossible when they were reachable in ~1.3 KB.
+  //   - fits, room remains  -> include it.
+  //   - fits, no room left  -> stop; the rest is a later page.
+  //
+  // Progress is therefore unconditional: every entry examined is either
+  // delivered or rejected, so `nextOffset` always advances while findings
+  // remain. There is no reachable state that hands back a non-progressing cursor.
+  const capacityFor = (overhead: number): number =>
+    BUNDLE_LIMITS.pageByteBudget - overhead - OMISSION_RESERVE_BYTES;
+
+  /**
+   * Greedy forward pack. `capacity` is what is left after everything else is
+   * placed. Returns the packed slice, how much of it was used, how many entries
+   * were rejected as individually oversized, and where traversal stopped.
+   */
+  const pack = (
+    capacity: number,
+  ): { packed: BundleFinding[]; used: number; rejected: number; cursor: number } => {
+    const packed: BundleFinding[] = [];
+    let used = 0;
+    let rejected = 0;
+    let i = start;
+    while (i < allFindings.length) {
+      const size = entryBytes(allFindings[i]);
+      if (size > capacity) {
+        rejected++;
+        i++;
+        continue;
+      }
+      if (used + size > capacity) break;
+      packed.push(allFindings[i] as BundleFinding);
+      used += size;
+      i++;
+    }
+    return { packed, used, rejected, cursor: i };
+  };
+
+  const overhead = bodyBytes(body);
+  let plan = pack(capacityFor(overhead));
+  page = plan.packed;
+  nextOffset = plan.cursor;
+  body = compose();
+
+  // `entryBytes` measures a finding standalone; nested in the page array it is
+  // re-indented, so the estimate runs low and the first pack can overrun. Correct
+  // by scaling capacity by the observed overshoot rather than halving the page:
+  // halving after the cursor has advanced drops findings without delivering or
+  // rejecting them (round 1 shipped that and lost ~14 findings per page).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const size = bodyBytes(body) + OMISSION_RESERVE_BYTES;
+    if (size <= BUNDLE_LIMITS.pageByteBudget) break;
+    const spent = size - overhead;
+    if (spent <= 0) break;
+    const scaled = Math.floor(
+      capacityFor(overhead) * ((BUNDLE_LIMITS.pageByteBudget - overhead) / spent),
+    );
+    if (scaled >= capacityFor(overhead)) break; // no progress available
+    plan = pack(scaled);
+    page = plan.packed;
+    nextOffset = plan.cursor;
+    body = compose();
+  }
+
+  // Final safety, if measurement noise still leaves it over: trim the tail AND
+  // rewind the cursor to match what was actually delivered. Rewinding is safe
+  // because traversal is idempotent — entries are re-examined, and an oversized
+  // one is simply rejected again on the next page. Losing them is not.
+  while (bodyBytes(body) + OMISSION_RESERVE_BYTES > BUNDLE_LIMITS.pageByteBudget && page.length > 0) {
+    page = page.slice(0, Math.floor(page.length / 2));
+    nextOffset = start + page.length;
+    body = compose();
   }
 
   const included: Record<(typeof TRIM_ORDER)[number], number> = {
@@ -393,22 +503,21 @@ export function buildReviewBundlePage(
     degraded: degraded.included.length,
   };
   const omissions: BundleOmission[] = [];
-  for (const component of TRIM_ORDER) {
+  for (const component of OMITTED_COMPONENTS) {
     const total = totals[component];
     if (total <= included[component]) continue;
-    const undelivered = total - (component === "findings" ? start + included.findings : 0);
-    const stranded = component === "findings" && included.findings === 0 && undelivered > 0;
+    // `included`/`omitted` describe **this response**; `total` is the whole
+    // result. For findings, `omitted` therefore also counts entries an earlier
+    // page already delivered — the serializer is stateless and cannot know that.
+    // Use `nextOffset` to size what is genuinely still ahead.
+    const extra =
+      component === "findings" && plan.rejected > 0 ? { unretrievable: plan.rejected } : {};
     omissions.push({
       component,
       total,
       included: included[component],
       omitted: total - included[component],
-      // Only claim unretrievable for the entries this page was actually asked
-      // for and could not carry; a trimmed *remainder* is recoverable by paging
-      // or by asking for a smaller `limit`.
-      ...(stranded || unretrievable > 0
-        ? { unretrievable: component === "findings" ? Math.max(unretrievable, undelivered) : undefined }
-        : {}),
+      ...extra,
     });
   }
 

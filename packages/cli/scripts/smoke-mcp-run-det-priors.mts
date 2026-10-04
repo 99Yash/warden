@@ -251,9 +251,13 @@ try {
     "the changed file in the fixture diff is present",
   );
   const categoryTotal = Object.values(page.findingsByCategory).reduce((a, b) => a + b, 0);
+  // Not a tautology guard on `tally` — it pins the documented rule that the
+  // tallies describe the WHOLE result, not this page. Re-scoping them per page
+  // would silently break every client sizing its paging loop, and this is the
+  // only assertion that would notice.
   assert(
-    categoryTotal === page.findingsTotal,
-    `findingsByCategory totals findingsTotal (${categoryTotal} vs ${page.findingsTotal})`,
+    categoryTotal === page.findingsTotal && page.findings.length <= page.findingsTotal,
+    `findingsByCategory totals findingsTotal (${categoryTotal} vs ${page.findingsTotal}) and the page is a subset`,
   );
   assert(
     page.findings.length > 0,
@@ -335,15 +339,29 @@ try {
   // Same mode as the MCP call above (the tool defaults to "review"), otherwise
   // this compares two different runs rather than two paths to one run.
   const inProcess = await runDetPriors({ diff: FIXTURE_DIFF, repoRoot: REPO, mode: "review" });
+  const key = (detector: string, file: string, line: number, tier: number, category: string): string =>
+    `${detector}@${file}:${line}:${tier}:${category}`;
   const wireSet = page.findings
-    .map((f) => `${f.detector}@${f.file}:${f.lineStart}:${f.tier}:${f.category}`)
+    .map((f) => key(f.detector, f.file, f.lineStart, f.tier, f.category))
     .sort();
   const coreSet = inProcess.findings
-    .map((f) => `${f.source}@${f.file}:${f.line}:${toComment(f).tier}:${toComment(f).category}`)
+    .map((f) => key(f.source, f.file, f.line, toComment(f).tier, toComment(f).category))
     .sort();
+  // Compare against exactly the prefix the page could hold. Comparing against a
+  // silently-truncated slice of the core set would pass even if core found more
+  // (round 1 sweep).
   assert(
-    JSON.stringify(wireSet) === JSON.stringify(coreSet.slice(0, wireSet.length)),
+    wireSet.length <= BUNDLE_LIMITS.findingsPerPage,
+    `the page holds no more than one page of findings (${wireSet.length})`,
+  );
+  assert(
+    JSON.stringify(wireSet) ===
+      JSON.stringify(coreSet.slice(0, BUNDLE_LIMITS.findingsPerPage).slice(0, wireSet.length)),
     `MCP page content matches a direct core run on the same diff (${wireSet.length} findings)`,
+  );
+  assert(
+    coreSet.length >= wireSet.length,
+    "the core run produced at least the findings the page carries",
   );
   const sample = inProcess.findings[0];
   if (sample !== undefined) {
@@ -351,9 +369,28 @@ try {
     const viaCli = toComment(sample);
     assert(
       JSON.stringify(viaBundle.sources) === JSON.stringify(viaCli.sources),
-      "sources[] is passed through from toComment, evidence triple included",
+      "sources[] is passed through from toComment unchanged for the sampled finding",
     );
   }
+  // The evidence triple only exists on detectors that cite source text. The
+  // fixture's findings are tool citations without one, so exercise the triple
+  // path on a synthetic probe rather than claiming the sampled finding covers it.
+  const tripleProbe = toBundleFinding({
+    source: "leverage",
+    file: "src/a.ts",
+    line: 7,
+    column: 1,
+    severity: "warning",
+    ruleId: "leverage/structured-clone",
+    message: "structuredClone is available natively",
+    evidence: { path: "src/a.ts", line: 7, snippet: "const c = structuredClone(x);" },
+  });
+  assert(
+    tripleProbe.sources[0]?.path === "src/a.ts" &&
+      tripleProbe.sources[0]?.line === 7 &&
+      tripleProbe.sources[0]?.snippet === "const c = structuredClone(x);",
+    "an evidence triple reaches sources[] intact on a citing detector",
+  );
 
   process.stdout.write("\n[5] an unavailable runner degrades, it does not error\n");
   assert(first.status === "ok", "a repo with no index still returns status: ok, not an error");
@@ -414,9 +451,9 @@ try {
   );
   assert(
     unknownHandle.hint !== undefined &&
-      unknownHandle.hint.includes("Re-issue") &&
-      unknownHandle.hint.length > 0,
-    "the expiry hint states the recovery — re-issue the original target",
+      unknownHandle.hint.includes('"request"') &&
+      unknownHandle.hint.includes("Start a new review"),
+    "the expiry hint states the recovery with an executable request shape",
   );
 
   process.stdout.write("\n[7] the bound — oversized input still fits, and says what it dropped\n");
@@ -493,52 +530,123 @@ try {
   const walked: string[] = [];
   let walkOffset: number | undefined = 0;
   let walkPages = 0;
-  while (walkOffset !== undefined && walkPages < 500) {
+  while (walkOffset !== undefined && walkPages < 900) {
     const p = buildReviewBundlePage(oversized, "rb_walk", walkOffset, {
       limit: BUNDLE_LIMITS.findingsPerPage,
     });
     for (const f of p.findings) walked.push(f.id);
-    if (p.nextOffset !== undefined) {
-      assert(p.nextOffset > walkOffset, `walk cursor advances (${walkOffset} -> ${p.nextOffset})`);
-    }
     walkOffset = p.nextOffset;
     walkPages++;
   }
+  // One assertion for progress: a non-advancing cursor would spin to the 500-hop
+  // cap and land here with the wrong count, so a per-iteration assert would only
+  // restate it 500 times (round 1 sweep).
+  assert(walkPages < 900, `the walk terminated in ${walkPages} pages rather than spinning`);
   assert(
     walked.length === 5_000 && new Set(walked).size === 5_000,
-    `paging a byte-trimmed result delivers all 5,000 findings exactly once (got ${walked.length})`,
+    `paging a byte-trimmed result delivers all 5,000 findings exactly once (got ${walked.length} across ${walkPages} pages)`,
   );
 
-  process.stdout.write("\n[9] REGRESSION — an oversized finding cannot loop forever (round 0)\n");
-  // One finding whose own serialization exceeds the whole byte budget. Round 0
-  // returned an empty page with cursor "offset=0", repeating forever.
-  const huge: DetPriors = {
+  process.stdout.write("\n[9] REGRESSION — an oversized finding is skipped, not contagious (round 1)\n");
+  // Round 1's worst finding: one oversized finding made the whole suffix
+  // "unretrievable" and offered no cursor, while two tiny siblings sat at 1.3 KB
+  // on the next page. `[oversized, small, small]` must deliver the small pair.
+  const hugeMsg = "x".repeat(200_000);
+  const mixed: DetPriors = {
     ...inProcess,
     findings: [
-      {
-        source: "eslint",
-        file: "src/huge.ts",
-        line: 1,
-        column: 1,
-        severity: "error",
-        ruleId: "huge",
-        message: "x".repeat(200_000),
-      },
+      { source: "eslint", file: "src/huge.ts", line: 1, column: 1, severity: "error", ruleId: "huge", message: hugeMsg },
+      { source: "eslint", file: "src/b.ts", line: 2, column: 1, severity: "warning", ruleId: "b", message: "small b" },
+      { source: "eslint", file: "src/c.ts", line: 3, column: 1, severity: "warning", ruleId: "c", message: "small c" },
     ],
     vulnComments: [],
     changed: [],
   };
-  const hugePage = buildReviewBundlePage(huge, "rb_huge", 0, { limit: 1 });
-  assert(hugePage.findings.length === 0, "an individually oversized finding is not partially returned");
-  assert(hugePage.nextOffset === undefined, "no cursor is advertised, so the client cannot loop on it");
-  const hugeOmission = hugePage.omissions?.find((o) => o.component === "findings");
+  const mixedPage = buildReviewBundlePage(mixed, "rb_mixed", 0, {
+    limit: BUNDLE_LIMITS.findingsPerPage,
+  });
   assert(
-    hugeOmission?.unretrievable === 1,
-    "the unretrievable count marks the finding as impossible to page",
+    mixedPage.findings.length >= 1,
+    `a huge sibling does not block the small ones (delivered ${mixedPage.findings.length})`,
   );
   assert(
-    hugePage.findingsTotal === 1,
-    "findingsTotal still reports the truth even when nothing could be delivered",
+    mixedPage.findings.some((f) => f.file === "src/b.ts") ||
+      mixedPage.nextOffset !== undefined,
+    "if the small pair is not on page 1, a cursor is still offered",
+  );
+  // Whatever page 0 does, following the contract to the end must reach b and c.
+  const reached = new Set<string>();
+  let mo: number | undefined = 0;
+  let hops = 0;
+  while (mo !== undefined && hops < 20) {
+    const p = buildReviewBundlePage(mixed, "rb_mixed", mo, { limit: BUNDLE_LIMITS.findingsPerPage });
+    for (const f of p.findings) reached.add(f.file);
+    if (p.nextOffset !== undefined) assert(p.nextOffset > mo, `mixed cursor advances (${mo} -> ${p.nextOffset})`);
+    mo = p.nextOffset;
+    hops++;
+  }
+  assert(
+    reached.has("src/b.ts") && reached.has("src/c.ts"),
+    `paging reaches both small findings despite the oversized one (reached ${[...reached].join(", ") || "none"})`,
+  );
+  assert(
+    mixedPage.findingsTotal === 3,
+    "findingsTotal reports the truth including the oversized entry",
+  );
+  const mixedOmission = mixedPage.omissions?.find((o) => o.component === "findings");
+  assert(
+    mixedOmission === undefined || mixedOmission.unretrievable === undefined || mixedOmission.unretrievable <= 1,
+    "at most the one oversized finding is labelled unretrievable, never the recoverable suffix",
+  );
+
+  // A lone oversized finding must still not produce a non-progressing cursor.
+  const hugeOnly: DetPriors = { ...inProcess, findings: mixed.findings.slice(0, 1), vulnComments: [], changed: [] };
+  const hugePage = buildReviewBundlePage(hugeOnly, "rb_huge", 0, { limit: 1 });
+  assert(hugePage.findings.length === 0, "an individually oversized finding is not partially returned");
+  assert(
+    hugePage.nextOffset === undefined || hugePage.nextOffset > 0,
+    "the cursor advances past the oversized finding instead of repeating page 0",
+  );
+
+  process.stdout.write("\n[9b] REGRESSION — metadata pressure is not an oversized finding (round 1)\n");
+  // Round 1: a bulky context locator squeezed out the findings, then the locator
+  // itself was trimmed, and the page never restored the findings — 525 B, no
+  // findings, all three "unretrievable". The same finding fits in ~919 B without
+  // the locator, so it was never unrepresentable.
+  const pressured: DetPriors = {
+    ...inProcess,
+    findings: mixed.findings.slice(1),
+    vulnComments: [],
+    changed: [],
+    retrievedContext: {
+      chunks: [
+        {
+          path: "src/bulky.ts",
+          lineStart: 1,
+          lineEnd: 40,
+          snippet: "z".repeat(60_000),
+          reason: "r".repeat(60_000),
+          sourceType: "repo_convention",
+        },
+      ],
+      sameFolderPaths: [],
+    },
+  };
+  const pressuredPage = buildReviewBundlePage(pressured, "rb_pressured", 0, {
+    limit: BUNDLE_LIMITS.findingsPerPage,
+  });
+  const pressuredBytes = Buffer.byteLength(JSON.stringify(pressuredPage, null, 2), "utf8");
+  assert(
+    pressuredBytes <= MAX_TOOL_RESULT_BYTES,
+    `a 60 KB context locator still yields a bounded page (${pressuredBytes} B)`,
+  );
+  assert(
+    pressuredPage.findings.length > 0,
+    `findings survive metadata pressure rather than being squeezed out (${pressuredPage.findings.length} delivered)`,
+  );
+  assert(
+    pressuredPage.omissions?.find((o) => o.component === "findings")?.unretrievable === undefined,
+    "no finding is labelled unretrievable when only the metadata was too large",
   );
 
   process.stdout.write("\n[10] REGRESSION — vulnerabilities are not dropped (round 0)\n");
@@ -604,6 +712,31 @@ try {
     badRef.hint?.includes("Could not resolve the review target") === true,
     "the failure names target resolution rather than reporting zero findings",
   );
+
+  process.stdout.write("\n[11b] an empty diff is a clean review, not an input error (round 1)\n");
+  // `git diff` on a clean checkout is "". Round 1's `.min(1)` rejected it, which
+  // made an empty literal diff disagree with an empty git-resolved one.
+  const emptyDiff = readEnvelope(
+    await client.callTool({
+      name: TOOL_NAME_RUN_DET_PRIORS,
+      arguments: { request: { target: "diff", diff: "", mode: "check" } },
+    }),
+    TOOL_NAME_RUN_DET_PRIORS,
+  );
+  assert(
+    emptyDiff.status === "ok" && emptyDiff.data !== undefined,
+    "an empty literal diff returns status: ok rather than invalid_input",
+  );
+  const emptyData = emptyDiff.data as ReviewBundlePage;
+  assert(
+    emptyData.changedFiles.length === 0 && emptyData.changedFilesTotal === 0,
+    "an empty diff contributes no changed files (detectors still run repo-wide, so findings may remain)",
+  );
+  assert(
+    emptyData.findingsTotal === emptyData.findings.length,
+    "the empty-diff page is internally consistent with its own total",
+  );
+  assert(emptyData.reviewHandle.startsWith("rb_"), "an empty diff still gets a handle");
 
   process.stdout.write("\n[12] REGRESSION — the wire schema is the core schema (round 0)\n");
   // Round 0's hand-copied schema accepted a citation carrying only {path, line}.

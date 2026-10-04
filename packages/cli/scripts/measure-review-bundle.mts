@@ -29,7 +29,9 @@ const REPO = git(["rev-parse", "--show-toplevel"], process.cwd()).trim();
 // `pnpm run <script> -- <args>` forwards the `--` itself, so drop it before
 // reading positionals.
 const argv = process.argv.slice(2).filter((a) => a !== "--");
-const [base, head = "HEAD"] = argv;
+const MD = argv.includes("--md");
+const positional = argv.filter((a) => a !== "--md");
+const [base, head = "HEAD"] = positional;
 
 if (base === undefined) {
   process.stderr.write("usage: measure:review-bundle -- <base> [head]\n");
@@ -66,16 +68,37 @@ for (const mode of ["review", "check"] as const) {
   ];
 
   const total = wire(det);
-  process.stdout.write(`## mode=${mode}\n\n`);
-  process.stdout.write(`${"component".padEnd(20)}${"wire B".padStart(12)}${"share".padStart(9)}\n`);
+
+  // `--md` emits the exact table the ADR quotes. Those numbers were
+  // hand-transcribed the first time and drifted; regenerating them is the fix.
   const rows = parts
     .map(([k, v]) => [k, wire(v)] as const)
     .sort((a, b) => b[1] - a[1]);
-  for (const [k, n] of rows) {
-    process.stdout.write(`${k.padEnd(20)}${String(n).padStart(12)}${`${((n / total) * 100).toFixed(1)}%`.padStart(9)}\n`);
+
+  if (MD) {
+    process.stdout.write(`\n### \`runDetPriors\` component sizes — \`${range}\`, mode=${mode}\n\n`);
+    process.stdout.write(`| component | wire B | share |\n| --- | ---: | ---: |\n`);
+  } else {
+    process.stdout.write(`## mode=${mode}\n\n`);
+    process.stdout.write(`${"component".padEnd(20)}${"wire B".padStart(12)}${"share".padStart(9)}\n`);
   }
-  process.stdout.write(`${"TOTAL DetPriors".padEnd(20)}${String(total).padStart(12)}${"100.0%".padStart(9)}\n`);
-  process.stdout.write(`${"TOTAL compact".padEnd(20)}${String(compact(det)).padStart(12)}\n`);
+
+  for (const [k, n] of rows) {
+    const share = `${((n / total) * 100).toFixed(1)}%`;
+    if (MD) {
+      process.stdout.write(`| \`${k}\` | ${n.toLocaleString("en-US")} | ${share} |\n`);
+    } else {
+      process.stdout.write(`${k.padEnd(20)}${String(n).padStart(12)}${share.padStart(9)}\n`);
+    }
+  }
+  const totalShare = "100.0%";
+  if (MD) {
+    process.stdout.write(`| **total \`DetPriors\`** | **${total.toLocaleString("en-US")}** | **${totalShare}** |\n`);
+    process.stdout.write(`| total, compact | ${compact(det).toLocaleString("en-US")} | — |\n`);
+  } else {
+    process.stdout.write(`${"TOTAL DetPriors".padEnd(20)}${String(total).padStart(12)}${totalShare.padStart(9)}\n`);
+    process.stdout.write(`${"TOTAL compact".padEnd(20)}${String(compact(det)).padStart(12)}\n`);
+  }
 
   const addedLineNumbers = det.changed.reduce((a, f) => a + f.addedLines.length, 0);
   const asArrays = wire(det.changed);

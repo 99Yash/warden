@@ -60,8 +60,13 @@ export const RunDetPriorsResultSchema = ReviewBundlePageSchema;
 const RunDetPriorsRequestSchema = z.discriminatedUnion("target", [
   z.strictObject({
     target: z.literal("diff"),
-    /** Unified diff text, as `git diff` would produce it. */
-    diff: z.string().min(1),
+    /**
+     * Unified diff text, as `git diff` would produce it. **May be empty** — a
+     * clean checkout yields `""`, and that is a legitimate "nothing to review",
+     * not an input error. Round 1 rejected it with `.min(1)`, which made an
+     * empty literal diff disagree with an empty git-resolved one.
+     */
+    diff: z.string(),
     /** `review` (default) selects context + banner; `check` is the working-tree mode. */
     mode: z.enum(["check", "review"]).default("review"),
     /** Findings per page. Clamped to `BUNDLE_LIMITS.findingsPerPage`. */
@@ -118,8 +123,11 @@ function invalidInput(detail: string): ToolResultEnvelope {
   return errorEnvelope(
     TOOL_NAME_RUN_DET_PRIORS,
     "invalid_input",
-    `Expected target "diff" ({ diff }), "base" ({ base }) for a first page, or "page" ` +
-      `({ reviewHandle, offset }) to continue one; got ${detail}`,
+    'Expected a { "request": { ... } } object. First page: ' +
+      '{ "request": { "target": "diff", "diff": "<unified diff>" } } or ' +
+      '{ "request": { "target": "base", "base": "<ref>" } }. ' +
+      'Continuation: { "request": { "target": "page", "reviewHandle": "<handle>", "offset": <n> } }. ' +
+      `Got: ${detail}`,
   );
 }
 
@@ -141,7 +149,9 @@ export async function runRunDetPriors(
       return errorEnvelope(
         TOOL_NAME_RUN_DET_PRIORS,
         "review_expired",
-        `No retained result for handle "${args.reviewHandle}". The server holds at most a few results and this one was evicted, or the server restarted. Re-issue the original { target: "diff" } or { target: "base" } request to start a new review.`,
+        `No retained result for handle "${args.reviewHandle}". The server holds at most a few results and this one was evicted, or the server restarted. Start a new review with ` +
+          `{ "request": { "target": "diff", "diff": "<unified diff>" } } or ` +
+          `{ "request": { "target": "base", "base": "<ref>" } }.`,
       );
     }
     return okEnvelope(

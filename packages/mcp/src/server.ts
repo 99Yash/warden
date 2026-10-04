@@ -72,11 +72,15 @@ function toolDefinitions(reviewCache: ReviewResultCache) {
       "consistency, scalability, deadcode, leverage, react-doctor) over a review target. Returns " +
       "the pruned changed-file set, the findings with their tier/category and citations, context " +
       "locators, and any degraded runners. This is ground truth, not a guess — a clean result is " +
-      "a real answer. First page: pass { diff } or { base }. Findings are paged — follow " +
-      "`nextOffset` by calling again with { reviewHandle, offset }, which re-reads the retained " +
-      "result without re-running detectors or re-resolving refs. Changed files carry " +
-      "`addedLineCount`, never the raw line list. `omissions` names every capped component with " +
-      "its exact shortfall; `unretrievable` marks entries too large to return at any page size.",
+      "a real answer.\n\n" +
+      "All arguments go inside a single `request` object. First page: " +
+      "{request:{target:\"diff\",diff:\"<unified diff>\"}} or {request:{target:\"base\",base:\"<ref>\"}}. " +
+      "Findings are paged — follow `nextOffset` with " +
+      "{request:{target:\"page\",reviewHandle:\"<handle>\",offset:<n>}}, which re-reads the retained " +
+      "result without re-running detectors or re-resolving refs.\n\n" +
+      "Changed files carry `addedLineCount`, never the raw line list. `omissions` names every " +
+      "capped component; `unretrievable` counts entries too large to return at any page size — " +
+      "those are skipped, not blocking, so paging still reaches everything else.",
     inputSchema: RunDetPriorsInputSchema,
     resultSchema: toolResultEnvelopeSchema(
       RunDetPriorsResultSchema,
