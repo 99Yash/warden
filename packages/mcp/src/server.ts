@@ -68,14 +68,15 @@ function toolDefinitions(reviewCache: ReviewResultCache) {
   {
     name: TOOL_NAME_RUN_DET_PRIORS,
     description:
-      "Run Warden's Phase 1 deterministic review (tsc, eslint, jscpd, security, consistency, " +
-      "scalability, deadcode, leverage, react-doctor) over a review target and return the pruned " +
-      "changed-file set, the findings with their tier/category and verified citations, context " +
-      "locators, and any degraded runners. This is ground truth, not a guess — a clean result is a " +
-      "real answer. Results are size-bounded per component: `findings` holds one page and " +
-      "`findingsTotal`/`nextOffset` page the rest, and `omissions` names anything capped. " +
-      "Changed files carry `addedLineCount`, never the raw line list. Call again with `offset` to " +
-      "continue paging; the server retains the result for the session.",
+      "Run Warden's Phase 1 deterministic review (tsc, eslint, jscpd, dependency/OSV audit, " +
+      "consistency, scalability, deadcode, leverage, react-doctor) over a review target. Returns " +
+      "the pruned changed-file set, the findings with their tier/category and citations, context " +
+      "locators, and any degraded runners. This is ground truth, not a guess — a clean result is " +
+      "a real answer. First page: pass { diff } or { base }. Findings are paged — follow " +
+      "`nextOffset` by calling again with { reviewHandle, offset }, which re-reads the retained " +
+      "result without re-running detectors or re-resolving refs. Changed files carry " +
+      "`addedLineCount`, never the raw line list. `omissions` names every capped component with " +
+      "its exact shortfall; `unretrievable` marks entries too large to return at any page size.",
     inputSchema: RunDetPriorsInputSchema,
     resultSchema: toolResultEnvelopeSchema(
       RunDetPriorsResultSchema,

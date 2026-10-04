@@ -174,14 +174,17 @@ export { toComment } from "./runners/to-comment.js";
 export {
   BUNDLE_LIMITS,
   REVIEW_BUNDLE_VERSION,
+  ReviewBundleBodySchema,
+  ReviewBundlePageSchema,
   buildReviewBundlePage,
-  computeReviewHandle,
+  projectBundleFindings,
   toBundleFinding,
   type BundleChangedFile,
   type BundleContextHandle,
   type BundleFinding,
   type BundleFindingLimits,
   type BundleOmission,
+  type ReviewBundleBody,
   type ReviewBundlePage,
 } from "./review-bundle.js";
 

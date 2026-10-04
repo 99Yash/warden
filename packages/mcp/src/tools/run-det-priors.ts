@@ -1,11 +1,8 @@
 import {
   buildReviewBundlePage,
-  computeReviewHandle,
   resolveDiff,
   runDetPriors,
-  type DegradedEntry,
-  type DetPriors,
-  type DiffMode,
+  ReviewBundlePageSchema,
 } from "@warden/core";
 import { z } from "zod";
 import {
@@ -23,107 +20,81 @@ import type { ReviewResultCache } from "../review-cache.js";
  * projects it through `buildReviewBundlePage` — the shared serializer in
  * `@warden/core`. There is no second bundle implementation here by
  * construction: the tier/category mapping and the citation envelope both come
- * from `toComment`, which is what the CLI already uses.
+ * from `toComment`, which is what the CLI already uses, and the wire schema is a
+ * re-bind of the core one rather than a copy.
  *
- * ## Sizing
+ * ## Two request shapes
  *
- * The result is bounded **by construction**, not by truncation. Each component
- * has a cap in `BUNDLE_LIMITS` and every capped component emits an entry in
- * `omissions` naming the total, so nothing vanishes without being reported.
+ * A **first page** names a review target (`diff`, or `base` for git). A
+ * **continuation** names the `reviewHandle` it was given. Continuations do not
+ * re-resolve refs and do not re-run detectors: `runDetPriors` shells out to
+ * `tsc`/`eslint`/`jscpd`, so paging by re-submitting the target would cost a full
+ * detector sweep per page *and* silently review whatever the refs point at now.
  *
- * The single most important property here is that `ChangedFile.addedLines` does
- * not cross the wire. Measured on this repo's own history, that one field was
- * **78%** of the entire Phase 1 payload — ~1.39 MB of bare JSON line-number
- * integers on a 332-file diff, versus 2,145 B for the same information as
- * per-file counts. Nothing outside warden reads it: its only consumers
- * (`scopeToDiff`, `scopeCommentsToDiff`) both run downstream inside warden.
+ * Round 0 found the first version keyed the cache on a `(repoRoot, diff)`
+ * fingerprint, which conflated request identity with result identity: two
+ * identical requests double-wrote one key, fixing the working tree and
+ * re-requesting returned the same handle with different contents, and advancing
+ * `HEAD` made a still-cached snapshot unreachable. The handle is now allocated
+ * per completed run and identifies exactly one immutable result.
  *
- * Retrieved context ships as `{path, lineStart, lineEnd}` locators rather than
- * snippets, for a second reason: core already caps retrieved context at 8
- * content-bearing chunks, so it was never the hazard — but locators also let a
- * client fetch the code it actually needs on demand instead of paying for 8
- * snippets it may never read.
+ * ## No `head` parameter
+ *
+ * Round 0 also caught that accepting a `head` ref manufactured false-cleans: git
+ * would supply that revision's diff while `tsc` and the file-reading detectors
+ * inspected the **current working tree**, so a request for a known-broken
+ * revision returned `status: "ok"` with zero findings. Supporting `head`
+ * correctly needs an isolated target checkout, which is real work and out of
+ * scope here, so the parameter is absent rather than present-and-wrong.
  */
 
-/** Wire schema for the bundle payload. Mirrors `buildReviewBundlePage`'s shape. */
-export const RunDetPriorsResultSchema = z.object({
-  schemaVersion: z.literal(1),
-  reviewHandle: z.string(),
-  findings: z.array(
-    z.object({
-      id: z.string(),
-      detector: z.string(),
-      file: z.string(),
-      lineStart: z.number().int().nonnegative(),
-      lineEnd: z.number().int().nonnegative(),
-      tier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-      category: z.string(),
-      claim: z.string(),
-      explanation: z.string(),
-      sources: z.array(z.record(z.string(), z.unknown())),
-      confidence: z.number().min(0).max(1),
-    }),
-  ),
-  findingsTotal: z.number().int().nonnegative(),
-  nextOffset: z.number().int().nonnegative().optional(),
-  changedFiles: z.array(
-    z.object({ path: z.string(), addedLineCount: z.number().int().nonnegative() }),
-  ),
-  changedFilesTotal: z.number().int().nonnegative(),
-  contextHandles: z.array(
-    z.object({
-      path: z.string(),
-      lineStart: z.number().int().nonnegative(),
-      lineEnd: z.number().int().nonnegative(),
-      reason: z.string(),
-      sourceType: z.string(),
-    }),
-  ),
-  degraded: z.array(
-    z.object({
-      kind: z.enum(["actionable", "warning", "info"]),
-      topic: z.string(),
-      message: z.string(),
-    }),
-  ),
-  findingsByCategory: z.record(z.string(), z.number()),
-  findingsByTier: z.record(z.string(), z.number()),
-  omissions: z
-    .array(
-      z.object({
-        component: z.enum(["changedFiles", "findings", "contextHandles", "degraded"]),
-        total: z.number().int().nonnegative(),
-        included: z.number().int().nonnegative(),
-        omitted: z.number().int().nonnegative(),
-        cursor: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
+/** Wire schema: a re-bind of the core owner, never a copy. */
+export const RunDetPriorsResultSchema = ReviewBundlePageSchema;
 
 /**
- * Input schema. A review target is either a literal `diff` or a `base`/`head`
- * ref pair resolved through core's `resolveDiff` — which owns the three-dot
- * merge-base semantics, so this tool does not re-derive them.
+ * Three request shapes behind an explicit `target` discriminator, rather than
+ * inferred from which fields are present. A model picking a shape from field
+ * presence alone reliably sends both `diff` and `base` at once; naming the shape
+ * makes the choice part of the request.
  */
-export const RunDetPriorsInputSchema = z
-  .object({
-    /** Unified diff text. Mutually exclusive with `base`. */
-    diff: z.string().optional(),
-    /** Base ref; diffed as `<base>...<head>`. */
-    base: z.string().optional(),
-    /** Right-hand ref. Defaults to `HEAD`. Ignored when `diff` is supplied. */
-    head: z.string().optional(),
+const RunDetPriorsRequestSchema = z.discriminatedUnion("target", [
+  z.strictObject({
+    target: z.literal("diff"),
+    /** Unified diff text, as `git diff` would produce it. */
+    diff: z.string().min(1),
     /** `review` (default) selects context + banner; `check` is the working-tree mode. */
     mode: z.enum(["check", "review"]).default("review"),
     /** Findings per page. Clamped to `BUNDLE_LIMITS.findingsPerPage`. */
     limit: z.number().int().positive().optional(),
-    /** Paging offset from a previous page's `nextOffset`. Omit for the first page. */
-    offset: z.number().int().nonnegative().optional(),
-  })
-  .refine((v) => (v.diff === undefined) !== (v.base === undefined), {
-    message: "Provide exactly one of `diff` or `base`",
-  });
+  }),
+  z.strictObject({
+    target: z.literal("base"),
+    /** Base ref; diffed as `<base>...HEAD`. */
+    base: z.string().min(1),
+    mode: z.enum(["check", "review"]).default("review"),
+    limit: z.number().int().positive().optional(),
+  }),
+  z.strictObject({
+    target: z.literal("page"),
+    /** Handle from a previous page. Addresses one immutable retained result. */
+    reviewHandle: z.string().min(1),
+    /** The `nextOffset` a previous page returned. */
+    offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive().optional(),
+  }),
+]);
+
+/**
+ * Wrapped in a single-property object rather than exposed as the union directly,
+ * because MCP requires `inputSchema.type === "object"` at the root (the SDK
+ * validates listings against `ToolSchema`) and a bare `discriminatedUnion`
+ * serializes with no root `type`. The nesting is what lets the wire schema keep
+ * the discriminated union — and therefore keep runtime validation of which
+ * fields belong together — while still satisfying the protocol.
+ */
+export const RunDetPriorsInputSchema = z.strictObject({
+  request: RunDetPriorsRequestSchema,
+});
 
 export type RunDetPriorsInput = z.infer<typeof RunDetPriorsInputSchema>;
 
@@ -132,25 +103,24 @@ export interface RunDetPriorsDeps {
 }
 
 /**
- * Cursor lookup. Returns the retained result for a handle, or a degraded
- * `review_expired` envelope naming the recovery. Split out so the eviction path
- * is testable without a live client.
+ * Allocate an id for one immutable retained result.
+ *
+ * Not derived from the request: two runs of the same target are two results, and
+ * collapsing them would let a later run silently replace the pages of a review
+ * already in progress. The id only has to be unique within this server process,
+ * which the cache's own keying guarantees.
  */
-function resolveCursor(
-  deps: RunDetPriorsDeps,
-  handle: string,
-): { det: DetPriors } | { envelope: ToolResultEnvelope } {
-  const det = deps.cache.get(handle);
-  if (det === undefined) {
-    return {
-      envelope: errorEnvelope(
-        TOOL_NAME_RUN_DET_PRIORS,
-        "review_expired",
-        `No retained result for handle "${handle}". The server holds at most a few results and this one was evicted, or the server restarted since the first page. Re-issue the original request without \`offset\`.`,
-      ),
-    };
-  }
-  return { det };
+function newReviewHandle(): string {
+  return `rb_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+function invalidInput(detail: string): ToolResultEnvelope {
+  return errorEnvelope(
+    TOOL_NAME_RUN_DET_PRIORS,
+    "invalid_input",
+    `Expected target "diff" ({ diff }), "base" ({ base }) for a first page, or "page" ` +
+      `({ reviewHandle, offset }) to continue one; got ${detail}`,
+  );
 }
 
 export async function runRunDetPriors(
@@ -160,33 +130,52 @@ export async function runRunDetPriors(
 ): Promise<ToolResultEnvelope> {
   const parsed = RunDetPriorsInputSchema.safeParse(input);
   if (!parsed.success) {
-    return errorEnvelope(
+    return invalidInput(parsed.error.message);
+  }
+  const args = parsed.data.request;
+
+  // ---- continuation -------------------------------------------------------
+  if (args.target === "page") {
+    const det = deps.cache.get(args.reviewHandle);
+    if (det === undefined) {
+      return errorEnvelope(
+        TOOL_NAME_RUN_DET_PRIORS,
+        "review_expired",
+        `No retained result for handle "${args.reviewHandle}". The server holds at most a few results and this one was evicted, or the server restarted. Re-issue the original { target: "diff" } or { target: "base" } request to start a new review.`,
+      );
+    }
+    return okEnvelope(
       TOOL_NAME_RUN_DET_PRIORS,
-      "invalid_input",
-      `Expected { diff } or { base, head?, mode?, limit?, offset? }; got ${parsed.error.message}`,
+      buildReviewBundlePage(
+        det,
+        args.reviewHandle,
+        args.offset,
+        args.limit === undefined ? {} : { limit: args.limit },
+      ),
     );
   }
-  const { diff: literalDiff, base, head, mode, limit, offset } = parsed.data;
 
-  // Resolve the diff text, then key retention on (repoRoot, diff) so an
-  // identical re-request is idempotent instead of a second cache entry.
+  // ---- first page: resolve the target -------------------------------------
   let diffText: string;
   let diffBase: { baseRef?: string; description: string } | undefined;
-  const extraDegraded: DegradedEntry[] = [];
-  if (literalDiff !== undefined) {
-    diffText = literalDiff;
+
+  if (args.target === "diff") {
+    diffText = args.diff;
   } else {
-    const resolved = await resolveDiff({
-      repoRoot,
-      mode: mode as DiffMode,
-      ...(base === undefined ? {} : { baseRef: base }),
-      ...(head === undefined ? {} : { headRef: head }),
-    });
-    if (resolved.diff === "") {
-      // A git failure degrades to an empty diff plus an actionable entry, so
-      // the review still returns a well-formed empty result explaining itself
-      // rather than a bare protocol error.
-      if (resolved.degraded) extraDegraded.push(...resolved.degraded);
+    const resolved = await resolveDiff({ repoRoot, mode: args.mode, baseRef: args.base });
+    // A git failure is a **failed target**, not an empty review. Round 0 caught
+    // this returning `status: "ok"` with zero findings and the failure buried in
+    // an info entry — indistinguishable from a clean repo, which is the
+    // silent-false-clean shape issue #29 is about. So it fails here, before any
+    // detector runs, and the reason rides the envelope.
+    //
+    // `resolveDiff` sets `degraded` only when git itself failed, so there is no
+    // merge-with-partial-warnings case to handle on the success path.
+    if (resolved.degraded) {
+      return errorEnvelope(
+        TOOL_NAME_RUN_DET_PRIORS,
+        "invalid_input",
+        `Could not resolve the review target: ${resolved.description}. ${resolved.degraded.map((d) => d.message).join(" ")}`,      );
     }
     diffText = resolved.diff;
     diffBase = {
@@ -195,24 +184,15 @@ export async function runRunDetPriors(
     };
   }
 
-  const handle = computeReviewHandle(repoRoot, diffText);
-
-  // Paging path: reuse the retained result, do not re-run detectors.
-  if (offset !== undefined) {
-    const found = resolveCursor(deps, handle);
-    if ("envelope" in found) return found.envelope;
-    return okEnvelope(TOOL_NAME_RUN_DET_PRIORS, buildReviewBundlePage(found.det, handle, offset, limit === undefined ? {} : { limit }));
-  }
-
-  const det = await runDetPriors({ diff: diffText, repoRoot, mode: mode as DiffMode, diffBase });
+  const det = await runDetPriors({ diff: diffText, repoRoot, mode: args.mode, diffBase });
+  // One handle per completed run. Not derived from the target: two runs of the
+  // same diff are two results, and keying on the request would let a later run
+  // silently replace the pages of a review already in progress.
+  const handle = newReviewHandle();
   deps.cache.set(handle, det);
 
-  const merged =
-    extraDegraded.length === 0
-      ? det
-      : { ...det, degraded: [...extraDegraded, ...det.degraded] };
   return okEnvelope(
     TOOL_NAME_RUN_DET_PRIORS,
-    buildReviewBundlePage(merged, handle, 0, limit === undefined ? {} : { limit }),
+    buildReviewBundlePage(det, handle, 0, args.limit === undefined ? {} : { limit: args.limit }),
   );
 }

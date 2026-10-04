@@ -59,10 +59,9 @@ export const TOOL_ERROR_REASONS = [
   /**
    * A paging cursor referenced a Phase 1 result the server no longer holds —
    * evicted from the bounded LRU, or the server restarted since the first page.
-   * Distinct from `internal_error` because the recovery is known and cheap:
-   * re-issue the original request without a cursor. `runDetPriors` shells out
-   * to `tsc`/`eslint`/`jscpd`, so the re-run is not free, which is why the
-   * cursor rides a retained result at all.
+   * Carries `isError: true`: the page was not delivered. `runDetPriors` shells
+   * out to `tsc`/`eslint`/`jscpd`, so the recovery (re-issue the original target)
+   * is not free, which is why the cursor rides a retained result at all.
    */
   "review_expired",
   "internal_error",
@@ -177,13 +176,14 @@ export function envelopeToContent(
     structuredContent: serialized,
     // Domain negatives completed the lookup. Operational failures should drive
     // standard MCP client recovery; isError does not discard recovery content.
-    // `review_expired` is a domain negative: the server knows exactly why the
-    // page is gone and the recovery (re-issue without a cursor) is cheap to
-    // state, so it rides the same non-error path as a missing symbol.
+    //
+    // `review_expired` is deliberately NOT in the non-error list. Round 0 argued
+    // the other way and won: unlike determining a symbol is absent — a complete
+    // answer — an expired cursor means the requested page was never delivered.
+    // That is failed tool execution, and reporting it as success is how a client
+    // ends up treating "I could not fetch the rest" as "there was nothing else."
     isError:
       serialized.status === "error" &&
-      !["package_not_installed", "no_types", "symbol_not_found", "review_expired"].includes(
-        serialized.reason,
-      ),
+      !["package_not_installed", "no_types", "symbol_not_found"].includes(serialized.reason),
   };
 }

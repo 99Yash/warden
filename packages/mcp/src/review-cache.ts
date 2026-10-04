@@ -37,23 +37,34 @@ export interface ReviewResultCache {
 
 export const DEFAULT_REVIEW_CACHE_CAPACITY = 4;
 
+/**
+ * Insertion-ordered `Map`, which gives O(1) move-to-end via delete+set and O(1)
+ * identification of the least-recently-used entry as the first key.
+ */
 export function createReviewResultCache(
   capacity: number = DEFAULT_REVIEW_CACHE_CAPACITY,
 ): ReviewResultCache {
-  // Map preserves insertion order, which is what makes the eviction below a
-  // plain LRU: re-inserting on read would need a second structure.
   const entries = new Map<string, DetPriors>();
   const max = Math.max(1, Math.trunc(capacity));
 
+  /** Move `handle` to the newest slot; plain insertion for a key not held. */
+  const touch = (handle: string, det: DetPriors): void => {
+    entries.delete(handle);
+    entries.set(handle, det);
+  };
+
   return {
     get(handle) {
-      return entries.get(handle);
+      const det = entries.get(handle);
+      // Promote on read. Without this the cache is FIFO and the entry a client is
+      // actively paging — the one it keeps asking for — is the first evicted.
+      // Round 0 probed exactly that: capacity 2, `set(A) set(B) get(A) set(C)`
+      // discarded A, the live review.
+      if (det !== undefined) touch(handle, det);
+      return det;
     },
     set(handle, det) {
-      // Delete-then-set so an overwrite of the live key moves it to the
-      // newest slot instead of keeping its original insertion position.
-      entries.delete(handle);
-      entries.set(handle, det);
+      touch(handle, det);
       while (entries.size > max) {
         const oldest = entries.keys().next();
         if (oldest.done === true) break;

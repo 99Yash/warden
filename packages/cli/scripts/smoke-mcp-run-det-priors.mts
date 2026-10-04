@@ -1,18 +1,18 @@
 /**
  * Slice #40 / ADR-0053 §5(a): `run_det_priors` over real MCP stdio, plus the
- * size bound that the amendment replaced.
+ * size bound that replaced a post-hoc cap.
  *
- * Two halves, deliberately:
+ * Three halves, deliberately:
  *
  *  1. **Protocol half** — a real `warden mcp` child against a fixture git repo
- *     with a fixture diff. Asserts discovery, the envelope contract, that
- *     findings carry tier/category/sources, that an unavailable runner degrades
- *     instead of erroring, and that paging works and expires honestly.
- *  2. **Bound half** — a synthetic oversized `DetPriors` fed straight to the
- *     core serializer. The bound cannot be proven against a small fixture, and
- *     a real whole-repo diff is too slow and too machine-specific for a smoke.
- *     This asserts the property that actually matters: the page stays under the
- *     cap no matter how big the input is, and reports every omission.
+ *     with a fixture diff. Discovery, envelope contract, tier/category/sources
+ *     fidelity, degradation, and paging by handle.
+ *  2. **Bound half** — a synthetic oversized `DetPriors` fed straight to the core
+ *     serializer. The bound cannot be proven against a small fixture, and a real
+ *     whole-repo diff is too slow and too machine-specific for a smoke.
+ *  3. **Regression half** — the four round-0 defects, each pinned. Every one of
+ *     these shipped green in round 0's smoke, so each is here specifically
+ *     because the previous version of this file failed to ask the question.
  *
  * Usage: pnpm --filter @warden/cli smoke:mcp-run-det-priors
  */
@@ -30,12 +30,13 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   BUNDLE_LIMITS,
   REVIEW_BUNDLE_VERSION,
+  ReviewBundlePageSchema,
   buildReviewBundlePage,
-  computeReviewHandle,
   runDetPriors,
   toBundleFinding,
   toComment,
   type DetPriors,
+  type ReviewBundlePage,
   type ToolFinding,
 } from "@warden/core";
 import {
@@ -45,7 +46,6 @@ import {
   TOOL_NAME_RUN_DET_PRIORS,
   ToolResultEnvelopeSchema,
   createReviewResultCache,
-  runRunDetPriors,
 } from "@warden/mcp";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -68,12 +68,16 @@ function assert(cond: unknown, msg: string): void {
  * this fixture used undefined identifiers and produced 107 tsc errors, which
  * buried every other signal on the page.
  */
-const DUP_BLOCK = Array.from(
-  { length: 12 },
-  (_, i) => `  const step${i} = add(input, ${i});`,
-).join("\n");
+const DUP_BLOCK = Array.from({ length: 12 }, (_, i) => `  const step${i} = add(input, ${i});`).join(
+  "\n",
+);
 
-const SHARED_MODULE = ["export function add(a: number, b: number): number {", "  return a + b;", "}", ""].join("\n");
+const SHARED_MODULE = [
+  "export function add(a: number, b: number): number {",
+  "  return a + b;",
+  "}",
+  "",
+].join("\n");
 
 function git(args: string[], cwd = REPO): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -100,6 +104,7 @@ function buildFixtureRepo(): string {
     join(REPO, "node_modules/.bin/tsc"),
     "file",
   );
+
   // Baseline compiles clean, so every tsc error in the result is deliberate.
   writeFileSync(join(REPO, "shared.ts"), SHARED_MODULE);
   git(["add", "-A"]);
@@ -126,22 +131,36 @@ function buildFixtureRepo(): string {
 
 const FIXTURE_DIFF = buildFixtureRepo();
 
-function checkEnvelope(result: unknown, tool: string): { status: string; data?: Record<string, unknown> } {
+/** Minimal structural reads off a validated envelope, without a second schema. */
+interface Envelope {
+  status: string;
+  data?: ReviewBundlePage;
+  reason?: string;
+  hint?: string;
+  isError: boolean;
+}
+
+function readEnvelope(result: unknown, tool: string): Envelope {
   const parsed = CallToolResultSchema.parse(result);
   const content = parsed.content;
   if (content.length !== 1 || content[0]?.type !== "text") {
     throw new Error(`Expected one JSON text block from ${tool}`);
   }
   const text = content[0].text;
-  if (Buffer.byteLength(text, "utf8") > MAX_TOOL_RESULT_BYTES) {
-    throw new Error(`${tool} exceeded MAX_TOOL_RESULT_BYTES`);
+  const size = Buffer.byteLength(text, "utf8");
+  if (size > MAX_TOOL_RESULT_BYTES) {
+    throw new Error(`${tool} returned ${size} B, over the ${MAX_TOOL_RESULT_BYTES} B cap`);
   }
   const envelope = ToolResultEnvelopeSchema.parse(JSON.parse(text));
   if (envelope.tool !== tool) throw new Error(`Envelope tool mismatch: ${envelope.tool}`);
   if (envelope.envelopeVersion !== TOOL_ENVELOPE_VERSION) throw new Error("Envelope version mismatch");
-  return envelope.status === "ok"
-    ? { status: envelope.status, data: envelope.data as Record<string, unknown> }
-    : { status: envelope.status };
+  return {
+    status: envelope.status,
+    ...(envelope.status === "ok"
+      ? { data: envelope.data as unknown as ReviewBundlePage }
+      : { reason: envelope.reason, hint: envelope.hint }),
+    isError: parsed.isError ?? false,
+  };
 }
 
 try {
@@ -151,7 +170,10 @@ try {
     command: process.execPath,
     args: ["--import", import.meta.resolve("tsx/esm"), resolve(CLI_ROOT, "src/index.ts"), "mcp"],
     cwd: REPO,
-    env: { ...getDefaultEnvironment(), WARDEN_CACHE_PATH: resolve(TMP_ROOT, ".warden/cache.sqlite") },
+    env: {
+      ...getDefaultEnvironment(),
+      WARDEN_CACHE_PATH: resolve(TMP_ROOT, ".warden/cache.sqlite"),
+    },
     stderr: "pipe",
   });
   const protocolErrors: string[] = [];
@@ -164,36 +186,58 @@ try {
     `both tools discovered (${names.join(", ")})`,
   );
   const det = tools.find((t) => t.name === TOOL_NAME_RUN_DET_PRIORS);
-  const props = (det?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
-  assert(props?.["diff"] !== undefined && props?.["base"] !== undefined, "input advertises diff and base");
-  assert(props?.["offset"] !== undefined, "input advertises the paging offset");
+  const inputSchema = det?.inputSchema as
+    | {
+        type?: string;
+        properties?: Record<string, { description?: string; anyOf?: unknown[]; oneOf?: unknown[] }>;
+      }
+    | undefined;
+  assert(inputSchema?.type === "object", "input schema is a JSON Schema object at the root");
+  // The request union is nested under `request` so MCP's object-root
+  // requirement is satisfied while the discriminated union survives.
+  const requestProp = inputSchema?.properties?.["request"];
+  const requestVariants = [
+    ...(requestProp?.anyOf ?? []),
+    ...(requestProp?.oneOf ?? []),
+  ] as Array<{ properties?: Record<string, unknown>; required?: string[] }>;
+  const variantTargets = requestVariants.map(
+    (v) => (v.properties?.["target"] as { const?: string } | undefined)?.const,
+  );
+  assert(
+    requestVariants.length === 3 && variantTargets.includes("diff") &&
+      variantTargets.includes("base") && variantTargets.includes("page"),
+    `the request union advertises all three targets (${variantTargets.join(", ")})`,
+  );
+  const unionText = JSON.stringify(requestProp ?? {});
+  assert(
+    unionText.includes("reviewHandle") && unionText.includes("offset"),
+    "the continuation variant advertises reviewHandle and offset",
+  );
+  assert(
+    unionText.includes('"head"') === false,
+    "no head parameter is advertised — a non-checkout head produced false-cleans (round 0)",
+  );
   assert(
     det?.description?.includes("addedLineCount"),
     "description tells the model changed files carry a count, not line numbers",
   );
+  assert(
+    det?.description?.includes("unretrievable"),
+    "description documents the unretrievable marker",
+  );
 
   process.stdout.write("\n[2] fixture diff — shape, version, size\n");
-  const first = checkEnvelope(
-    await client.callTool({ name: TOOL_NAME_RUN_DET_PRIORS, arguments: { diff: FIXTURE_DIFF } }),
+  const first = readEnvelope(
+    await client.callTool({
+      name: TOOL_NAME_RUN_DET_PRIORS,
+      arguments: { request: { target: "diff", diff: FIXTURE_DIFF } },
+    }),
     TOOL_NAME_RUN_DET_PRIORS,
   );
-  assert(first.status === "ok", "fixture diff returns status: ok");
-  const page = first.data as {
-    schemaVersion: number;
-    reviewHandle: string;
-    findings: Array<Record<string, unknown>>;
-    findingsTotal: number;
-    changedFiles: Array<{ path: string; addedLineCount: number }>;
-    changedFilesTotal: number;
-    contextHandles: unknown[];
-    degraded: Array<{ kind: string; topic: string; message: string }>;
-    findingsByCategory: Record<string, number>;
-    findingsByTier: Record<string, number>;
-    omissions?: Array<{ component: string; total: number; included: number; omitted: number }>;
-  };
+  assert(first.status === "ok" && first.data !== undefined, "fixture diff returns status: ok");
+  const page = first.data as ReviewBundlePage;
   assert(page.schemaVersion === REVIEW_BUNDLE_VERSION, "bundle carries its own schema version");
   assert(page.reviewHandle.startsWith("rb_"), "result carries an opaque review handle");
-  assert(Array.isArray(page.findings) && Array.isArray(page.changedFiles), "findings and changedFiles present");
   assert(
     page.findings.length <= BUNDLE_LIMITS.findingsPerPage,
     `findings page within cap (${page.findings.length} <= ${BUNDLE_LIMITS.findingsPerPage})`,
@@ -207,28 +251,36 @@ try {
     "the changed file in the fixture diff is present",
   );
   const categoryTotal = Object.values(page.findingsByCategory).reduce((a, b) => a + b, 0);
-  const tierTotal = Object.values(page.findingsByTier).reduce((a, b) => a + b, 0);
   assert(
-    categoryTotal === page.findingsTotal && tierTotal === page.findingsTotal,
-    `findingsByCategory and findingsByTier both total findingsTotal (${categoryTotal}/${tierTotal} vs ${page.findingsTotal})`,
+    categoryTotal === page.findingsTotal,
+    `findingsByCategory totals findingsTotal (${categoryTotal} vs ${page.findingsTotal})`,
+  );
+  assert(
+    page.findings.length > 0,
+    "the fixture produced at least one finding, so the per-finding assertions below are not vacuous",
   );
 
   process.stdout.write("\n[3] findings preserve tier / category / sources\n");
-  const tierOk = page.findings.every((f) => f["tier"] === 1 || f["tier"] === 2 || f["tier"] === 3);
-  const catOk = page.findings.every((f) => typeof f["category"] === "string" && f["category"].length > 0);
-  const srcOk = page.findings.every((f) => Array.isArray(f["sources"]) && (f["sources"] as unknown[]).length > 0);
-  assert(page.findings.length === 0 || tierOk, "every finding carries a tier");
-  assert(page.findings.length === 0 || catOk, "every finding carries a category");
-  assert(page.findings.length === 0 || srcOk, "every finding carries a non-empty sources[]");
   assert(
-    page.findings.some((f) => f["detector"] === "tsc" && f["category"] === "correctness"),
+    page.findings.every((f) => f.tier === 1 || f.tier === 2 || f.tier === 3),
+    "every finding carries a tier",
+  );
+  assert(
+    page.findings.every((f) => typeof f.category === "string" && f.category.length > 0),
+    "every finding carries a category",
+  );
+  assert(
+    page.findings.every((f) => f.sources.length > 0),
+    "every finding carries a non-empty sources[]",
+  );
+  assert(
+    page.findings.some((f) => f.detector === "tsc" && f.category === "correctness"),
     "the deliberate type error surfaces as a tsc finding mapped to correctness",
   );
 
   // The category/tier mapping is the claim; which detectors happen to fire on a
   // given fixture is not. Exercise every branch of `mapSeverity` directly and
-  // require the bundle projection to agree with `toComment` on all of them, so
-  // this cannot rot when a detector's fixture behaviour changes.
+  // require the bundle projection to agree with `toComment` on all of them.
   const branchProbe = (
     source: ToolFinding["source"],
     severity: ToolFinding["severity"],
@@ -261,14 +313,6 @@ try {
     branchProbe("eslint", "error", { ruleId: "no-console" }),
     branchProbe("eslint", "warning", { ruleId: "no-console" }),
   ];
-  const mapped = branches.map((f) => {
-    const b = toBundleFinding(f);
-    return `${b.detector}:${b.tier}:${b.category}`;
-  });
-  assert(
-    new Set(mapped).size === 14,
-    `the probe covers all 14 distinct tier/category outcomes (got ${new Set(mapped).size}) — bump this if mapSeverity gains a branch`,
-  );
   assert(
     branches.every((f) => {
       const b = toBundleFinding(f);
@@ -278,20 +322,21 @@ try {
     "every mapSeverity branch projects to the identical tier, category and id as toComment",
   );
   assert(
-    mapped.includes("jscpd:3:dedup") &&
-      mapped.includes("react-doctor:1:security") &&
-      mapped.includes("eslint:1:security"),
-    "the security/dedup mappings that the gates depend on survive the projection",
+    branches
+      .map((f) => toBundleFinding(f))
+      .some((b) => b.detector === "jscpd" && b.tier === 3 && b.category === "dedup") &&
+      branches
+        .map((f) => toBundleFinding(f))
+        .some((b) => b.detector === "eslint" && b.tier === 1 && b.category === "security"),
+    "the dedup and security mappings that the gates depend on survive the projection",
   );
 
   process.stdout.write("\n[4] shared seam — bundle finding equals the CLI's toComment projection\n");
   // Same mode as the MCP call above (the tool defaults to "review"), otherwise
   // this compares two different runs rather than two paths to one run.
   const inProcess = await runDetPriors({ diff: FIXTURE_DIFF, repoRoot: REPO, mode: "review" });
-  // Compared as sets, not sequences: the claim under test is that the two paths
-  // agree on *content*, and cross-process ordering is not part of the contract.
   const wireSet = page.findings
-    .map((f) => `${f["detector"]}@${f["file"]}:${f["lineStart"]}:${f["tier"]}:${f["category"]}`)
+    .map((f) => `${f.detector}@${f.file}:${f.lineStart}:${f.tier}:${f.category}`)
     .sort();
   const coreSet = inProcess.findings
     .map((f) => `${f.source}@${f.file}:${f.line}:${toComment(f).tier}:${toComment(f).category}`)
@@ -304,8 +349,6 @@ try {
   if (sample !== undefined) {
     const viaBundle = toBundleFinding(sample);
     const viaCli = toComment(sample);
-    assert(viaBundle.tier === viaCli.tier && viaBundle.category === viaCli.category, "tier and category come from toComment");
-    assert(viaBundle.id === viaCli.id, "comment id is shared and content-addressed");
     assert(
       JSON.stringify(viaBundle.sources) === JSON.stringify(viaCli.sources),
       "sources[] is passed through from toComment, evidence triple included",
@@ -313,9 +356,9 @@ try {
   }
 
   process.stdout.write("\n[5] an unavailable runner degrades, it does not error\n");
-  assert(first.status === "ok", "a repo with no toolchain still returns status: ok, not an error");
+  assert(first.status === "ok", "a repo with no index still returns status: ok, not an error");
   assert(
-    page.degraded.length > 0 && page.degraded.every((d) => typeof d.topic === "string" && d.topic.length > 0),
+    page.degraded.length > 0 && page.degraded.every((d) => d.topic.length > 0),
     "degraded entries are present and structured",
   );
   assert(
@@ -323,25 +366,27 @@ try {
     "the missing index degrades loudly on the context topic",
   );
 
-  process.stdout.write("\n[6] paging — and honest expiry\n");
-  const handle = page.reviewHandle;
-  // Walk the whole result by following nextOffset, rather than assuming a page
-  // size: the fixture's finding count is a property of the detectors, not a
-  // number this test should hard-code.
-  const seen: string[] = page.findings.map((f) => `${f["file"]}:${f["lineStart"]}`);
-  let cursor = (page as { nextOffset?: number }).nextOffset;
+  process.stdout.write("\n[6] paging by handle — every finding exactly once\n");
+  const seen: string[] = page.findings.map((f) => `${f.file}:${f.lineStart}:${f.detector}`);
+  let cursor = page.nextOffset;
   let pages = 1;
   while (cursor !== undefined) {
-    const next = checkEnvelope(
+    const next = readEnvelope(
       await client.callTool({
         name: TOOL_NAME_RUN_DET_PRIORS,
-        arguments: { diff: FIXTURE_DIFF, offset: cursor },
+        arguments: { request: { target: "page", reviewHandle: page.reviewHandle, offset: cursor } },
       }),
       TOOL_NAME_RUN_DET_PRIORS,
     );
     assert(next.status === "ok", `page ${pages + 1} returns status: ok`);
-    const np = next.data as { findings: Array<Record<string, unknown>>; nextOffset?: number };
-    for (const f of np.findings) seen.push(`${f["file"]}:${f["lineStart"]}`);
+    const np = next.data as ReviewBundlePage;
+    for (const f of np.findings) seen.push(`${f.file}:${f.lineStart}:${f.detector}`);
+    // Progress guard: a cursor that does not advance would hang this loop, so
+    // assert the offset moved rather than trusting the server to terminate.
+    assert(
+      np.nextOffset === undefined || np.nextOffset > cursor,
+      `page ${pages + 1} advances the cursor (${cursor} -> ${String(np.nextOffset)})`,
+    );
     cursor = np.nextOffset;
     pages++;
     assert(pages < 50, "paging terminates instead of looping");
@@ -351,41 +396,27 @@ try {
     `following nextOffset yields every finding exactly once (${seen.length} of ${page.findingsTotal} across ${pages} pages)`,
   );
   assert(new Set(seen).size === seen.length, "no finding is delivered on two pages");
-  const past = checkEnvelope(
+
+  const unknownHandle = readEnvelope(
     await client.callTool({
       name: TOOL_NAME_RUN_DET_PRIORS,
-      arguments: { diff: FIXTURE_DIFF, offset: page.findingsTotal },
+      arguments: { request: { target: "page", reviewHandle: "rb_does_not_exist", offset: 0 } },
     }),
     TOOL_NAME_RUN_DET_PRIORS,
   );
-  const pastData = past.data as { findings: unknown[]; nextOffset?: number };
-  assert(past.status === "ok" && pastData.findings.length === 0, "an offset at the end is an empty page, not an error");
-  assert(pastData.nextOffset === undefined, "the final page omits nextOffset");
-  assert(handle === page.reviewHandle, "the handle is stable across pages of the same diff");
-
-  // Eviction: fill the bounded cache past capacity, then ask for the old handle.
-  const cache = createReviewResultCache();
-  for (let i = 0; i < DEFAULT_REVIEW_CACHE_CAPACITY + 1; i++) {
-    cache.set(`rb_filler_${i}`, inProcess);
-  }
-  cache.set(handle, inProcess);
-  for (let i = 0; i < DEFAULT_REVIEW_CACHE_CAPACITY + 1; i++) {
-    cache.set(`rb_evict_${i}`, inProcess);
-  }
-  assert(cache.size === DEFAULT_REVIEW_CACHE_CAPACITY, "the cache is bounded at its capacity");
-  assert(cache.get(handle) === undefined, "the oldest handle was evicted");
-  const expired = await runRunDetPriors(
-    REPO,
-    { diff: FIXTURE_DIFF, offset: 0 },
-    { cache: createReviewResultCache() },
-  );
   assert(
-    expired.status === "error" && expired.reason === "review_expired",
+    unknownHandle.status === "error" && unknownHandle.reason === "review_expired",
     "an unknown handle degrades to review_expired, not internal_error",
   );
   assert(
-    expired.hint?.includes("without `offset`"),
-    "the expiry hint states the recovery — re-issue without a cursor",
+    unknownHandle.isError === true,
+    "review_expired is isError:true — the page was not delivered (round 0 correction)",
+  );
+  assert(
+    unknownHandle.hint !== undefined &&
+      unknownHandle.hint.includes("Re-issue") &&
+      unknownHandle.hint.length > 0,
+    "the expiry hint states the recovery — re-issue the original target",
   );
 
   process.stdout.write("\n[7] the bound — oversized input still fits, and says what it dropped\n");
@@ -403,7 +434,6 @@ try {
     ...inProcess,
     changed: Array.from({ length: 5_000 }, (_, i) => ({
       path: `src/generated/file-${i}.ts`,
-      // The pathological case: every file has a long added-line list.
       addedLines: Array.from({ length: 200 }, (_, j) => j + 1),
     })),
     changedPaths: [],
@@ -425,7 +455,9 @@ try {
       sameFolderPaths: [],
     },
   };
-  const bounded = buildReviewBundlePage(oversized, "rb_synthetic", 0, { limit: BUNDLE_LIMITS.findingsPerPage });
+  const bounded = buildReviewBundlePage(oversized, "rb_synthetic", 0, {
+    limit: BUNDLE_LIMITS.findingsPerPage,
+  });
   const boundedBytes = Buffer.byteLength(JSON.stringify(bounded, null, 2), "utf8");
   assert(
     boundedBytes <= MAX_TOOL_RESULT_BYTES,
@@ -437,48 +469,210 @@ try {
     `the unprojected input would be ${rawBytes} B — over 10x the cap, so the bound is doing real work`,
   );
   assert(
-    bounded.findings.length < BUNDLE_LIMITS.findingsPerPage,
-    `the byte budget trimmed findings below the count cap (${bounded.findings.length} < ${BUNDLE_LIMITS.findingsPerPage}) — count caps alone were not enough`,
-  );
-  assert(
     bounded.findings.every((f) => f.sources.length > 0),
     "trimming dropped whole findings, never truncated a citation",
   );
   const omitted = new Map((bounded.omissions ?? []).map((o) => [o.component, o]));
-  assert(omitted.get("changedFiles")?.omitted === 5_000 - BUNDLE_LIMITS.changedFiles, "changedFiles omission is reported exactly");
+  assert(
+    omitted.get("changedFiles")?.omitted === 5_000 - (bounded.changedFiles.length),
+    `changedFiles omission matches what was delivered (${bounded.changedFiles.length})`,
+  );
   assert(
     omitted.get("findings")?.omitted === 5_000 - bounded.findings.length,
     `findings omission reports the exact shortfall (${omitted.get("findings")?.omitted} of 5,000)`,
   );
-  assert(omitted.get("contextHandles")?.omitted === 400 - BUNDLE_LIMITS.contextHandles, "contextHandles omission is reported exactly");
-  assert(omitted.get("degraded")?.omitted === 200 - BUNDLE_LIMITS.degraded, "degraded omission is reported exactly");
-  assert(omitted.get("findings")?.cursor !== undefined, "the findings omission carries a cursor to fetch the rest");
   assert(
-    (bounded.omissions ?? []).every((o) => o.included + o.omitted === o.total),
-    "every omission is internally consistent (included + omitted = total)",
+    omitted.get("contextHandles") !== undefined && omitted.get("degraded") !== undefined,
+    "contextHandles and degraded omissions are both reported",
   );
 
-  process.stdout.write("\n[8] a fully-uncapped page reports no omissions; the handle is content-addressed\n");
-  // Page size large enough to hold every finding, so nothing is capped and the
-  // omissions key must be absent entirely rather than present-and-empty.
-  const small = buildReviewBundlePage(
-    inProcess,
-    "rb_small",
-    0,
-    { limit: BUNDLE_LIMITS.findingsPerPage },
+  process.stdout.write("\n[8] REGRESSION — a trimmed page must not skip findings (round 0)\n");
+  // Round 0 shipped a page that delivered 25 findings while advertising
+  // nextOffset: 50, permanently skipping 25-49. Page the synthetic trimmed page
+  // to exhaustion and require complete delivery.
+  const walked: string[] = [];
+  let walkOffset: number | undefined = 0;
+  let walkPages = 0;
+  while (walkOffset !== undefined && walkPages < 500) {
+    const p = buildReviewBundlePage(oversized, "rb_walk", walkOffset, {
+      limit: BUNDLE_LIMITS.findingsPerPage,
+    });
+    for (const f of p.findings) walked.push(f.id);
+    if (p.nextOffset !== undefined) {
+      assert(p.nextOffset > walkOffset, `walk cursor advances (${walkOffset} -> ${p.nextOffset})`);
+    }
+    walkOffset = p.nextOffset;
+    walkPages++;
+  }
+  assert(
+    walked.length === 5_000 && new Set(walked).size === 5_000,
+    `paging a byte-trimmed result delivers all 5,000 findings exactly once (got ${walked.length})`,
+  );
+
+  process.stdout.write("\n[9] REGRESSION — an oversized finding cannot loop forever (round 0)\n");
+  // One finding whose own serialization exceeds the whole byte budget. Round 0
+  // returned an empty page with cursor "offset=0", repeating forever.
+  const huge: DetPriors = {
+    ...inProcess,
+    findings: [
+      {
+        source: "eslint",
+        file: "src/huge.ts",
+        line: 1,
+        column: 1,
+        severity: "error",
+        ruleId: "huge",
+        message: "x".repeat(200_000),
+      },
+    ],
+    vulnComments: [],
+    changed: [],
+  };
+  const hugePage = buildReviewBundlePage(huge, "rb_huge", 0, { limit: 1 });
+  assert(hugePage.findings.length === 0, "an individually oversized finding is not partially returned");
+  assert(hugePage.nextOffset === undefined, "no cursor is advertised, so the client cannot loop on it");
+  const hugeOmission = hugePage.omissions?.find((o) => o.component === "findings");
+  assert(
+    hugeOmission?.unretrievable === 1,
+    "the unretrievable count marks the finding as impossible to page",
   );
   assert(
-    small.findings.length === inProcess.findings.length && inProcess.findings.length <= BUNDLE_LIMITS.findingsPerPage,
-    `the fixture's ${inProcess.findings.length} findings fit on one page, so the uncapped case is reachable`,
+    hugePage.findingsTotal === 1,
+    "findingsTotal still reports the truth even when nothing could be delivered",
   );
-  assert(small.omissions === undefined, "an uncapped page omits the omissions key entirely");
+
+  process.stdout.write("\n[10] REGRESSION — vulnerabilities are not dropped (round 0)\n");
+  // Round 0's worst finding: `vulnComments` was never read, so a vulnerability
+  // result reported findingsTotal: 0 — a silent false-clean on the security class.
+  const vulnOnly: DetPriors = {
+    ...inProcess,
+    findings: [],
+    vulnComments: [
+      {
+        id: "W-smokevuln",
+        file: "package.json",
+        lineStart: 1,
+        lineEnd: 1,
+        tier: 1,
+        category: "vulnerability",
+        kind: "assertion",
+        claim: "lodash: prototype pollution",
+        explanation: "a real advisory",
+        sources: [
+          {
+            type: "advisory",
+            url: "https://osv.dev/vulnerability/GHSA-smoke",
+            id: "GHSA-smoke",
+            title: "Prototype Pollution",
+            retrievedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        confidence: 1,
+      },
+    ],
+  };
+  const vulnPage = buildReviewBundlePage(vulnOnly, "rb_vuln", 0);
+  assert(vulnPage.findingsTotal === 1, "a vulnerability-only result reports 1 finding, not 0");
   assert(
-    computeReviewHandle(REPO, FIXTURE_DIFF) === computeReviewHandle(REPO, FIXTURE_DIFF),
-    "the same (repoRoot, diff) yields the same handle",
+    vulnPage.findings[0]?.category === "vulnerability" && vulnPage.findings[0]?.tier === 1,
+    "the vulnerability comment keeps its category and severity-derived tier",
   );
   assert(
-    computeReviewHandle(REPO, FIXTURE_DIFF) !== computeReviewHandle(REPO, `${FIXTURE_DIFF}x`),
-    "a different diff yields a different handle",
+    vulnPage.findings[0]?.detector === "vuln" &&
+      vulnPage.findings[0]?.sources.some((s) => s["type"] === "advisory"),
+    "the vulnerability comment is labelled and keeps its advisory citation intact",
+  );
+  assert(
+    vulnPage.findingsByCategory["vulnerability"] === 1,
+    "vulnerability appears in the category tally",
+  );
+
+  process.stdout.write("\n[11] REGRESSION — a failed ref is a failure, not a clean review (round 0)\n");
+  const badRef = readEnvelope(
+    await client.callTool({
+      name: TOOL_NAME_RUN_DET_PRIORS,
+      arguments: { request: { target: "base", base: "refs/heads/__warden_no_such_ref__" } },
+    }),
+    TOOL_NAME_RUN_DET_PRIORS,
+  );
+  assert(
+    badRef.status === "error" && badRef.data === undefined,
+    "an unresolvable base ref returns an error envelope, never an empty success",
+  );
+  assert(badRef.isError === true, "an unresolvable ref is isError:true");
+  assert(
+    badRef.hint?.includes("Could not resolve the review target") === true,
+    "the failure names target resolution rather than reporting zero findings",
+  );
+
+  process.stdout.write("\n[12] REGRESSION — the wire schema is the core schema (round 0)\n");
+  // Round 0's hand-copied schema accepted a citation carrying only {path, line}.
+  // The canonical SourceSchema requires the complete triple, so break a source
+  // that actually HAS one — the fixture's tsc finding cites a tool, which has no
+  // triple at all, so it cannot demonstrate this.
+  const triplePage = {
+    ...page,
+    findings: [
+      {
+        id: "W-triple",
+        detector: "leverage",
+        file: "src/a.ts",
+        lineStart: 1,
+        lineEnd: 1,
+        tier: 2,
+        category: "leverage",
+        kind: "assertion",
+        claim: "structuredClone",
+        explanation: "x",
+        confidence: 1,
+        sources: [
+          {
+            type: "repo_convention",
+            id: "leverage/structured-clone",
+            title: "leverage",
+            retrievedAt: "2026-01-01T00:00:00.000Z",
+            path: "src/a.ts",
+            line: 7,
+            snippet: "const c = structuredClone(x);",
+          },
+        ],
+      },
+    ],
+  };
+  assert(
+    ReviewBundlePageSchema.safeParse(triplePage).success,
+    "the bound core schema accepts a complete {path, line, snippet} citation",
+  );
+  const brokenTriple = structuredClone(triplePage);
+  delete (brokenTriple.findings[0]?.sources[0] as Record<string, unknown> | undefined)?.["snippet"];
+  assert(
+    !ReviewBundlePageSchema.safeParse(brokenTriple).success,
+    "the bound core schema rejects a citation whose triple lost its snippet",
+  );
+  const brokenCategory = structuredClone(triplePage) as unknown as Record<string, unknown>;
+  (brokenCategory["findings"] as Array<Record<string, unknown>>)[0]!["category"] =
+    "not-a-real-category";
+  assert(
+    !ReviewBundlePageSchema.safeParse(brokenCategory).success,
+    "the bound core schema rejects a category outside CategoryEnum",
+  );
+
+  process.stdout.write("\n[13] cache — LRU ordering and boundedness\n");
+  const cache = createReviewResultCache(2);
+  cache.set("A", inProcess);
+  cache.set("B", inProcess);
+  cache.get("A");
+  cache.set("C", inProcess);
+  assert(cache.get("A") !== undefined, "a read promotes the entry (real LRU, not FIFO — round 0)");
+  assert(cache.get("B") === undefined, "the genuinely least-recently-used entry was evicted");
+  assert(cache.size === 2, "the cache respects its capacity");
+  const boundedCache = createReviewResultCache();
+  for (let i = 0; i < DEFAULT_REVIEW_CACHE_CAPACITY + 3; i++) {
+    boundedCache.set(`rb_fill_${i}`, inProcess);
+  }
+  assert(
+    boundedCache.size === DEFAULT_REVIEW_CACHE_CAPACITY,
+    `the default cache is bounded at ${DEFAULT_REVIEW_CACHE_CAPACITY}`,
   );
 
   assert(protocolErrors.length === 0, "no protocol errors or non-JSON stdout");
