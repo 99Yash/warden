@@ -393,7 +393,10 @@ export function buildReviewBundlePage(
       : component === "contextHandles"
         ? handles.included.length
         : degraded.included.length;
-  const shrink = (component: "changedFiles" | "contextHandles" | "degraded", next: number): void => {
+  const shrink = (
+    component: "changedFiles" | "contextHandles" | "degraded",
+    next: number,
+  ): void => {
     if (component === "changedFiles") {
       changed = { included: changed.included.slice(0, next), total: totals.changedFiles };
     } else if (component === "contextHandles") {
@@ -490,7 +493,10 @@ export function buildReviewBundlePage(
   // rewind the cursor to match what was actually delivered. Rewinding is safe
   // because traversal is idempotent — entries are re-examined, and an oversized
   // one is simply rejected again on the next page. Losing them is not.
-  while (bodyBytes(body) + OMISSION_RESERVE_BYTES > BUNDLE_LIMITS.pageByteBudget && page.length > 0) {
+  while (
+    bodyBytes(body) + OMISSION_RESERVE_BYTES > BUNDLE_LIMITS.pageByteBudget &&
+    page.length > 0
+  ) {
     page = page.slice(0, Math.floor(page.length / 2));
     nextOffset = start + page.length;
     body = compose();

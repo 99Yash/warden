@@ -153,7 +153,8 @@ function readEnvelope(result: unknown, tool: string): Envelope {
   }
   const envelope = ToolResultEnvelopeSchema.parse(JSON.parse(text));
   if (envelope.tool !== tool) throw new Error(`Envelope tool mismatch: ${envelope.tool}`);
-  if (envelope.envelopeVersion !== TOOL_ENVELOPE_VERSION) throw new Error("Envelope version mismatch");
+  if (envelope.envelopeVersion !== TOOL_ENVELOPE_VERSION)
+    throw new Error("Envelope version mismatch");
   return {
     status: envelope.status,
     ...(envelope.status === "ok"
@@ -182,7 +183,9 @@ try {
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name).sort();
   assert(
-    names.length === 2 && names.includes("lookup_type_def") && names.includes(TOOL_NAME_RUN_DET_PRIORS),
+    names.length === 2 &&
+      names.includes("lookup_type_def") &&
+      names.includes(TOOL_NAME_RUN_DET_PRIORS),
     `both tools discovered (${names.join(", ")})`,
   );
   const det = tools.find((t) => t.name === TOOL_NAME_RUN_DET_PRIORS);
@@ -196,16 +199,18 @@ try {
   // The request union is nested under `request` so MCP's object-root
   // requirement is satisfied while the discriminated union survives.
   const requestProp = inputSchema?.properties?.["request"];
-  const requestVariants = [
-    ...(requestProp?.anyOf ?? []),
-    ...(requestProp?.oneOf ?? []),
-  ] as Array<{ properties?: Record<string, unknown>; required?: string[] }>;
+  const requestVariants = [...(requestProp?.anyOf ?? []), ...(requestProp?.oneOf ?? [])] as Array<{
+    properties?: Record<string, unknown>;
+    required?: string[];
+  }>;
   const variantTargets = requestVariants.map(
     (v) => (v.properties?.["target"] as { const?: string } | undefined)?.const,
   );
   assert(
-    requestVariants.length === 3 && variantTargets.includes("diff") &&
-      variantTargets.includes("base") && variantTargets.includes("page"),
+    requestVariants.length === 3 &&
+      variantTargets.includes("diff") &&
+      variantTargets.includes("base") &&
+      variantTargets.includes("page"),
     `the request union advertises all three targets (${variantTargets.join(", ")})`,
   );
   const unionText = JSON.stringify(requestProp ?? {});
@@ -335,12 +340,19 @@ try {
     "the dedup and security mappings that the gates depend on survive the projection",
   );
 
-  process.stdout.write("\n[4] shared seam — bundle finding equals the CLI's toComment projection\n");
+  process.stdout.write(
+    "\n[4] shared seam — bundle finding equals the CLI's toComment projection\n",
+  );
   // Same mode as the MCP call above (the tool defaults to "review"), otherwise
   // this compares two different runs rather than two paths to one run.
   const inProcess = await runDetPriors({ diff: FIXTURE_DIFF, repoRoot: REPO, mode: "review" });
-  const key = (detector: string, file: string, line: number, tier: number, category: string): string =>
-    `${detector}@${file}:${line}:${tier}:${category}`;
+  const key = (
+    detector: string,
+    file: string,
+    line: number,
+    tier: number,
+    category: string,
+  ): string => `${detector}@${file}:${line}:${tier}:${category}`;
   const wireSet = page.findings
     .map((f) => key(f.detector, f.file, f.lineStart, f.tier, f.category))
     .sort();
@@ -511,7 +523,7 @@ try {
   );
   const omitted = new Map((bounded.omissions ?? []).map((o) => [o.component, o]));
   assert(
-    omitted.get("changedFiles")?.omitted === 5_000 - (bounded.changedFiles.length),
+    omitted.get("changedFiles")?.omitted === 5_000 - bounded.changedFiles.length,
     `changedFiles omission matches what was delivered (${bounded.changedFiles.length})`,
   );
   assert(
@@ -547,7 +559,9 @@ try {
     `paging a byte-trimmed result delivers all 5,000 findings exactly once (got ${walked.length} across ${walkPages} pages)`,
   );
 
-  process.stdout.write("\n[9] REGRESSION — an oversized finding is skipped, not contagious (round 1)\n");
+  process.stdout.write(
+    "\n[9] REGRESSION — an oversized finding is skipped, not contagious (round 1)\n",
+  );
   // Round 1's worst finding: one oversized finding made the whole suffix
   // "unretrievable" and offered no cursor, while two tiny siblings sat at 1.3 KB
   // on the next page. `[oversized, small, small]` must deliver the small pair.
@@ -555,9 +569,33 @@ try {
   const mixed: DetPriors = {
     ...inProcess,
     findings: [
-      { source: "eslint", file: "src/huge.ts", line: 1, column: 1, severity: "error", ruleId: "huge", message: hugeMsg },
-      { source: "eslint", file: "src/b.ts", line: 2, column: 1, severity: "warning", ruleId: "b", message: "small b" },
-      { source: "eslint", file: "src/c.ts", line: 3, column: 1, severity: "warning", ruleId: "c", message: "small c" },
+      {
+        source: "eslint",
+        file: "src/huge.ts",
+        line: 1,
+        column: 1,
+        severity: "error",
+        ruleId: "huge",
+        message: hugeMsg,
+      },
+      {
+        source: "eslint",
+        file: "src/b.ts",
+        line: 2,
+        column: 1,
+        severity: "warning",
+        ruleId: "b",
+        message: "small b",
+      },
+      {
+        source: "eslint",
+        file: "src/c.ts",
+        line: 3,
+        column: 1,
+        severity: "warning",
+        ruleId: "c",
+        message: "small c",
+      },
     ],
     vulnComments: [],
     changed: [],
@@ -570,8 +608,7 @@ try {
     `a huge sibling does not block the small ones (delivered ${mixedPage.findings.length})`,
   );
   assert(
-    mixedPage.findings.some((f) => f.file === "src/b.ts") ||
-      mixedPage.nextOffset !== undefined,
+    mixedPage.findings.some((f) => f.file === "src/b.ts") || mixedPage.nextOffset !== undefined,
     "if the small pair is not on page 1, a cursor is still offered",
   );
   // Whatever page 0 does, following the contract to the end must reach b and c.
@@ -579,9 +616,12 @@ try {
   let mo: number | undefined = 0;
   let hops = 0;
   while (mo !== undefined && hops < 20) {
-    const p = buildReviewBundlePage(mixed, "rb_mixed", mo, { limit: BUNDLE_LIMITS.findingsPerPage });
+    const p = buildReviewBundlePage(mixed, "rb_mixed", mo, {
+      limit: BUNDLE_LIMITS.findingsPerPage,
+    });
     for (const f of p.findings) reached.add(f.file);
-    if (p.nextOffset !== undefined) assert(p.nextOffset > mo, `mixed cursor advances (${mo} -> ${p.nextOffset})`);
+    if (p.nextOffset !== undefined)
+      assert(p.nextOffset > mo, `mixed cursor advances (${mo} -> ${p.nextOffset})`);
     mo = p.nextOffset;
     hops++;
   }
@@ -595,20 +635,32 @@ try {
   );
   const mixedOmission = mixedPage.omissions?.find((o) => o.component === "findings");
   assert(
-    mixedOmission === undefined || mixedOmission.unretrievable === undefined || mixedOmission.unretrievable <= 1,
+    mixedOmission === undefined ||
+      mixedOmission.unretrievable === undefined ||
+      mixedOmission.unretrievable <= 1,
     "at most the one oversized finding is labelled unretrievable, never the recoverable suffix",
   );
 
   // A lone oversized finding must still not produce a non-progressing cursor.
-  const hugeOnly: DetPriors = { ...inProcess, findings: mixed.findings.slice(0, 1), vulnComments: [], changed: [] };
+  const hugeOnly: DetPriors = {
+    ...inProcess,
+    findings: mixed.findings.slice(0, 1),
+    vulnComments: [],
+    changed: [],
+  };
   const hugePage = buildReviewBundlePage(hugeOnly, "rb_huge", 0, { limit: 1 });
-  assert(hugePage.findings.length === 0, "an individually oversized finding is not partially returned");
+  assert(
+    hugePage.findings.length === 0,
+    "an individually oversized finding is not partially returned",
+  );
   assert(
     hugePage.nextOffset === undefined || hugePage.nextOffset > 0,
     "the cursor advances past the oversized finding instead of repeating page 0",
   );
 
-  process.stdout.write("\n[9b] REGRESSION — metadata pressure is not an oversized finding (round 1)\n");
+  process.stdout.write(
+    "\n[9b] REGRESSION — metadata pressure is not an oversized finding (round 1)\n",
+  );
   // Round 1: a bulky context locator squeezed out the findings, then the locator
   // itself was trimmed, and the page never restored the findings — 525 B, no
   // findings, all three "unretrievable". The same finding fits in ~919 B without
@@ -695,7 +747,9 @@ try {
     "vulnerability appears in the category tally",
   );
 
-  process.stdout.write("\n[11] REGRESSION — a failed ref is a failure, not a clean review (round 0)\n");
+  process.stdout.write(
+    "\n[11] REGRESSION — a failed ref is a failure, not a clean review (round 0)\n",
+  );
   const badRef = readEnvelope(
     await client.callTool({
       name: TOOL_NAME_RUN_DET_PRIORS,

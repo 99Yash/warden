@@ -418,14 +418,22 @@ try {
     const child = spawn(
       process.execPath,
       ["--import", import.meta.resolve("tsx/esm"), resolve(CLI_ROOT, "src/index.ts"), "mcp"],
-      { cwd: TMP_ROOT, env: { ...process.env, WARDEN_CACHE_PATH: CACHE_PATH }, stdio: ["pipe", "pipe", "pipe"] },
+      {
+        cwd: TMP_ROOT,
+        env: { ...process.env, WARDEN_CACHE_PATH: CACHE_PATH },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
     );
     let childOut = "";
     let childErr = "";
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (c: string) => { childOut += c; });
-    child.stderr.on("data", (c: string) => { childErr += c; });
+    child.stdout.on("data", (c: string) => {
+      childOut += c;
+    });
+    child.stderr.on("data", (c: string) => {
+      childErr += c;
+    });
     const send = (msg: Record<string, unknown>): void => {
       child.stdin.write(`${JSON.stringify(msg)}\n`);
     };
@@ -443,17 +451,36 @@ try {
           if (line) {
             resolveWait(JSON.parse(line) as Record<string, unknown>);
           } else if (Date.now() - started > timeoutMs) {
-            rejectWait(new Error(`timeout waiting for response id ${id}; stderr so far: ${childErr}`));
+            rejectWait(
+              new Error(`timeout waiting for response id ${id}; stderr so far: ${childErr}`),
+            );
           } else {
             setTimeout(poll, 25);
           }
         };
         poll();
       });
-    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "smoke-eof", version: "0.0.1" } } });
+    send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "smoke-eof", version: "0.0.1" },
+      },
+    });
     await waitFor(1);
     send({ jsonrpc: "2.0", method: "notifications/initialized" });
-    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "lookup_type_def", arguments: { package: "typescript", symbol: "ts.createProgram" } } });
+    send({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "lookup_type_def",
+        arguments: { package: "typescript", symbol: "ts.createProgram" },
+      },
+    });
     // Hang up immediately: EOF races the in-flight cold lookup. The response
     // must still be written, and only then may the server close.
     child.stdin.end();
@@ -466,7 +493,10 @@ try {
     } catch {
       toolEnvelope = undefined;
     }
-    assert(toolEnvelope?.status === "ok", "in-flight tools/call response is written after client EOF");
+    assert(
+      toolEnvelope?.status === "ok",
+      "in-flight tools/call response is written after client EOF",
+    );
     const exitCode = await new Promise<number | null>((resolveExit) => {
       child.on("exit", (code) => resolveExit(code));
     });

@@ -185,7 +185,8 @@ export async function runRunDetPriors(
       return errorEnvelope(
         TOOL_NAME_RUN_DET_PRIORS,
         "invalid_input",
-        `Could not resolve the review target: ${resolved.description}. ${resolved.degraded.map((d) => d.message).join(" ")}`,      );
+        `Could not resolve the review target: ${resolved.description}. ${resolved.degraded.map((d) => d.message).join(" ")}`,
+      );
     }
     diffText = resolved.diff;
     diffBase = {
