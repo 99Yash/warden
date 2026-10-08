@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  PostPassLanesSchema,
   resolveDiff,
   review,
+  runPostPass,
   security as securityReview,
   shutdownObservability,
   type CommentSet,
@@ -224,6 +226,24 @@ sharedOpts(
 });
 
 program
+  .command("post-pass")
+  .description(
+    "Deterministic post-pass over externally-driven lane findings. No LLM call. Emits the canonical CommentSet.",
+  )
+  .option("--lanes <path>", "Path to the lanes JSON ({version, lanes}), or - for stdin.")
+  .option("--diff-file <path>", "Read the unified diff from a literal file instead of git.")
+  .option(
+    "--base <ref>",
+    "Override the base ref for the git-resolved diff (rejected together with --diff-file).",
+  )
+  .option("--json", "Emit machine-readable JSON output instead of pretty CLI.")
+  .option("--verbose", "Keep tier-3 (style/dedup) findings; gated by default.")
+  .option("--volume-cap <n>", "Maximum comments to emit; Tier-1 always kept. Default 5.")
+  .action(async (opts: PostPassOpts) => {
+    await runPostPassCommand(opts);
+  });
+
+program
   .command("mcp")
   .description("Start Warden's MCP tool-provider over stdio. Stdout is reserved for JSON-RPC.")
   .action(async () => {
@@ -284,20 +304,18 @@ program
     },
   );
 
-program
-  .parseAsync(process.argv)
-  .then(
-    // ADR-0048 §3 — force-flush the OTEL→Langfuse exporter before the
-    // short-lived CLI process exits, or in-flight spans are lost. No-op when
-    // telemetry never started (no Langfuse keys).
-    () => shutdownObservability(),
-    async (err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(pc.red(`warden: ${message}\n`));
-      await shutdownObservability();
-      process.exit(1);
-    },
-  );
+program.parseAsync(process.argv).then(
+  // ADR-0048 §3 — force-flush the OTEL→Langfuse exporter before the
+  // short-lived CLI process exits, or in-flight spans are lost. No-op when
+  // telemetry never started (no Langfuse keys).
+  () => shutdownObservability(),
+  async (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(pc.red(`warden: ${message}\n`));
+    await shutdownObservability();
+    process.exit(1);
+  },
+);
 
 async function runSecurity(opts: CommonOpts): Promise<void> {
   const repoRoot = findRepoRoot();
@@ -325,4 +343,93 @@ function writeJsonResult(result: CommentSet, opts: { json?: boolean }): boolean 
   if (!opts.json) return false;
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return true;
+}
+
+interface PostPassOpts {
+  lanes?: string;
+  diffFile?: string;
+  base?: string;
+  json?: boolean;
+  verbose?: boolean;
+  volumeCap?: string;
+}
+
+/**
+ * Slice #41 / ADR-0053 §4: the driver step. Reads externally-driven lane
+ * findings, runs the mandatory post-pass, and publishes only its
+ * `CommentSet`. Deterministic — no provider key required. Not an MCP tool.
+ */
+async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
+  const repoRoot = findRepoRoot();
+  loadWardenRuntime({ repoRoot });
+
+  if (opts.lanes === undefined) {
+    throw new Error("post-pass: --lanes <path|-> is required");
+  }
+  const raw =
+    opts.lanes === "-" ? await readAllStdin() : readFileSync(resolve(repoRoot, opts.lanes), "utf8");
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (err) {
+    throw new Error("post-pass: lanes input is not valid JSON", { cause: err });
+  }
+  const lanesParsed = PostPassLanesSchema.safeParse(json);
+  if (!lanesParsed.success) {
+    const problems = lanesParsed.error.issues
+      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("; ");
+    throw new Error(`post-pass: lanes input failed PostPassLanesSchema validation: ${problems}`);
+  }
+
+  if (opts.diffFile !== undefined && opts.base !== undefined) {
+    throw new Error("post-pass: --diff-file and --base are mutually exclusive");
+  }
+  let diff: string;
+  let extraDegraded: ResolvedDiff["degraded"];
+  if (opts.diffFile !== undefined) {
+    diff = readFileSync(resolve(repoRoot, opts.diffFile), "utf8");
+  } else {
+    const resolved = await resolveDiff({ repoRoot, mode: "review", baseRef: opts.base });
+    diff = resolved.diff;
+    extraDegraded = resolved.degraded;
+  }
+
+  let volumeCap: number | undefined;
+  if (opts.volumeCap !== undefined) {
+    const n = Number(opts.volumeCap);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `post-pass: --volume-cap must be a positive integer (got "${opts.volumeCap}")`,
+      );
+    }
+    volumeCap = n;
+  }
+
+  const verbose = opts.verbose === true;
+  const result = await runPostPass({
+    repoRoot,
+    diff,
+    lanes: lanesParsed.data.lanes,
+    config: {
+      verbose,
+      ...(volumeCap !== undefined ? { volumeCap } : {}),
+    },
+    ...(extraDegraded && extraDegraded.length > 0 ? { extraDegraded } : {}),
+  });
+
+  // Issue #29 parity: a false-clean (no lanes, every lane failed, or an
+  // empty diff that anchored nothing) must not look like success. Only
+  // `lane-health` and `diff-source` gate the exit — other actionable
+  // entries (e.g. `noise-filter`) fire on normal runs.
+  if (
+    result.metadata.degradedWorkers.some(
+      (e) => e.kind === "actionable" && (e.topic === "lane-health" || e.topic === "diff-source"),
+    )
+  ) {
+    process.exitCode = 1;
+  }
+
+  if (writeJsonResult(result, opts)) return;
+  process.stdout.write("\n" + formatCommentSet(result, "review", verbose) + "\n");
 }

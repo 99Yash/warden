@@ -2,6 +2,7 @@ import { recordDroppedCandidate, tool } from "@warden/ai";
 import { z } from "zod";
 import type { Semaphore } from "../../orchestration/semaphore.js";
 import type { Comment, DegradedEntry } from "../../schema.js";
+import { commentInScope } from "../comment-scope.js";
 import type { ReviewScratchpad, TokenUsage } from "../scratchpad.js";
 
 /**
@@ -316,11 +317,11 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
     // `sources[].path` (the canonical citation site) — drop the whole
     // Comment if none of its sources cite a file inside the lane. This
     // mirrors the M13 security sub-agent's lane policy.
-    const lane = new Set(args.files.map((p) => p.replace(/\\/g, "/")));
+    const scope = new Set(args.files.map((p) => p.replace(/\\/g, "/")));
     const inLane: Comment[] = [];
     const droppedCount = { value: 0 };
     for (const finding of result.findings) {
-      if (commentInLane(finding, lane)) {
+      if (commentInScope(finding, scope)) {
         inLane.push(finding);
       } else {
         droppedCount.value += 1;
@@ -381,23 +382,6 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
   });
 
   return { tool: aiTool, dispatch: runOneDispatch };
-}
-
-/**
- * A comment is in-lane iff at least one of its sources cites a path in
- * the dispatched `files` set. Comments with zero path-bearing sources
- * (e.g. pure-tool sources with no `path`) are kept — they aren't pinned
- * to any file, so lane discipline doesn't apply.
- */
-function commentInLane(comment: Comment, lane: Set<string>): boolean {
-  let sawPath = false;
-  for (const src of comment.sources) {
-    if (src.path === undefined) continue;
-    sawPath = true;
-    const normalized = src.path.replace(/\\/g, "/");
-    if (lane.has(normalized)) return true;
-  }
-  return !sawPath;
 }
 
 function formatErr(err: unknown): string {

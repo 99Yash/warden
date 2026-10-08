@@ -7,6 +7,44 @@ export interface DiffScopedComments {
 }
 
 /**
+ * A comment is in-scope iff at least one of its sources cites a path in
+ * the trusted scope set. The comment — including its sources — is
+ * model-owned on the externally-driven path; only the scope set is
+ * trusted. Comments with zero path-bearing sources (e.g. pure-tool
+ * sources with no `path`) are kept — they aren't pinned to any file, so
+ * lane discipline doesn't apply. Extracted from the Phase 2
+ * worker-dispatch boundary (`dispatch-worker.ts`) for the externally-driven
+ * post-pass (ADR-0053 §4): the dispatch's file set is model-chosen, but the
+ * lane's scope envelope is driver-owned, so the same membership rule runs
+ * here against trusted input.
+ */
+export function commentInScope(comment: Comment, scope: ReadonlySet<string>): boolean {
+  let sawPath = false;
+  for (const src of comment.sources) {
+    if (src.path === undefined) continue;
+    sawPath = true;
+    const normalized = src.path.replace(/\\/g, "/");
+    if (scope.has(normalized)) return true;
+  }
+  return !sawPath;
+}
+
+/**
+ * The post-pass anchor check (ADR-0053 §4): the finding's own
+ * `comment.file` must be in the lane's trusted scope set. `commentInScope`
+ * above only inspects `sources[].path`, which is model-owned on the
+ * externally-driven path — a finding with zero sources, or with one
+ * in-scope source and an out-of-scope anchor, would otherwise publish on
+ * any changed file. The anchor is model-owned too, but requiring both
+ * closes the sourceless/out-of-scope-anchor sequences. Kept separate from
+ * `commentInScope` (and `dispatch-worker.ts` unchanged): the dispatch path
+ * enforces `commentInScope` only.
+ */
+export function anchorInScope(comment: Comment, scope: ReadonlySet<string>): boolean {
+  return scope.has(comment.file.replace(/\\/g, "/"));
+}
+
+/**
  * Keep only comments whose rendered line range overlaps an added line.
  *
  * Deterministic runner findings already use the same range-overlap policy via

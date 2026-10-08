@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { wardenEnv } from "@warden/env";
 import type { Category, Comment, DegradedEntry } from "./schema.js";
 
@@ -74,6 +75,107 @@ export function dropsToDegraded(
       message: `Dropped ${count} low-confidence ${cat} ${
         count === 1 ? "finding" : "findings"
       } below floor ${floor}`,
+    });
+  }
+  return entries;
+}
+
+/**
+ * Default assertion threshold for categories with no `CATEGORY_CONFIDENCE_FLOOR`
+ * entry (ADR-0044 §6). Worker prompts use 0.7 for questions and ≥0.85 for
+ * assertions — a model below 70% sure should ask, not assert.
+ */
+export const DEFAULT_ASSERTION_THRESHOLD = 0.7;
+
+export interface ConfidenceDemotionResult {
+  comments: Comment[];
+  /** Per-category demotion counts paired with the effective threshold at
+   * decision time, mirroring `ConfidenceFloorResult.drops`. */
+  demotions: Map<Category, { count: number; threshold: number }>;
+}
+
+/**
+ * True iff some source is a fully-populated `api_def` citation triple
+ * pointing at an installed type declaration. Must run after
+ * `verifyCitations` so the triple is verified — lane output is
+ * model-owned, so a model-chosen `type: "cve"`/`"web"`/`"tool"` label is
+ * not authority the post-pass can check. Letting such a label exempt a
+ * finding from demotion would make demotion discretionary. The `api_def`
+ * label itself is model-chosen on this path too, so the exemption
+ * additionally requires the `lookupTypeDef` output contract (`schema.ts`
+ * `api_def` docs): a normalized path inside `node_modules/` ending in
+ * `.d.ts`. Normalization is `path.posix.normalize` after `\`→`/`, and a
+ * result that escapes the repo (`..`, `../…`, or absolute) is rejected, so
+ * `node_modules/../src/x.d.ts` cannot smuggle a reviewed file past the
+ * check. The cost of being strict is a question instead of an
+ * assertion, never a drop.
+ *
+ * Residual (shared with m14): a real but unrelated `.d.ts` line still
+ * exempts — the post-pass checks the citation is a genuine type
+ * declaration, not that it is relevant to the claim. The check is lexical,
+ * so a reviewed workspace `.d.ts` reached through a `node_modules/` symlink
+ * also exempts.
+ */
+export function hasVerifiedAuthority(c: Comment): boolean {
+  return c.sources.some((s) => {
+    if (
+      s.type !== "api_def" ||
+      s.path === undefined ||
+      s.line === undefined ||
+      s.snippet === undefined
+    ) {
+      return false;
+    }
+    const slashed = s.path.replace(/\\/g, "/");
+    const normalized = posix.normalize(slashed);
+    if (normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
+      return false;
+    }
+    const inNodeModules =
+      normalized.startsWith("node_modules/") || normalized.includes("/node_modules/");
+    return inNodeModules && normalized.endsWith(".d.ts");
+  });
+}
+
+/**
+ * Demote low-confidence assertions to questions (ADR-0044 §6). For each
+ * comment with `kind === "assertion"`, no verified authority, and
+ * `confidence` below the category threshold (resolved floor, else
+ * `DEFAULT_ASSERTION_THRESHOLD`), rewrite `kind` to `"question"`. Tier 1
+ * is not exempt — Tier-1 never drops, but it still degrades. Never drops,
+ * never promotes a question.
+ */
+export function applyConfidenceToKind(
+  comments: Comment[],
+  opts: ApplyConfidenceFloorOptions = {},
+): ConfidenceDemotionResult {
+  const floors = resolveFloors(opts);
+  const out: Comment[] = [];
+  const demotions = new Map<Category, { count: number; threshold: number }>();
+  for (const c of comments) {
+    const threshold = floors[c.category] ?? DEFAULT_ASSERTION_THRESHOLD;
+    if (c.kind === "assertion" && !hasVerifiedAuthority(c) && c.confidence < threshold) {
+      out.push({ ...c, kind: "question" });
+      const prev = demotions.get(c.category);
+      demotions.set(c.category, { count: (prev?.count ?? 0) + 1, threshold });
+      continue;
+    }
+    out.push(c);
+  }
+  return { comments: out, demotions };
+}
+
+export function demotionsToDegraded(
+  demotions: Map<Category, { count: number; threshold: number }>,
+): DegradedEntry[] {
+  const entries: DegradedEntry[] = [];
+  for (const [cat, { count, threshold }] of demotions) {
+    entries.push({
+      kind: "info",
+      topic: cat,
+      message: `Demoted ${count} low-confidence ${cat} ${
+        count === 1 ? "assertion" : "assertions"
+      } below threshold ${threshold} to questions`,
     });
   }
   return entries;
