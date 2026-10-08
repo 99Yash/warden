@@ -371,8 +371,8 @@ async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
   let json: unknown;
   try {
     json = JSON.parse(raw);
-  } catch {
-    throw new Error("post-pass: lanes input is not valid JSON");
+  } catch (err) {
+    throw new Error("post-pass: lanes input is not valid JSON", { cause: err });
   }
   const lanesParsed = PostPassLanesSchema.safeParse(json);
   if (!lanesParsed.success) {
@@ -418,11 +418,13 @@ async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
     ...(extraDegraded && extraDegraded.length > 0 ? { extraDegraded } : {}),
   });
 
-  // Issue #29 parity: a false-clean (no lanes, or every lane failed) must
-  // not look like success.
+  // Issue #29 parity: a false-clean (no lanes, every lane failed, or an
+  // empty diff that anchored nothing) must not look like success. Only
+  // `lane-health` and `diff-source` gate the exit — other actionable
+  // entries (e.g. `noise-filter`) fire on normal runs.
   if (
     result.metadata.degradedWorkers.some(
-      (e) => e.kind === "actionable" && e.topic === "lane-health",
+      (e) => e.kind === "actionable" && (e.topic === "lane-health" || e.topic === "diff-source"),
     )
   ) {
     process.exitCode = 1;
