@@ -24,10 +24,14 @@ import {
   buildLaneMessage,
   buildMcpConfigContent,
   buildOpencodeCommand,
+  buildOpencodeServeCommand,
   evaluateLane,
   parseLaneEvents,
+  parseMcpServers,
   resolveLoaderFlags,
   resolveWardenMcpCommand,
+  waitForWardenMcp,
+  wardenMcpReadiness,
 } from "../src/opencode/drive.js";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -361,21 +365,27 @@ try {
   // [6] command builder + MCP command — argv shape, loader resolution.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[6] command — argv shape and warden MCP command\n");
-  const cmd = buildOpencodeCommand({ model: "anthropic/claude-opus-5-5#high", message: "hello" });
+  const cmd = buildOpencodeCommand({
+    serverUrl: "http://127.0.0.1:4123",
+    model: "anthropic/claude-opus-5-5#high",
+    message: "hello",
+  });
   assert(cmd.bin === "opencode", "default binary is opencode");
-  for (const want of [
-    "run",
-    "--standalone",
-    "--agent",
-    "warden-down",
-    "--model",
-    "--format",
-    "json",
-  ]) {
+  for (const want of ["run", "--server", "--agent", "warden-down", "--model", "--format", "json"]) {
     assert(cmd.argv.includes(want), `argv includes ${want}`);
   }
+  assert(
+    cmd.argv[cmd.argv.indexOf("--server") + 1] === "http://127.0.0.1:4123",
+    "--server carries the driver's serve URL",
+  );
   assert(!cmd.argv.includes("--auto"), "argv never passes --auto (unexpected asks fail closed)");
+  assert(
+    !cmd.argv.includes("--standalone"),
+    "run attaches to the warmed serve instance, never --standalone",
+  );
   assert(cmd.argv[cmd.argv.length - 1] === "hello", "message is the last argv entry");
+  const serveCmd = buildOpencodeServeCommand({ port: 4123 });
+  assert(serveCmd.argv.join(" ") === "serve --hostname 127.0.0.1 --port 4123", "serve argv shape");
   assert(
     buildLaneMessage("origin/main").includes("origin/main"),
     "lane message names the base ref",
@@ -401,7 +411,76 @@ try {
   );
 
   // ---------------------------------------------------------------------------
-  // [7] driver end-to-end with a fake opencode.
+  // [6b] MCP readiness — untrusted /api/mcp JSON, warden-only gating.
+  // ---------------------------------------------------------------------------
+  process.stdout.write("\n[6b] mcp — /api/mcp parsing and warden-only readiness\n");
+  const connectedBody = {
+    location: { directory: "/tmp/r" },
+    data: [
+      { name: "other", status: { status: "failed", error: "nope" } },
+      { name: "warden", status: { status: "connected" } },
+    ],
+  };
+  assert(
+    wardenMcpReadiness(parseMcpServers(connectedBody)).state === "connected",
+    "connected warden gates open (other servers ignored)",
+  );
+  const failedBody = {
+    data: [{ name: "warden", status: { status: "failed", error: "boom" } }],
+  };
+  const failedReady = wardenMcpReadiness(parseMcpServers(failedBody));
+  assert(
+    failedReady.state === "failed" && failedReady.detail.includes("boom"),
+    "failed warden carries the server error",
+  );
+  assert(
+    wardenMcpReadiness(parseMcpServers({ data: [] })).state === "pending",
+    "unlisted warden is pending, not failed",
+  );
+  assert(
+    wardenMcpReadiness(parseMcpServers({ nope: 1 })).state === "pending",
+    "bad shape is pending",
+  );
+  assert(wardenMcpReadiness(parseMcpServers(null)).state === "pending", "null body is pending");
+  // waitForWardenMcp against a tiny inline server: instant connect, failed,
+  // and timeout are all deterministic.
+  const { createServer } = await import("node:http");
+  const pollOnce = async (body: unknown, timeoutMs: number): Promise<void> => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    await new Promise<void>((resolveP) => server.listen(0, "127.0.0.1", resolveP));
+    const port = (server.address() as { port: number }).port;
+    try {
+      await waitForWardenMcp({
+        baseUrl: `http://127.0.0.1:${port}`,
+        password: "pw",
+        directory: "/tmp",
+        timeoutMs,
+      });
+    } finally {
+      server.close();
+    }
+  };
+  await pollOnce(connectedBody, 2000);
+  assert(true, "waitForWardenMcp resolves on connected");
+  let failedWait = "";
+  try {
+    await pollOnce(failedBody, 2000);
+  } catch (err) {
+    failedWait = err instanceof Error ? err.message : String(err);
+  }
+  assert(failedWait.includes("boom"), `wait rejects with the server error (${failedWait})`);
+  let timeoutWait = "";
+  try {
+    await pollOnce({ data: [] }, 300);
+  } catch (err) {
+    timeoutWait = err instanceof Error ? err.message : String(err);
+  }
+  assert(timeoutWait.includes("not connected within"), `wait times out bounded (${timeoutWait})`);
+  // ---------------------------------------------------------------------------
+  // [7] driver end-to-end with a fake opencode (serve + run).
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[7] driver — fake opencode end-to-end in a temp git repo\n");
   const REPO = mkdtempSync(resolve(tmpdir(), "warden-lanes-repo-"));
@@ -430,34 +509,71 @@ try {
   git(["commit", "-m", "v2"]);
 
   // The fake asserts the driver's argv/env contract, then plays canned
-  // JSONL per WARDEN_SMOKE_MODE. Any contract breach exits non-zero.
+  // JSONL per WARDEN_SMOKE_MODE. `serve` runs a tiny HTTP server for
+  // /api/mcp per WARDEN_SMOKE_SERVE_MODE; `run --server` plays the lane.
+  // Any contract breach exits non-zero.
   const fakePath = resolve(FAKE_BIN, "opencode");
   writeFileSync(
     fakePath,
     `#!/usr/bin/env node
 import { existsSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 const argv = process.argv.slice(2);
 const fail = (msg) => { process.stderr.write("fake opencode: " + msg + "\\n"); process.exit(3); };
 const has = (flag, value) => {
   const i = argv.indexOf(flag);
   return value === undefined ? i !== -1 : argv[i + 1] === value;
 };
-if (argv[0] !== "run") fail("first argv must be run");
-for (const w of ["--standalone", "--format"]) if (!has(w)) fail("missing " + w);
+const checkSharedEnv = () => {
+  if (!existsSync(process.env.OPENCODE_CONFIG ?? "")) fail("OPENCODE_CONFIG does not exist");
+  if (process.env.OPENCODE_DISABLE_PROJECT_CONFIG !== "1") fail("project config not disabled");
+  let content;
+  try {
+    content = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? "");
+  } catch { fail("OPENCODE_CONFIG_CONTENT is not JSON"); }
+  const wardenServer = content?.mcp?.servers?.warden;
+  const wardenCmd = wardenServer?.command;
+  if (!Array.isArray(wardenCmd) || !wardenCmd.some((p) => String(p).endsWith("mcp"))) fail("warden MCP command missing");
+  if (wardenServer?.type !== "local" || wardenServer?.codemode !== false) fail("warden MCP server must keep type local + codemode false");
+  if (!process.env.OPENCODE_PASSWORD) fail("OPENCODE_PASSWORD must be set for serve auth");
+};
+if (argv[0] === "serve") {
+  checkSharedEnv();
+  if (!has("--hostname", "127.0.0.1")) fail("serve must bind 127.0.0.1");
+  if (!has("--port") || !(Number(argv[argv.indexOf("--port") + 1]) > 0)) fail("serve needs a --port value");
+  const port = Number(argv[argv.indexOf("--port") + 1]);
+  const mode = process.env.WARDEN_SMOKE_SERVE_MODE ?? "connected";
+  const server = createServer((req, res) => {
+    const u = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (u.pathname !== "/api/mcp") { res.writeHead(404); res.end(); return; }
+    if (req.headers.authorization !== ("Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_PASSWORD ?? ""), "utf8").toString("base64"))) {
+      res.writeHead(401); res.end(JSON.stringify({ message: "Authentication required" })); return;
+    }
+    const dir = u.searchParams.get("location[directory]");
+    if (!dir) fail("poll must send location[directory]");
+    const data =
+      mode === "connected"
+        ? [{ name: "unrelated", status: { status: "connected" } }, { name: "warden", status: { status: "connected" } }]
+        : mode === "failed"
+          ? [{ name: "warden", status: { status: "failed", error: "fake mcp exploded" } }]
+          : [{ name: "warden", status: { status: "pending" } }];
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ location: { directory: dir }, data }));
+  });
+  server.listen(port, "127.0.0.1", () => {
+    if (process.env.WARDEN_SMOKE_SERVE_PORT !== undefined) writeFileSync(process.env.WARDEN_SMOKE_SERVE_PORT, String(port));
+  });
+} else {
+if (argv[0] !== "run") fail("first argv must be run or serve");
+for (const w of ["--server", "--format"]) if (!has(w)) fail("missing " + w);
+if (has("--standalone")) fail("--standalone must not be passed (warmed serve owns MCP)");
+if (!String(argv[argv.indexOf("--server") + 1] ?? "").startsWith("http://127.0.0.1:")) fail("wrong --server URL");
 if (!has("--agent", "warden-down")) fail("wrong agent");
 if (!has("--model") || (argv[argv.indexOf("--model") + 1] ?? "").length === 0) fail("missing --model value");
 if (has("--auto")) fail("--auto must not be passed");
-if (!existsSync(process.env.OPENCODE_CONFIG ?? "")) fail("OPENCODE_CONFIG does not exist");
-if (process.env.OPENCODE_DISABLE_PROJECT_CONFIG !== "1") fail("project config not disabled");
-let content;
-try {
-  content = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? "");
-} catch { fail("OPENCODE_CONFIG_CONTENT is not JSON"); }
-const wardenServer = content?.mcp?.servers?.warden;
-const wardenCmd = wardenServer?.command;
-if (!Array.isArray(wardenCmd) || !wardenCmd.some((p) => String(p).endsWith("mcp"))) fail("warden MCP command missing");
-if (wardenServer?.type !== "local" || wardenServer?.codemode !== false) fail("warden MCP server must keep type local + codemode false");
-if (process.env.WARDEN_SMOKE_MARKER !== undefined) writeFileSync(process.env.WARDEN_SMOKE_MARKER, "invoked\\n");
+checkSharedEnv();
+if (!process.env.OPENCODE_PASSWORD) fail("run needs OPENCODE_PASSWORD for --server auth");
+if (process.env.WARDEN_SMOKE_RUN_MARKER !== undefined) writeFileSync(process.env.WARDEN_SMOKE_RUN_MARKER, "invoked\\n");
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + "\\n");
 const text = (t) => emit({ type: "text", timestamp: 2, sessionID: "s", part: { type: "text", text: t } });
 const tool = (name, status = "completed") =>
@@ -466,13 +582,19 @@ const mode = process.env.WARDEN_SMOKE_MODE ?? "ok";
 const finding = JSON.parse(process.env.WARDEN_SMOKE_FINDING ?? "null");
 const fence = String.fromCharCode(96).repeat(3);
 const block = (findings) => "Triage.\\n" + fence + "json\\n" + JSON.stringify({ findings }) + "\\n" + fence;
-if (mode === "ok" || mode === "notools" || mode === "outofscope") {
+if (mode === "runfail") {
+  tool("warden_run_det_priors");
+  text(block([finding]));
+  process.stderr.write("fake run exploded\\n");
+  process.exit(1);
+} else if (mode === "ok" || mode === "notools" || mode === "outofscope") {
   if (mode !== "notools") tool("warden_run_det_priors");
   tool("read");
   text(block(mode === "outofscope" ? [{ ...finding, file: "src/other.ts" }] : [finding]));
 } else if (mode === "nosubmission") {
   tool("warden_run_det_priors");
   text("looks clean to me, no block here");
+}
 }
 `,
   );
@@ -521,6 +643,7 @@ if (mode === "ok" || mode === "notools" || mode === "outofscope") {
             ...stripKeys(process.env),
             PATH: `${FAKE_BIN}:${process.env["PATH"] ?? ""}`,
             WARDEN_SMOKE_FINDING: JSON.stringify(inScopeFinding),
+            WARDEN_SMOKE_SERVE_PORT: resolve(TMP_ROOT, "fake-serve-port"),
             ...extraEnv,
           },
           encoding: "utf8",
@@ -534,6 +657,33 @@ if (mode === "ok" || mode === "notools" || mode === "outofscope") {
     }
   };
 
+  const fakeServePort = (): number | undefined => {
+    try {
+      const raw = readFileSync(resolve(TMP_ROOT, "fake-serve-port"), "utf8").trim();
+      const port = Number(raw);
+      return Number.isInteger(port) && port > 0 ? port : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const assertServeDead = async (label: string): Promise<void> => {
+    const port = fakeServePort();
+    assert(port !== undefined, `${label}: fake serve recorded its port`);
+    if (port === undefined) return;
+    let reachable = false;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      await fetch(`http://127.0.0.1:${port}/api/mcp`, { signal: controller.signal });
+      clearTimeout(timer);
+      reachable = true;
+    } catch {
+      reachable = false;
+    }
+    assert(!reachable, `${label}: no serve process left (port ${port} closed)`);
+  };
+
   const parseOut = (out: string): CommentSet | undefined => {
     try {
       const parsed = CommentSetSchema.safeParse(JSON.parse(out));
@@ -543,6 +693,7 @@ if (mode === "ok" || mode === "notools" || mode === "outofscope") {
     }
   };
 
+  // (a) happy path: serve reports connected, then run submits.
   const okRun = runDriver(["--base", "HEAD~1", "--json", "--lanes-out", "lanes.json"]);
   const okSet = parseOut(okRun.out);
   assert(okRun.exit === 0, `in-scope submission exits 0 (got ${okRun.exit})`);
@@ -556,6 +707,7 @@ if (mode === "ok" || mode === "notools" || mode === "outofscope") {
     ) === true,
     "lane-trace entry records the tool-call counts",
   );
+  await assertServeDead("happy path");
   let lanesOut: { version: number; lanes: Array<{ lane: string; status: string }> } | undefined;
   try {
     lanesOut = JSON.parse(readFileSync(resolve(REPO, "lanes.json"), "utf8"));
@@ -568,6 +720,59 @@ if (mode === "ok" || mode === "notools" || mode === "outofscope") {
       lanesOut.lanes[0]?.status === "ok",
     "--lanes-out carries the down/ok envelope for replay",
   );
+
+  // (b) warden never connects: lane failed, run never spawned, serve killed.
+  const runMarkerB = resolve(TMP_ROOT, "run-invoked-b");
+  const never = runDriver(["--base", "HEAD~1", "--json", "--mcp-timeout", "2"], {
+    WARDEN_SMOKE_SERVE_MODE: "never",
+    WARDEN_SMOKE_RUN_MARKER: runMarkerB,
+  });
+  const neverSet = parseOut(never.out);
+  assert(never.exit === 1, `unconnected MCP exits 1 (got ${never.exit})`);
+  assert(
+    neverSet?.metadata.degradedWorkers.some(
+      (d) =>
+        d.kind === "actionable" &&
+        d.topic === "lane-health" &&
+        d.message.includes("not connected within"),
+    ) === true,
+    "unconnected MCP fails the lane naming the timeout",
+  );
+  let runHitB = false;
+  try {
+    readFileSync(runMarkerB, "utf8");
+    runHitB = true;
+  } catch {
+    runHitB = false;
+  }
+  assert(!runHitB, "unconnected MCP never spawns run");
+  await assertServeDead("unconnected MCP");
+
+  // (c) warden failed status: lane failed with the server error in the reason.
+  const failedMcp = runDriver(["--base", "HEAD~1", "--json", "--mcp-timeout", "2"], {
+    WARDEN_SMOKE_SERVE_MODE: "failed",
+  });
+  const failedMcpSet = parseOut(failedMcp.out);
+  assert(failedMcp.exit === 1, `failed MCP exits 1 (got ${failedMcp.exit})`);
+  assert(
+    failedMcpSet?.metadata.degradedWorkers.some(
+      (d) => d.topic === "lane-health" && d.message.includes("fake mcp exploded"),
+    ) === true,
+    "failed MCP names the server error",
+  );
+  await assertServeDead("failed MCP");
+
+  // (d) run failure: the reason carries the stderr tail.
+  const runFail = runDriver(["--base", "HEAD~1", "--json"], { WARDEN_SMOKE_MODE: "runfail" });
+  const runFailSet = parseOut(runFail.out);
+  assert(runFail.exit === 1, `run failure exits 1 (got ${runFail.exit})`);
+  assert(
+    runFailSet?.metadata.degradedWorkers.some(
+      (d) => d.topic === "lane-health" && d.message.includes("fake run exploded"),
+    ) === true,
+    "run failure reason carries the stderr tail",
+  );
+  await assertServeDead("run failure");
 
   const noSub = runDriver(["--base", "HEAD~1", "--json"], { WARDEN_SMOKE_MODE: "nosubmission" });
   const noSubSet = parseOut(noSub.out);
@@ -598,18 +803,20 @@ if (mode === "ok" || mode === "notools" || mode === "outofscope") {
     "missing det-priors call names the gate in lane-health",
   );
 
-  const marker = resolve(TMP_ROOT, "fake-invoked");
-  const empty = runDriver(["--base", "HEAD", "--json"], { WARDEN_SMOKE_MARKER: marker });
+  const runMarker = resolve(TMP_ROOT, "run-invoked");
+  rmSync(resolve(TMP_ROOT, "fake-serve-port"), { force: true });
+  const empty = runDriver(["--base", "HEAD", "--json"], { WARDEN_SMOKE_RUN_MARKER: runMarker });
   const emptySet = parseOut(empty.out);
   assert(empty.exit === 1, `empty diff exits 1 (got ${empty.exit})`);
   let markerHit = false;
   try {
-    readFileSync(marker, "utf8");
+    readFileSync(runMarker, "utf8");
     markerHit = true;
   } catch {
     markerHit = false;
   }
-  assert(!markerHit, "empty diff never spawns OpenCode");
+  assert(!markerHit, "empty diff never spawns run");
+  assert(fakeServePort() === undefined, "empty diff never spawns serve");
   assert(
     emptySet?.metadata.degradedWorkers.some(
       (d) =>
