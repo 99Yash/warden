@@ -112,7 +112,9 @@ export interface ConfidenceDemotionResult {
  *
  * Residual (shared with m14): a real but unrelated `.d.ts` line still
  * exempts — the post-pass checks the citation is a genuine type
- * declaration, not that it is relevant to the claim.
+ * declaration, not that it is relevant to the claim. The check is lexical,
+ * so a reviewed workspace `.d.ts` reached through a `node_modules/` symlink
+ * also exempts.
  */
 export function hasVerifiedAuthority(c: Comment): boolean {
   return c.sources.some((s) => {
