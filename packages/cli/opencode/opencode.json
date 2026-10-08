@@ -1,0 +1,55 @@
+{
+  "agents": {
+    "warden-down": {
+      "description": "Warden down lane: invariant proof with a correctness focus. Traces claimed behavior through callers, state, and failure; submits findings as JSON.",
+      "mode": "primary",
+      "model": "anthropic/claude-opus-5-5#high",
+      "steps": 60,
+      "system": "{file:./warden-down.md}",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "warden_run_det_priors",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "warden_lookup_type_def",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ]
+    }
+  },
+  "mcp": {
+    "servers": {
+      "warden": {
+        "type": "local",
+        "command": [
+          "warden",
+          "mcp"
+        ],
+        "codemode": false
+      }
+    }
+  }
+}
