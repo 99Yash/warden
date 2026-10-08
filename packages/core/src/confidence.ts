@@ -94,21 +94,37 @@ export interface ConfidenceDemotionResult {
 }
 
 /**
- * True iff some source is a fully-populated `api_def` citation triple.
- * Must run after `verifyCitations` so the triple is verified — lane output
- * is model-owned, so a model-chosen `type: "cve"`/`"web"`/`"tool"` label is
+ * True iff some source is a fully-populated `api_def` citation triple
+ * pointing at an installed type declaration. Must run after
+ * `verifyCitations` so the triple is verified — lane output is
+ * model-owned, so a model-chosen `type: "cve"`/`"web"`/`"tool"` label is
  * not authority the post-pass can check. Letting such a label exempt a
- * finding from demotion would make demotion discretionary. The cost of
- * being strict is a question instead of an assertion, never a drop.
+ * finding from demotion would make demotion discretionary. The `api_def`
+ * label itself is model-chosen on this path too, so the exemption
+ * additionally requires the `lookupTypeDef` output contract (`schema.ts`
+ * `api_def` docs): a normalized path inside `node_modules/` ending in
+ * `.d.ts`. The cost of being strict is a question instead of an
+ * assertion, never a drop.
+ *
+ * Residual (shared with m14): a real but unrelated `.d.ts` line still
+ * exempts — the post-pass checks the citation is a genuine type
+ * declaration, not that it is relevant to the claim.
  */
 export function hasVerifiedAuthority(c: Comment): boolean {
-  return c.sources.some(
-    (s) =>
-      s.type === "api_def" &&
-      s.path !== undefined &&
-      s.line !== undefined &&
-      s.snippet !== undefined,
-  );
+  return c.sources.some((s) => {
+    if (
+      s.type !== "api_def" ||
+      s.path === undefined ||
+      s.line === undefined ||
+      s.snippet === undefined
+    ) {
+      return false;
+    }
+    const normalized = s.path.replace(/\\/g, "/");
+    const inNodeModules =
+      normalized.startsWith("node_modules/") || normalized.includes("/node_modules/");
+    return inNodeModules && normalized.endsWith(".d.ts");
+  });
 }
 
 /**

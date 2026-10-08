@@ -5,7 +5,11 @@ import { parseUnifiedDiff } from "./diff/index.js";
 import { pruneDiff } from "./diff/prune.js";
 import { verifyCitations } from "./llm/verify-citations.js";
 import { compareByPriority } from "./priority.js";
-import { scopeCommentsToDiff, scopeCommentsToFiles } from "./review-harness/comment-scope.js";
+import {
+  anchorInScope,
+  commentInScope,
+  scopeCommentsToDiff,
+} from "./review-harness/comment-scope.js";
 import { CommentSchema, type Comment, type CommentSet, type DegradedEntry } from "./schema.js";
 
 /**
@@ -46,7 +50,9 @@ export const PostPassLanesSchema = z.strictObject({
   lanes: z.array(LaneOutputSchema),
 });
 
-export const LaneFindingSchema = CommentSchema.extend({ id: z.string().optional() });
+// Model-supplied `id` keys are stripped (a plain `z.object` with no `id`
+// key), so a model id can never win dedupe — every id is minted below.
+export const LaneFindingSchema = CommentSchema.omit({ id: true });
 
 export interface PostPassConfig {
   verbose?: boolean;
@@ -69,8 +75,9 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   const postPass: DegradedEntry[] = [];
 
   // 1. Per-finding schema validation. Invalid findings drop, counted per
-  // lane. Missing ids are minted without the lane in the key, so the same
-  // finding submitted by two lanes dedupes at step 8.
+  // lane. Every id is minted content-addressed without the lane in the
+  // key, so byte-identical findings (same file, lines, category, and
+  // claim) submitted by two lanes dedupe at step 8.
   const perLane: Comment[][] = [];
   const invalidByLane = new Map<string, number>();
   for (const lane of input.lanes) {
@@ -81,14 +88,12 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
         invalidByLane.set(lane.lane, (invalidByLane.get(lane.lane) ?? 0) + 1);
         continue;
       }
-      const { id, ...rest } = result.data;
+      const rest = result.data;
       kept.push({
         ...rest,
-        id:
-          id ??
-          stableCommentId(
-            `post-pass:${rest.file}:${rest.lineStart}:${rest.lineEnd}:${rest.category}:${rest.claim}`,
-          ),
+        id: stableCommentId(
+          `post-pass:${rest.file}:${rest.lineStart}:${rest.lineEnd}:${rest.category}:${rest.claim}`,
+        ),
       });
     }
     perLane.push(kept);
@@ -106,15 +111,35 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   }
 
   // 2. Lane scope membership, per lane against its trusted envelope.
-  // Findings from a failed lane are still processed — partial output is
-  // evidence, not trusted output.
+  // Both the source paths (`commentInScope`) and the finding's own anchor
+  // (`anchorInScope`) must be in scope — sources alone are model-owned, so
+  // a sourceless finding or an out-of-scope anchor would otherwise publish
+  // on any changed file. Findings from a failed lane are still processed —
+  // partial output is evidence, not trusted output.
   const scoped: Comment[] = [];
+  const scopedKeptByLane: number[] = [];
   let scopeDropped = 0;
   input.lanes.forEach((lane, i) => {
-    const result = scopeCommentsToFiles(perLane[i] ?? [], lane.scope);
-    scoped.push(...result.comments);
-    scopeDropped += result.droppedCount;
+    const scope = new Set(lane.scope.map((p) => p.replace(/\\/g, "/")));
+    let keptCount = 0;
+    for (const comment of perLane[i] ?? []) {
+      if (commentInScope(comment, scope) && anchorInScope(comment, scope)) {
+        scoped.push(comment);
+        keptCount += 1;
+      } else {
+        scopeDropped += 1;
+      }
+    }
+    scopedKeptByLane.push(keptCount);
   });
+  // An `ok` lane with non-empty findings that loses all of them to gates
+  // 1–2 (schema + scope) is unhealthy — including a mis-encoded scope, which
+  // otherwise fails silently. Named per lane for the lane-health entries.
+  const unhealthy = input.lanes.flatMap((lane, index) =>
+    lane.status === "ok" && lane.findings.length > 0 && (scopedKeptByLane[index] ?? 0) === 0
+      ? [{ index, lane: lane.lane, count: lane.findings.length }]
+      : [],
+  );
   if (scopeDropped > 0) {
     postPass.push({
       kind: "info",
@@ -130,7 +155,16 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
 
   // 4. Added-line anchoring — identical derivation to runDetPriors
   // (det-priors.ts:129): parse, then prune, then scope to the pruned set.
+  // Zero files means no comment can anchor (e.g. an empty --diff-file) —
+  // an actionable entry, not a clean result.
   const changed = pruneDiff(parseUnifiedDiff(input.diff)).pruned;
+  if (changed.length === 0) {
+    postPass.push({
+      kind: "actionable",
+      topic: "diff-source",
+      message: "post-pass: empty diff — no comment can anchor; this is NOT a clean result",
+    });
+  }
   const anchored = scopeCommentsToDiff(verified.comments, changed);
   if (anchored.droppedCount > 0) {
     postPass.push({
@@ -206,7 +240,7 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
     });
   }
 
-  const laneHealth = laneHealthEntries(input.lanes);
+  const laneHealth = laneHealthEntries(input.lanes, unhealthy);
 
   return {
     comments: capped,
@@ -234,7 +268,10 @@ function resolveVolumeCap(volumeCap: number | undefined): number {
   return cap;
 }
 
-function laneHealthEntries(lanes: LaneOutput[]): DegradedEntry[] {
+function laneHealthEntries(
+  lanes: LaneOutput[],
+  unhealthy: { index: number; lane: string; count: number }[],
+): DegradedEntry[] {
   if (lanes.length === 0) {
     return [
       {
@@ -255,15 +292,41 @@ function laneHealthEntries(lanes: LaneOutput[]): DegradedEntry[] {
       },
     ];
   }
+  if (failed.length === 0 && unhealthy.length === 0) {
+    return [];
+  }
+  const failedIdx = new Set(lanes.flatMap((l, i) => (l.status === "failed" ? [i] : [])));
+  const unhealthyIdx = new Set(unhealthy.map((u) => u.index));
+  const allCovered = lanes.every((_, i) => failedIdx.has(i) || unhealthyIdx.has(i));
+  const parts: string[] = [];
   if (failed.length > 0) {
-    const reasons = failed.map((l) => `${l.lane}: ${l.reason ?? "no reason given"}`).join("; ");
+    parts.push(failed.map((l) => `${l.lane}: ${l.reason ?? "no reason given"}`).join("; "));
+  }
+  if (unhealthy.length > 0) {
+    parts.push(
+      unhealthy
+        .map(
+          (u) =>
+            `${u.lane}: all ${u.count} ${u.count === 1 ? "finding" : "findings"} dropped by validation/scope`,
+        )
+        .join("; "),
+    );
+  }
+  const detail = parts.join("; ");
+  if (allCovered) {
     return [
       {
-        kind: "warning",
+        kind: "actionable",
         topic: "lane-health",
-        message: `${failed.length} of ${lanes.length} review lanes failed (${reasons}) — partial results`,
+        message: `all ${lanes.length} review lanes failed or unhealthy — this is NOT a clean result (${detail})`,
       },
     ];
   }
-  return [];
+  return [
+    {
+      kind: "warning",
+      topic: "lane-health",
+      message: `${failed.length + unhealthy.length} of ${lanes.length} review lanes failed or unhealthy (${detail}) — partial results`,
+    },
+  ];
 }

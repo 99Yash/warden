@@ -28,6 +28,21 @@ export function commentInScope(comment: Comment, scope: ReadonlySet<string>): bo
 }
 
 /**
+ * The post-pass anchor check (slice #41 must-fix 1): the finding's own
+ * `comment.file` must be in the lane's trusted scope set. `commentInScope`
+ * above only inspects `sources[].path`, which is model-owned on the
+ * externally-driven path — a finding with zero sources, or with one
+ * in-scope source and an out-of-scope anchor, would otherwise publish on
+ * any changed file. The anchor is model-owned too, but requiring both
+ * closes the sourceless/out-of-scope-anchor sequences. Kept separate from
+ * `commentInScope` (and `dispatch-worker.ts` unchanged): the Phase-2 hole
+ * is pre-existing and queued as follow-up.
+ */
+export function anchorInScope(comment: Comment, scope: ReadonlySet<string>): boolean {
+  return scope.has(comment.file.replace(/\\/g, "/"));
+}
+
+/**
  * Keep only comments in the lane's trusted file set, normalizing `\`→`/`
  * on both sides. Returns the kept comments plus the drop count so the
  * caller can fold it into `CommentSet.degradedWorkers`.
