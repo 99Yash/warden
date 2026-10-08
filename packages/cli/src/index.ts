@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   PostPassLanesSchema,
+  isNotClean,
   resolveDiff,
   review,
   runPostPass,
@@ -25,6 +26,7 @@ import { runInitCommand } from "./commands/init.js";
 import { runSetupCommand, type SetupCliOpts } from "./commands/setup.js";
 import { formatCommentSet } from "./format.js";
 import { createPhaseRenderer, renderBannerLine } from "./render.js";
+import { runOpencodeReview } from "./opencode/drive.js";
 
 function findUp(filename: string): string | undefined {
   let dir = process.cwd();
@@ -244,6 +246,31 @@ program
   });
 
 program
+  .command("opencode-review")
+  .description(
+    "Run the down lane in OpenCode, build the trusted lane envelope, and publish only the runPostPass CommentSet. No warden provider key needed.",
+  )
+  .option(
+    "--base <ref>",
+    "Override the base ref for the diff (default: vs default-branch, like review).",
+  )
+  .option(
+    "--model <provider/model#variant>",
+    "Lane model override (default: the lane spec's strong-tier default).",
+  )
+  .option("--json", "Emit machine-readable JSON output instead of pretty CLI.")
+  .option("--verbose", "Keep tier-3 (style/dedup) findings; gated by default.")
+  .option("--volume-cap <n>", "Maximum comments to emit; Tier-1 always kept. Default 5.")
+  .option(
+    "--lanes-out <path>",
+    "Write the lane envelope JSON here (audit / replay through warden post-pass).",
+  )
+  .option("--timeout <seconds>", "Kill the OpenCode child after N seconds. Default 900.")
+  .action(async (opts: OpencodeReviewOpts) => {
+    await runOpencodeReviewCommand(opts);
+  });
+
+program
   .command("mcp")
   .description("Start Warden's MCP tool-provider over stdio. Stdout is reserved for JSON-RPC.")
   .action(async () => {
@@ -339,6 +366,57 @@ async function runSecurity(opts: CommonOpts): Promise<void> {
   process.stdout.write("\n" + formatCommentSet(result, "security", opts.verbose === true) + "\n");
 }
 
+interface OpencodeReviewOpts {
+  base?: string;
+  model?: string;
+  json?: boolean;
+  verbose?: boolean;
+  volumeCap?: string;
+  lanesOut?: string;
+  timeout?: string;
+}
+
+/**
+ * Slice #42 / ADR-0053 §4: the driven path. All lane logic lives in
+ * `opencode/drive.ts`; this handler only parses flags.
+ */
+async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void> {
+  const repoRoot = findRepoRoot();
+  loadWardenRuntime({ repoRoot });
+
+  let volumeCap: number | undefined;
+  if (opts.volumeCap !== undefined) {
+    const n = Number(opts.volumeCap);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `opencode-review: --volume-cap must be a positive integer (got "${opts.volumeCap}")`,
+      );
+    }
+    volumeCap = n;
+  }
+  let timeoutSecs: number | undefined;
+  if (opts.timeout !== undefined) {
+    const n = Number(opts.timeout);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(
+        `opencode-review: --timeout must be a positive number (got "${opts.timeout}")`,
+      );
+    }
+    timeoutSecs = n;
+  }
+
+  await runOpencodeReview({
+    repoRoot,
+    ...(opts.base !== undefined ? { baseRef: opts.base } : {}),
+    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(opts.json !== undefined ? { json: opts.json } : {}),
+    ...(opts.verbose !== undefined ? { verbose: opts.verbose } : {}),
+    ...(volumeCap !== undefined ? { volumeCap } : {}),
+    ...(opts.lanesOut !== undefined ? { lanesOut: opts.lanesOut } : {}),
+    ...(timeoutSecs !== undefined ? { timeoutSecs } : {}),
+  });
+}
+
 function writeJsonResult(result: CommentSet, opts: { json?: boolean }): boolean {
   if (!opts.json) return false;
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -422,11 +500,7 @@ async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
   // empty diff that anchored nothing) must not look like success. Only
   // `lane-health` and `diff-source` gate the exit — other actionable
   // entries (e.g. `noise-filter`) fire on normal runs.
-  if (
-    result.metadata.degradedWorkers.some(
-      (e) => e.kind === "actionable" && (e.topic === "lane-health" || e.topic === "diff-source"),
-    )
-  ) {
+  if (isNotClean(result)) {
     process.exitCode = 1;
   }
 
