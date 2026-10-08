@@ -52,10 +52,13 @@ const DTS_LINES = [
   "export declare const fakeVersion: string;",
   "export declare function greet(name: string): string;",
 ];
+const TRAVERSE_DECL = "src/traverse.d.ts";
+const TRAVERSE_LINES = ["export declare const traverseFlag: boolean;"];
 mkdirSync(resolve(TMP_ROOT, "src"), { recursive: true });
 mkdirSync(resolve(TMP_ROOT, "node_modules/fakepkg"), { recursive: true });
 writeFileSync(resolve(TMP_ROOT, SRC), SRC_LINES.join("\n") + "\n");
 writeFileSync(resolve(TMP_ROOT, DTS), DTS_LINES.join("\n") + "\n");
+writeFileSync(resolve(TMP_ROOT, TRAVERSE_DECL), TRAVERSE_LINES.join("\n") + "\n");
 
 // The diff adds only lines 1-3 of src/a.ts: line 6 is a real file line
 // (the verifier passes it) but not an added line (anchoring drops it).
@@ -113,7 +116,7 @@ try {
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[1] schema validation — malformed drops, id minted\n");
   const noId = mkFinding();
-  delete (noId as Record<string, unknown>)["id"];
+  delete noId["id"];
   const lanes1: LaneOutput[] = [mkLane("up", [42, "nope", {}, noId])];
   const r1 = await runPostPass({ repoRoot: TMP_ROOT, diff: DIFF, lanes: lanes1 });
   assert(r1.comments.length === 1, `one valid finding survives (got ${r1.comments.length})`);
@@ -291,6 +294,15 @@ try {
   const above = mkFinding({ confidence: 0.9 });
   const lowSecurity = mkFinding({ category: "security", confidence: 0.75 });
   const tier1Low = mkFinding({ tier: 1, confidence: 0.1 });
+  const inScopeCompanion = {
+    type: "tool",
+    id: "t",
+    title: "t",
+    retrievedAt: nowIso,
+    path: SRC,
+    line: 2,
+    snippet: SRC_LINES[1],
+  };
   const apiDefLow = {
     ...mkFinding({ confidence: 0.1 }),
     sources: [
@@ -303,6 +315,39 @@ try {
         line: 2,
         snippet: DTS_LINES[1],
       },
+      // A bare `api_def` path in `node_modules/` is outside every lane
+      // scope, so the verified finding needs an in-scope companion source
+      // or gate 2 drops it (see `bareApiDef` below).
+      { ...inScopeCompanion },
+    ],
+  };
+  const bareApiDef = {
+    ...mkFinding({ confidence: 0.9 }),
+    sources: [
+      {
+        type: "api_def",
+        id: "fakepkg@1.0.0#greet",
+        title: "function greet",
+        retrievedAt: nowIso,
+        path: DTS,
+        line: 2,
+        snippet: DTS_LINES[1],
+      },
+    ],
+  };
+  const traversalApiDef = {
+    ...mkFinding({ confidence: 0.2 }),
+    sources: [
+      {
+        type: "api_def",
+        id: "traverse#flag",
+        title: "const traverseFlag",
+        retrievedAt: nowIso,
+        path: `node_modules/../${TRAVERSE_DECL}`,
+        line: 1,
+        snippet: TRAVERSE_LINES[0],
+      },
+      { ...inScopeCompanion },
     ],
   };
   const apiDefSrc = {
@@ -330,7 +375,7 @@ try {
       {
         lane: "up",
         status: "ok",
-        scope: [SRC, DTS],
+        scope: [SRC],
         findings: [
           lowReasoned,
           atThreshold,
@@ -338,12 +383,14 @@ try {
           lowSecurity,
           tier1Low,
           apiDefLow,
+          bareApiDef,
+          traversalApiDef,
           apiDefSrc,
           cveLow,
         ],
       },
     ],
-    // 8 findings, all gated through — the default cap of 5 would clip three.
+    // 10 findings, all gated through — the default cap of 5 would clip half.
     config: { volumeCap: Infinity },
   });
   const kindOf = (claim: string): string | undefined =>
@@ -361,7 +408,15 @@ try {
   );
   assert(
     kindOf(claimOf(apiDefLow)) === "assertion",
-    "verified api_def low-confidence stays an assertion",
+    "verified api_def with an in-scope companion stays an assertion",
+  );
+  assert(
+    !r5.comments.some((c) => c.claim === claimOf(bareApiDef)),
+    "bare api_def with scope [SRC] drops at gate 2 — node_modules/ is outside every lane scope",
+  );
+  assert(
+    kindOf(claimOf(traversalApiDef)) === "question",
+    "api_def at node_modules/../src/*.d.ts demotes — traversal escapes node_modules/",
   );
   assert(
     kindOf(claimOf(apiDefSrc)) === "question",
@@ -413,9 +468,9 @@ try {
   assert(order7 === want7, `correctness before style, tier before confidence (${order7})`);
 
   // ---------------------------------------------------------------------------
-  // [8] cross-lane id dedupe.
+  // [8] dedupe — identical content across lanes posts once, model ids stripped.
   // ---------------------------------------------------------------------------
-  process.stdout.write("\n[8] dedupe — identical content across two lanes posts once\n");
+  process.stdout.write("\n[8] dedupe — identical content posts once, model ids stripped\n");
   const sharedClaim = "shared cross-lane claim";
   const dupA = mkFinding({ claim: sharedClaim });
   const dupB = mkFinding({ claim: sharedClaim });
@@ -520,7 +575,7 @@ try {
   });
   const unhealthyOne = r10e.metadata.degradedWorkers.find((d) => d.topic === "lane-health");
   assert(
-    unhealthyOne?.kind === "warning" && (unhealthyOne.message.includes("down") ?? false),
+    unhealthyOne?.kind === "warning" && unhealthyOne.message.includes("down"),
     "ok lane losing all findings to validation/scope is unhealthy — warning naming the lane",
   );
   const r10f = await runPostPass({
@@ -621,7 +676,7 @@ try {
     ],
     { cwd: TMP_ROOT, env: stripKeys(process.env), input: lanesJson, encoding: "utf8" },
   );
-  const cliParsed = CommentSetSchema.safeParse(JSON.parse(cliOut as string));
+  const cliParsed = CommentSetSchema.safeParse(JSON.parse(cliOut));
   assert(cliParsed.success, "keyless CLI run exits 0 with a schema-valid CommentSet");
   if (cliParsed.success) {
     assert(
@@ -632,8 +687,9 @@ try {
 
   process.stdout.write("\n[12c] CLI exits 1 on empty lanes\n");
   let exit1 = -1;
+  let out12c = "";
   try {
-    execFileSync(
+    out12c = execFileSync(
       process.execPath,
       [
         "--import",
@@ -656,13 +712,37 @@ try {
     );
   } catch (err) {
     exit1 = (err as { status?: number }).status ?? -1;
+    out12c = (err as { stdout?: string }).stdout ?? "";
   }
   assert(exit1 === 1, `empty lanes exits 1 (got ${exit1})`);
+  const parsed12c = CommentSetSchema.safeParse(JSON.parse(out12c));
+  assert(
+    parsed12c.success &&
+      parsed12c.data.metadata.degradedWorkers.some(
+        (d) =>
+          d.kind === "actionable" &&
+          d.topic === "lane-health" &&
+          d.message.includes("no review lanes reported"),
+      ),
+    "empty lanes stdout carries the actionable lane-health entry",
+  );
 
   process.stdout.write("\n[12d] CLI exits 1 on bad --base and empty --diff-file\n");
+  // A real git repo, so the bad ref — not a missing repo — is the cause.
+  const GIT_ROOT = mkdtempSync(resolve(tmpdir(), "warden-mcp-post-pass-git-"));
+  execFileSync("git", ["init"], { cwd: GIT_ROOT, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "smoke@example.com"], {
+    cwd: GIT_ROOT,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["config", "user.name", "smoke"], { cwd: GIT_ROOT, stdio: "ignore" });
+  writeFileSync(resolve(GIT_ROOT, "README.md"), "smoke\n");
+  execFileSync("git", ["add", "-A"], { cwd: GIT_ROOT, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "smoke"], { cwd: GIT_ROOT, stdio: "ignore" });
   let badBaseExit = -1;
+  let out12dBase = "";
   try {
-    execFileSync(
+    out12dBase = execFileSync(
       process.execPath,
       [
         "--import",
@@ -676,7 +756,7 @@ try {
         "-",
       ],
       {
-        cwd: TMP_ROOT,
+        cwd: GIT_ROOT,
         env: stripKeys(process.env),
         input: lanesJson,
         encoding: "utf8",
@@ -685,13 +765,24 @@ try {
     );
   } catch (err) {
     badBaseExit = (err as { status?: number }).status ?? -1;
+    out12dBase = (err as { stdout?: string }).stdout ?? "";
   }
   assert(badBaseExit === 1, `bad --base exits 1 (got ${badBaseExit})`);
+  const parsed12dBase = CommentSetSchema.safeParse(JSON.parse(out12dBase));
+  assert(
+    parsed12dBase.success &&
+      parsed12dBase.data.metadata.degradedWorkers.some(
+        (d) => d.kind === "actionable" && d.topic === "diff-source",
+      ),
+    "bad --base stdout carries the actionable diff-source entry",
+  );
+  rmSync(GIT_ROOT, { recursive: true, force: true });
   const EMPTY_DIFF_PATH = resolve(TMP_ROOT, "empty.diff");
   writeFileSync(EMPTY_DIFF_PATH, "");
   let emptyDiffExit = -1;
+  let out12dEmpty = "";
   try {
-    execFileSync(
+    out12dEmpty = execFileSync(
       process.execPath,
       [
         "--import",
@@ -714,8 +805,82 @@ try {
     );
   } catch (err) {
     emptyDiffExit = (err as { status?: number }).status ?? -1;
+    out12dEmpty = (err as { stdout?: string }).stdout ?? "";
   }
   assert(emptyDiffExit === 1, `empty --diff-file exits 1 (got ${emptyDiffExit})`);
+  const parsed12dEmpty = CommentSetSchema.safeParse(JSON.parse(out12dEmpty));
+  assert(
+    parsed12dEmpty.success &&
+      parsed12dEmpty.data.metadata.degradedWorkers.some(
+        (d) => d.kind === "actionable" && d.topic === "diff-source",
+      ),
+    "empty --diff-file stdout carries the actionable diff-source entry",
+  );
+
+  // ---------------------------------------------------------------------------
+  // [14] pruned-not-empty diff — no false "empty diff", noise-filter forwarded.
+  // ---------------------------------------------------------------------------
+  process.stdout.write("\n[14] pruned diff — noise-filter forwarded, no diff-source entry\n");
+  // A diff that parses to files but prunes to nothing (generated noise) is
+  // not an empty diff: the large generated drop is loud (info
+  // noise-filter), so the silence is visible without a false-clean entry.
+  const MIN_LINES = Array.from({ length: 600 }, (_, i) => `+var bundle${i} = ${i};`).join("\n");
+  const MIN_DIFF = [
+    "diff --git a/dist/x.min.js b/dist/x.min.js",
+    "--- /dev/null",
+    "+++ b/dist/x.min.js",
+    "@@ -0,0 +1,600 @@",
+    MIN_LINES,
+    "",
+  ].join("\n");
+  const MIN_DIFF_PATH = resolve(TMP_ROOT, "noise.diff");
+  writeFileSync(MIN_DIFF_PATH, MIN_DIFF);
+  const r14 = await runPostPass({ repoRoot: TMP_ROOT, diff: MIN_DIFF, lanes: [mkLane("up", [])] });
+  assert(
+    r14.metadata.degradedWorkers.every((d) => d.topic !== "diff-source"),
+    "pruned-to-nothing diff emits no diff-source entry",
+  );
+  assert(
+    r14.metadata.degradedWorkers.some((d) => d.topic === "noise-filter"),
+    "prune degraded is forwarded into the CommentSet",
+  );
+  let exit14 = -1;
+  let out14 = "";
+  try {
+    out14 = execFileSync(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx/esm"),
+        resolve(CLI_ROOT, "src/index.ts"),
+        "post-pass",
+        "--json",
+        "--diff-file",
+        MIN_DIFF_PATH,
+        "--lanes",
+        "-",
+      ],
+      {
+        cwd: TMP_ROOT,
+        env: stripKeys(process.env),
+        input: JSON.stringify({ version: 1, lanes: [mkLane("up", [])] }),
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    exit14 = 0;
+  } catch (err) {
+    exit14 = (err as { status?: number }).status ?? -1;
+    out14 = (err as { stdout?: string }).stdout ?? "";
+  }
+  assert(exit14 === 0, `pruned diff with ok + empty exits 0 (got ${exit14})`);
+  const parsed14 = CommentSetSchema.safeParse(JSON.parse(out14));
+  assert(
+    parsed14.success &&
+      parsed14.data.metadata.degradedWorkers.some((d) => d.topic === "noise-filter") &&
+      parsed14.data.metadata.degradedWorkers.every((d) => d.topic !== "diff-source"),
+    "pruned-diff CLI stdout forwards noise-filter with no diff-source entry",
+  );
 
   // ---------------------------------------------------------------------------
   // [13] not an MCP tool.
