@@ -124,9 +124,23 @@ export function resolveWardenMcpCommand(): string[] {
   return [process.execPath, ...resolveLoaderFlags(), resolveCliEntry(), "mcp"];
 }
 
-/** `OPENCODE_CONFIG_CONTENT` overrides only the warden MCP command/cwd. */
+/**
+ * `OPENCODE_CONFIG_CONTENT` carries the full warden server object, not just
+ * the command/cwd delta: the host resolves config per top-level key (last
+ * document defining the key wins the whole key — `latest()` in
+ * `core/src/config.ts`), so a partial `{mcp:…}` override would replace the
+ * committed `mcp` object and drop `type`/`codemode`, and the server entry
+ * would fail validation and never register. Values mirror the committed
+ * `opencode.json`; only command/cwd vary per install.
+ */
 export function buildMcpConfigContent(opts: { command: string[]; cwd: string }): string {
-  return JSON.stringify({ mcp: { servers: { warden: { command: opts.command, cwd: opts.cwd } } } });
+  return JSON.stringify({
+    mcp: {
+      servers: {
+        warden: { type: "local", command: opts.command, cwd: opts.cwd, codemode: false },
+      },
+    },
+  });
 }
 
 export interface LaneProcessResult {
@@ -169,7 +183,9 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       if (typeof text === "string" && text.trim() !== "") texts.push(text);
     } else if (record["type"] === "tool_use") {
       const part = record["part"] as Record<string, unknown> | undefined;
-      const name = part?.["name"];
+      // Wire shape is `part.tool` (verified against a live `--format json`
+      // stream); `part.name` is accepted as a fallback for forward tolerance.
+      const name = part?.["tool"] ?? part?.["name"];
       if (typeof name !== "string" || name === "") continue;
       seenByTool.set(name, (seenByTool.get(name) ?? 0) + 1);
       const status = (part?.["state"] as Record<string, unknown> | undefined)?.["status"];

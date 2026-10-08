@@ -87,11 +87,13 @@ function textEvent(text: string): string {
 }
 
 function toolEvent(name: string, status = "completed"): string {
+  // Real wire shape is `part.tool` (verified against a live `--format json`
+  // stream); the driver also tolerates `part.name`.
   return JSON.stringify({
     type: "tool_use",
     timestamp: 1,
     sessionID: "s",
-    part: { type: "tool", id: "t1", name, state: { status }, time: {} },
+    part: { type: "tool", id: "t1", tool: name, state: { status }, time: {} },
   });
 }
 
@@ -340,6 +342,20 @@ try {
     { exitCode: 0, stdout: "", timedOut: false },
   );
   assert(runningOnly.status === "failed", "non-completed det-priors call still fails the lane");
+  // Forward tolerance: a `part.name` shape (no `part.tool`) still counts.
+  const legacyName = parseLaneEvents(
+    [
+      JSON.stringify({
+        type: "tool_use",
+        part: { type: "tool", name: "warden_run_det_priors", state: { status: "completed" } },
+      }),
+      textEvent(submissionText([goodFinding])),
+    ].join("\n"),
+  );
+  assert(
+    evaluateLane(legacyName, { exitCode: 0, stdout: "", timedOut: false }).status === "ok",
+    "legacy part.name tool shape still satisfies the gate",
+  );
 
   // ---------------------------------------------------------------------------
   // [6] command builder + MCP command — argv shape, loader resolution.
@@ -367,9 +383,13 @@ try {
   const content = JSON.parse(
     buildMcpConfigContent({ command: ["node", "x", "mcp"], cwd: "/tmp/r" }),
   ) as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
+  const wardenServer = content["mcp"]?.["servers"]?.["warden"];
   assert(
-    Array.isArray(content["mcp"]?.["servers"]?.["warden"]?.["command"]),
-    "config content overrides only the warden MCP command/cwd",
+    Array.isArray(wardenServer?.["command"]) &&
+      wardenServer?.["type"] === "local" &&
+      wardenServer?.["codemode"] === false &&
+      (wardenServer as Record<string, unknown>)["cwd"] === "/tmp/r",
+    "config content carries the full server object (host replaces the whole mcp key)",
   );
   const mcpCommand = resolveWardenMcpCommand();
   assert(mcpCommand[mcpCommand.length - 1] === "mcp", "warden MCP command ends with the mcp verb");
@@ -433,13 +453,15 @@ let content;
 try {
   content = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? "");
 } catch { fail("OPENCODE_CONFIG_CONTENT is not JSON"); }
-const wardenCmd = content?.mcp?.servers?.warden?.command;
+const wardenServer = content?.mcp?.servers?.warden;
+const wardenCmd = wardenServer?.command;
 if (!Array.isArray(wardenCmd) || !wardenCmd.some((p) => String(p).endsWith("mcp"))) fail("warden MCP command missing");
+if (wardenServer?.type !== "local" || wardenServer?.codemode !== false) fail("warden MCP server must keep type local + codemode false");
 if (process.env.WARDEN_SMOKE_MARKER !== undefined) writeFileSync(process.env.WARDEN_SMOKE_MARKER, "invoked\\n");
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + "\\n");
 const text = (t) => emit({ type: "text", timestamp: 2, sessionID: "s", part: { type: "text", text: t } });
 const tool = (name, status = "completed") =>
-  emit({ type: "tool_use", timestamp: 1, sessionID: "s", part: { type: "tool", id: "t", name, state: { status }, time: {} } });
+  emit({ type: "tool_use", timestamp: 1, sessionID: "s", part: { type: "tool", id: "t", tool: name, state: { status }, time: {} } });
 const mode = process.env.WARDEN_SMOKE_MODE ?? "ok";
 const finding = JSON.parse(process.env.WARDEN_SMOKE_FINDING ?? "null");
 const fence = String.fromCharCode(96).repeat(3);

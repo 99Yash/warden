@@ -45,8 +45,10 @@ resolves it relative to its own module in dev and dist):
   `system: "{file:./warden-down.md}"` (substituted relative to the config
   file's directory), the permission list below, and
   `mcp.servers.warden = {type: "local", command: ["warden", "mcp"],
-  codemode: false}` (the driver overrides the command/cwd per install via
-  `OPENCODE_CONFIG_CONTENT`).
+  codemode: false}` (the driver re-states the full server object per install
+  via `OPENCODE_CONFIG_CONTENT` — the host resolves config per top-level
+  key, so a partial override would replace the whole `mcp` key and drop
+  `type`/`codemode`).
 
 ## Permission list
 
