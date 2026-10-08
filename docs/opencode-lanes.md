@@ -91,9 +91,70 @@ tools with their own permission actions — the permission list above and
 the driver's zero-call gate both depend on those exact names
 (`<server>_<tool>`).
 
-## `--standalone` + project config
+## The MCP startup race (operator amendment 2026-10-08)
 
-The driver spawns `opencode run --standalone` with
+The shipped binaries (v2.0.24, v2.0.25) do not wait for MCP servers
+before the session tool snapshot: `SessionContext.select` awaits only the
+plugin flush, not the MCP flush, and `MCP.tools()` returns connected tools
+at once without a readiness wait (binary evidence: `"SessionContext.select"`
+in `/tmp/slice42-probe/oc25.strings` line ~183319; the `v2` source checkout
+still has both waits, so the source does not match the binary here — trust
+the binary). A server that connects late fires `mcp.tools.changed` and its
+tools register after short debounces, so only a later step or a later run
+on a warm server sees them. Warden's MCP server (tsx) connects ~2.7–3 s
+after the server starts, after the first snapshot — so a cold
+`opencode run --standalone` never shows `warden_run_det_priors`. Proof:
+replay MCP servers with warden's exact `tools/list` are visible when they
+connect fast and missing with a 2.5 s connect delay (probes p6/p7); on one
+`opencode serve`, the cold run misses the tools and the warm run shows
+`warden_run_det_priors` and `warden_lookup_type_def` as direct tools
+(p11/p12, real warden config).
+
+## Serve → poll → run
+
+The driver never uses `run --standalone`. Instead:
+
+1. Spawn `opencode serve --hostname 127.0.0.1 --port <free port>` (flags
+   verified against `opencode serve --help`: `--hostname`, `--port`) with
+   the same env as before (`OPENCODE_CONFIG`,
+   `OPENCODE_DISABLE_PROJECT_CONFIG=1`, `OPENCODE_CONFIG_CONTENT`) plus a
+   random `OPENCODE_PASSWORD`. The port comes from the OS (listen on port
+   0, read the port, close). The serve child reads the env password for
+   its API auth (`server-process.ts`: `Env.password`, else a random
+   fallback the run client could never know); the run client sends it back
+   as Basic `opencode:<password>` (`server-connection.ts`), so both
+   children share it and it never leaves loopback.
+2. Poll `GET http://127.0.0.1:<port>/api/mcp` with Basic auth
+   `opencode:<password>`. This call also boots the location. The query is
+   `location[directory]=<repoRoot>` (deepObject `LocationQuery` —
+   `packages/protocol/src/groups/location.ts`; a bare `?directory=` is
+   ignored by the binary and answers with the serve cwd, verified live).
+   The response shape is `{location:{…},
+   data:[{name,status:{status,error?}}]}` (`Location.response` in
+   `packages/server/src/location.ts`, `Mcp.Server` in
+   `packages/schema/src/mcp.ts`) — the driver validates it as untrusted
+   JSON. Wait until the **warden** server shows `connected`; other servers
+   (e.g. the user's global config) are ignored. A `failed` warden, or no
+   `connected` within 30 s (default, `--mcp-timeout` overrides), fails the
+   lane with a reason naming the MCP status — `run` is never spawned.
+3. Wait ~1 s more (`MCP_SETTLE_MS`) for the `mcp.tools.changed`
+   debounces before the first snapshot.
+4. Spawn `opencode run --server http://127.0.0.1:<port> --agent
+   warden-down --model <m> --format json <message>` (flag verified against
+   `opencode run --help`: `--server`; `--standalone` stays off) with stdin
+   ignored. `OPENCODE_PASSWORD` stays in its env for the `--server` auth.
+5. The serve child is killed on every exit path (SIGTERM, then SIGKILL
+   after a grace period): success, failure, timeout, and thrown errors. A
+   leaked `opencode serve` is a bug.
+6. Diagnostics: a bounded ~2 KB stderr tail of both processes. A run
+   failure reason carries the run tail (e.g. `opencode run exited 1
+   (stderr: …)`); an MCP-warmup failure reason carries the serve tail. A
+   failed lane always says why.
+
+## `--standalone` + project config (superseded)
+
+The `--standalone` paragraph below describes the pre-amendment driver and
+is kept for history only. The current driver spawns `opencode serve` with
 `OPENCODE_CONFIG=<absolute opencode.json>` and
 `OPENCODE_DISABLE_PROJECT_CONFIG=1`: a private server that inherits the
 driver's env, and the reviewed tree cannot re-grant permissions, add
@@ -118,7 +179,7 @@ conclusions.
 ```
 warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   [--json] [--verbose] [--volume-cap <n>] [--lanes-out <path>]
-  [--timeout <seconds>]
+  [--timeout <seconds>] [--mcp-timeout <seconds>]
 ```
 
 - Resolves the diff exactly like `warden post-pass` (`resolveDiff`,
@@ -127,11 +188,17 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   anchors against.
 - Empty scope never spawns OpenCode: the lane is `failed` with
   `empty review target` so the fail-closed entries fire.
-- Lane `failed` reasons are specific: non-zero exit, timeout (default
-  900 s, child killed), error event, no fenced block, invalid JSON, no
-  `findings` array, or zero completed `warden_run_det_priors` calls. A
-  failed lane still forwards parsed findings; `--lanes-out` writes the
-  envelope for audit / replay through `warden post-pass`.
+- Warms its own `opencode serve` (free loopback port, random password),
+  waits for the warden MCP server to connect (default 30 s,
+  `--mcp-timeout`), settles 1 s, then runs against it; the serve child is
+  killed on every path.
+- Lane `failed` reasons are specific: MCP not ready (never connects,
+  failed status, poll rejected), non-zero exit (with the stderr tail),
+  timeout (default 900 s, child killed), error event, no fenced block,
+  invalid JSON, no `findings` array, or zero completed
+  `warden_run_det_priors` calls. A failed lane still forwards parsed
+  findings; `--lanes-out` writes the envelope for audit / replay through
+  `warden post-pass`.
 - Output matches `warden post-pass` exactly; exit 1 when
   `isNotClean(result)` (actionable `lane-health` / `diff-source`).
 - An extra `info` entry, topic `lane-trace`, records the tool-call counts
