@@ -1,5 +1,6 @@
 import { stableCommentId } from "./comment-id.js";
 import { applyConfidenceFloor, dropsToDegraded } from "./confidence.js";
+import { compareByPriority } from "./priority.js";
 import type { ContextSelector } from "./context/index.js";
 import type { Lockfile } from "./ecosystem/index.js";
 import type { FormatterListener } from "./llm/index.js";
@@ -47,9 +48,14 @@ export {
 } from "./llm/verify-citations.js";
 export {
   CATEGORY_CONFIDENCE_FLOOR,
+  DEFAULT_ASSERTION_THRESHOLD,
   applyConfidenceFloor,
+  applyConfidenceToKind,
+  demotionsToDegraded,
   dropsToDegraded,
+  hasVerifiedAuthority,
   type ApplyConfidenceFloorOptions,
+  type ConfidenceDemotionResult,
   type ConfidenceFloorResult,
 } from "./confidence.js";
 export {
@@ -171,6 +177,20 @@ export {
   type TriageGateResult,
 } from "./security/index.js";
 export { toComment } from "./runners/to-comment.js";
+export { PRIORITY_ORDER, compareByPriority } from "./priority.js";
+export {
+  DEFAULT_VOLUME_CAP,
+  LaneFindingSchema,
+  LaneNameEnum,
+  LaneOutputSchema,
+  POST_PASS_INPUT_VERSION,
+  PostPassLanesSchema,
+  runPostPass,
+  type LaneName,
+  type LaneOutput,
+  type PostPassConfig,
+  type PostPassInput,
+} from "./post-pass.js";
 export {
   BUNDLE_LIMITS,
   REVIEW_BUNDLE_VERSION,
@@ -429,22 +449,7 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
   };
 }
 
-const PRIORITY_ORDER: Category[] = [
-  "correctness",
-  "security",
-  "vulnerability",
-  "contract",
-  "scalability",
-  "consistency",
-  "deadcode",
-  "committability",
-  "clarity",
-  "style",
-  "leverage",
-  "dedup",
-  "tests",
-];
-
+// Priority order lives in `priority.ts` (shared with the post-pass).
 interface HardRulesOutput {
   comments: Comment[];
   degraded: DegradedEntry[];
@@ -483,13 +488,7 @@ function applyHardRules(comments: Comment[], config: HardRulesConfig): HardRules
   // dogfood: previous version filtered tier-3 in both modes.)
   const shouldGateTier3 = config.mode === "review" && config.verbose !== true;
   const filtered = shouldGateTier3 ? kept.filter((c) => c.tier !== 3) : kept;
-  const sorted = [...filtered].sort((a, b) => {
-    const pa = PRIORITY_ORDER.indexOf(a.category);
-    const pb = PRIORITY_ORDER.indexOf(b.category);
-    if (pa !== pb) return pa - pb;
-    if (a.tier !== b.tier) return a.tier - b.tier;
-    return b.confidence - a.confidence;
-  });
+  const sorted = [...filtered].sort(compareByPriority);
   return { comments: sorted, degraded: floorDegraded };
 }
 

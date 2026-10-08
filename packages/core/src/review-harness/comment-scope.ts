@@ -7,6 +7,49 @@ export interface DiffScopedComments {
 }
 
 /**
+ * A comment is in-scope iff at least one of its sources cites a path in
+ * the lane's file set. Comments with zero path-bearing sources (e.g.
+ * pure-tool sources with no `path`) are kept — they aren't pinned to any
+ * file, so lane discipline doesn't apply. Extracted from the Phase 2
+ * worker-dispatch boundary (`dispatch-worker.ts`) for the externally-driven
+ * post-pass (ADR-0053 §4): the dispatch's file set is model-chosen, but the
+ * lane's scope envelope is driver-owned, so the same membership rule runs
+ * here against trusted input.
+ */
+export function commentInScope(comment: Comment, scope: ReadonlySet<string>): boolean {
+  let sawPath = false;
+  for (const src of comment.sources) {
+    if (src.path === undefined) continue;
+    sawPath = true;
+    const normalized = src.path.replace(/\\/g, "/");
+    if (scope.has(normalized)) return true;
+  }
+  return !sawPath;
+}
+
+/**
+ * Keep only comments in the lane's trusted file set, normalizing `\`→`/`
+ * on both sides. Returns the kept comments plus the drop count so the
+ * caller can fold it into `CommentSet.degradedWorkers`.
+ */
+export function scopeCommentsToFiles(
+  comments: Comment[],
+  files: readonly string[],
+): DiffScopedComments {
+  const scope = new Set(files.map((p) => p.replace(/\\/g, "/")));
+  const kept: Comment[] = [];
+  let droppedCount = 0;
+  for (const comment of comments) {
+    if (commentInScope(comment, scope)) {
+      kept.push(comment);
+    } else {
+      droppedCount += 1;
+    }
+  }
+  return { comments: kept, droppedCount };
+}
+
+/**
  * Keep only comments whose rendered line range overlaps an added line.
  *
  * Deterministic runner findings already use the same range-overlap policy via

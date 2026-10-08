@@ -2,6 +2,7 @@ import { recordDroppedCandidate, tool } from "@warden/ai";
 import { z } from "zod";
 import type { Semaphore } from "../../orchestration/semaphore.js";
 import type { Comment, DegradedEntry } from "../../schema.js";
+import { commentInScope } from "../comment-scope.js";
 import type { ReviewScratchpad, TokenUsage } from "../scratchpad.js";
 
 /**
@@ -320,7 +321,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
     const inLane: Comment[] = [];
     const droppedCount = { value: 0 };
     for (const finding of result.findings) {
-      if (commentInLane(finding, lane)) {
+      if (commentInScope(finding, lane)) {
         inLane.push(finding);
       } else {
         droppedCount.value += 1;
@@ -381,23 +382,6 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
   });
 
   return { tool: aiTool, dispatch: runOneDispatch };
-}
-
-/**
- * A comment is in-lane iff at least one of its sources cites a path in
- * the dispatched `files` set. Comments with zero path-bearing sources
- * (e.g. pure-tool sources with no `path`) are kept — they aren't pinned
- * to any file, so lane discipline doesn't apply.
- */
-function commentInLane(comment: Comment, lane: Set<string>): boolean {
-  let sawPath = false;
-  for (const src of comment.sources) {
-    if (src.path === undefined) continue;
-    sawPath = true;
-    const normalized = src.path.replace(/\\/g, "/");
-    if (lane.has(normalized)) return true;
-  }
-  return !sawPath;
 }
 
 function formatErr(err: unknown): string {
