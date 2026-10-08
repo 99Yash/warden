@@ -17,15 +17,20 @@ interception before building.
 
 ## Acceptance criteria
 
-- [ ] The post-pass is not exposed as an MCP tool.
-- [ ] Given lane output, it drops unverifiable evidence/sources, drops comments
+- [x] The post-pass is not exposed as an MCP tool.
+- [x] Given lane output, it drops unverifiable evidence/sources, drops comments
       not anchored to added diff lines, applies priority order + volume cap +
       confidence→kind, and returns a canonical `CommentSet`.
-- [ ] It is invocable independently of the current boss-loop harness.
-- [ ] The interception host is verified and documented (plugin hook or driver),
+- [x] It is invocable independently of the current boss-loop harness.
+- [x] The interception host is verified and documented (plugin hook or driver),
       including what happens when a lane returns no findings.
-- [ ] Smoke tests cover independence from the harness and the drop/degrade
+- [x] Smoke tests cover independence from the harness and the drop/degrade
       behavior on crafted input.
+
+Met by slice #41 (`runPostPass()` + `warden post-pass`, ADR-0053 amendment
+2026-10-08): host verified as the driver step; lane-health rules cover the
+no-findings cases; `smoke:mcp-post-pass` covers the drop/degrade behavior,
+harness independence, and the no-post-pass-tool MCP surface.
 
 ## Blocked by
 

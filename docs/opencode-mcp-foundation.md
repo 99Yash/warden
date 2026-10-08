@@ -126,9 +126,11 @@ enabled per agent via OpenCode's `tools` globs.
 - `CommentSet` shaping
 
 Rationale: a model can choose not to call a tool. Deterministic gates must not
-be discretionary. The post-pass runs via an OpenCode plugin
-`tool.execute.after` interception of the terminal submit, or as a driver step
-after `opencode run` returns.
+be discretionary. The post-pass runs as a driver step after the session
+returns (`warden post-pass` / `runPostPass`, ADR-0053 amendment 2026-10-08) —
+a plugin hook cannot guarantee interception: v2 has no session-end hook, and
+its `tool` `execute.after` hook (the v1 `tool.execute.after` name is stale)
+fires for MCP tools but cannot force the model to call a submit tool.
 
 **Open design points:** the det-priors bundle can be large — decide whether the
 tool returns paths + summary and the agent reads files (context-safe) or a full
