@@ -185,6 +185,8 @@ export {
   LaneOutputSchema,
   POST_PASS_INPUT_VERSION,
   PostPassLanesSchema,
+  deriveLaneScope,
+  isNotClean,
   runPostPass,
   type LaneName,
   type LaneOutput,
