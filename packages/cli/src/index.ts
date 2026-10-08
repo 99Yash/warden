@@ -266,6 +266,10 @@ program
     "Write the lane envelope JSON here (audit / replay through warden post-pass).",
   )
   .option("--timeout <seconds>", "Kill the OpenCode child after N seconds. Default 900.")
+  .option(
+    "--mcp-timeout <seconds>",
+    "Wait up to N seconds for the warden MCP server to connect. Default 30.",
+  )
   .action(async (opts: OpencodeReviewOpts) => {
     await runOpencodeReviewCommand(opts);
   });
@@ -374,6 +378,7 @@ interface OpencodeReviewOpts {
   volumeCap?: string;
   lanesOut?: string;
   timeout?: string;
+  mcpTimeout?: string;
 }
 
 /**
@@ -404,6 +409,16 @@ async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void>
     }
     timeoutSecs = n;
   }
+  let mcpTimeoutSecs: number | undefined;
+  if (opts.mcpTimeout !== undefined) {
+    const n = Number(opts.mcpTimeout);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(
+        `opencode-review: --mcp-timeout must be a positive number (got "${opts.mcpTimeout}")`,
+      );
+    }
+    mcpTimeoutSecs = n;
+  }
 
   await runOpencodeReview({
     repoRoot,
@@ -414,6 +429,7 @@ async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void>
     ...(volumeCap !== undefined ? { volumeCap } : {}),
     ...(opts.lanesOut !== undefined ? { lanesOut: opts.lanesOut } : {}),
     ...(timeoutSecs !== undefined ? { timeoutSecs } : {}),
+    ...(mcpTimeoutSecs !== undefined ? { mcpTimeoutSecs } : {}),
   });
 }
 

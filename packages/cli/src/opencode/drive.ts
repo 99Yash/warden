@@ -1,5 +1,7 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,7 +30,22 @@ import { formatCommentSet } from "../format.js";
 export const OPENCODE_AGENT_ENV = "OPENCODE_CONFIG";
 export const OPENCODE_PROJECT_DISABLE_ENV = "OPENCODE_DISABLE_PROJECT_CONFIG";
 export const OPENCODE_CONTENT_ENV = "OPENCODE_CONFIG_CONTENT";
+export const OPENCODE_PASSWORD_ENV = "OPENCODE_PASSWORD";
 export const DEFAULT_LANE_TIMEOUT_SECS = 900;
+/** Bounded wait for the warden MCP server to connect (covers serve boot). */
+export const DEFAULT_MCP_TIMEOUT_SECS = 30;
+export const MCP_POLL_INTERVAL_MS = 500;
+/**
+ * Settle delay after `connected` before spawning `run`: a late server fires
+ * `mcp.tools.changed` and the tools register after short debounces, so the
+ * session snapshot of an immediate run still misses them (operator
+ * amendment 2026-10-08; `mcp.tools.changed` is visible in oc25.strings).
+ */
+export const MCP_SETTLE_MS = 1000;
+/** Bounded stderr tail kept for failed-lane diagnostics. */
+export const STDERR_TAIL_BYTES = 2048;
+/** Grace between SIGTERM and SIGKILL when stopping the serve child. */
+const SERVE_KILL_GRACE_MS = 2000;
 
 export interface OpencodeCommand {
   /** Binary to spawn (`opencode` on PATH, or a fake in the smoke). */
@@ -36,9 +53,15 @@ export interface OpencodeCommand {
   argv: string[];
 }
 
-/** `opencode run` never applies `agent.model` — the driver always passes `--model`. No `--auto`: an unexpected ask must fail closed. */
+/**
+ * `opencode run` never applies `agent.model` — the driver always passes
+ * `--model`. No `--auto`: an unexpected ask must fail closed. No
+ * `--standalone`: the run attaches to the driver's warmed `serve` instance
+ * (see below) so the warden MCP tools are already connected.
+ */
 export function buildOpencodeCommand(opts: {
   bin?: string;
+  serverUrl: string;
   model: string;
   message: string;
 }): OpencodeCommand {
@@ -46,7 +69,8 @@ export function buildOpencodeCommand(opts: {
     bin: opts.bin ?? "opencode",
     argv: [
       "run",
-      "--standalone",
+      "--server",
+      opts.serverUrl,
       "--agent",
       DOWN_LANE_SPEC.agentId,
       "--model",
@@ -56,6 +80,33 @@ export function buildOpencodeCommand(opts: {
       opts.message,
     ],
   };
+}
+
+/** The driver's private server. Flags verified against `opencode serve --help` (v2.0.25). */
+export function buildOpencodeServeCommand(opts: { bin?: string; port: number }): OpencodeCommand {
+  return {
+    bin: opts.bin ?? "opencode",
+    argv: ["serve", "--hostname", "127.0.0.1", "--port", String(opts.port)],
+  };
+}
+
+/** A free loopback port from the OS (listen on 0, read, close). */
+export function allocFreePort(): Promise<number> {
+  return new Promise((resolveP, rejectP) => {
+    const server = createServer();
+    server.once("error", rejectP);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => {
+        if (address !== null && typeof address === "object") resolveP(address.port);
+        else rejectP(new Error("opencode-review: could not allocate a free port"));
+      });
+    });
+  });
+}
+
+function randomPassword(): string {
+  return randomBytes(32).toString("base64url");
 }
 
 /** The user message names the base ref and defers to the system prompt. */
@@ -147,6 +198,8 @@ export interface LaneProcessResult {
   exitCode: number;
   stdout: string;
   timedOut: boolean;
+  /** Bounded tail of stderr, for failed-lane diagnostics. */
+  stderrTail?: string;
 }
 
 export interface ToolCallCount {
@@ -224,9 +277,11 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
     findings,
     toolCalls,
   });
-  if (process.timedOut) return fail("opencode run timed out");
-  if (process.exitCode !== 0) return fail(`opencode run exited ${process.exitCode}`);
-  if (parsed.errors.length > 0) return fail(`opencode run error event: ${parsed.errors[0]}`);
+  if (process.timedOut) return fail(withTail("opencode run timed out", process.stderrTail));
+  if (process.exitCode !== 0)
+    return fail(withTail(`opencode run exited ${process.exitCode}`, process.stderrTail));
+  if (parsed.errors.length > 0)
+    return fail(withTail(`opencode run error event: ${parsed.errors[0]}`, process.stderrTail));
   const text = parsed.texts.join("\n");
   const block = lastJsonBlock(text);
   if (block === undefined) return fail("no fenced json submission in the final message");
@@ -264,6 +319,122 @@ function lastJsonBlock(text: string): string | undefined {
   return matches[matches.length - 1]?.[1]?.trim();
 }
 
+function withTail(reason: string, tail: string | undefined): string {
+  if (tail === undefined || tail === "") return reason;
+  return `${reason} (stderr: ${tail})`;
+}
+
+export interface McpServerState {
+  name: string;
+  /** Raw `status.status` value (`connected`, `pending`, `failed`, …). */
+  status: string;
+  error?: string;
+}
+
+/**
+ * The `/api/mcp` response is untrusted JSON: validate at this boundary.
+ * Shape (verified live against v2.0.25): `{location:{…}, data:[{name,
+ * status:{status, error?}}]}`. Returns `undefined` when the shape is wrong.
+ */
+export function parseMcpServers(body: unknown): McpServerState[] | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const data = (body as Record<string, unknown>)["data"];
+  if (!Array.isArray(data)) return undefined;
+  const out: McpServerState[] = [];
+  for (const entry of data) {
+    if (typeof entry !== "object" || entry === null) return undefined;
+    const record = entry as Record<string, unknown>;
+    if (typeof record["name"] !== "string") return undefined;
+    const status = record["status"];
+    if (typeof status !== "object" || status === null) return undefined;
+    const state = (status as Record<string, unknown>)["status"];
+    if (typeof state !== "string") return undefined;
+    const error = (status as Record<string, unknown>)["error"];
+    out.push({
+      name: record["name"],
+      status: state,
+      ...(typeof error === "string" ? { error } : {}),
+    });
+  }
+  return out;
+}
+
+export type WardenMcpReadiness =
+  | { state: "connected" }
+  | { state: "failed"; detail: string }
+  | { state: "pending"; detail: string };
+
+/** Only the warden server gates the lane; other servers (e.g. the user's global config) are ignored. */
+export function wardenMcpReadiness(servers: McpServerState[] | undefined): WardenMcpReadiness {
+  if (servers === undefined) return { state: "pending", detail: "unparseable /api/mcp response" };
+  const warden = servers.find((s) => s.name === "warden");
+  if (warden === undefined) return { state: "pending", detail: "warden server not listed yet" };
+  if (warden.status === "connected") return { state: "connected" };
+  if (warden.status === "failed") {
+    return {
+      state: "failed",
+      detail: `warden MCP server failed${warden.error !== undefined ? `: ${warden.error}` : ""}`,
+    };
+  }
+  return { state: "pending", detail: `warden MCP status: ${warden.status}` };
+}
+
+/**
+ * Poll `GET <baseUrl>/api/mcp` until the warden server shows `connected`.
+ * This call also boots the location, so a cold serve reports pending
+ * entries first. Connection refusals mean the serve child is still
+ * starting and are treated as pending until the timeout.
+ *
+ * Deviation from the item text: the query is `location[directory]=<dir>`
+ * (deepObject `LocationQuery`), not `?directory=<dir>` — the binary
+ * ignores a bare `directory` param and answers with the serve cwd
+ * (verified live against v2.0.25).
+ */
+export async function waitForWardenMcp(opts: {
+  baseUrl: string;
+  password: string;
+  directory: string;
+  timeoutMs: number;
+  pollMs?: number;
+}): Promise<void> {
+  const pollMs = opts.pollMs ?? MCP_POLL_INTERVAL_MS;
+  const deadline = Date.now() + opts.timeoutMs;
+  const url = new URL("/api/mcp", opts.baseUrl);
+  // `URLSearchParams` percent-encodes the brackets; the host decodes them.
+  url.searchParams.set("location[directory]", opts.directory);
+  const auth = `Basic ${Buffer.from(`opencode:${opts.password}`, "utf8").toString("base64")}`;
+  let lastDetail = "no poll completed yet";
+  for (;;) {
+    let readiness: WardenMcpReadiness;
+    try {
+      const res = await fetch(url, { headers: { Authorization: auth } });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(`MCP poll rejected (HTTP ${res.status}): password mismatch`);
+      }
+      if (!res.ok) {
+        readiness = { state: "pending", detail: `HTTP ${res.status}` };
+      } else {
+        readiness = wardenMcpReadiness(parseMcpServers(await res.json()));
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("MCP poll rejected")) throw err;
+      readiness = { state: "pending", detail: "serve not reachable yet" };
+    }
+    if (readiness.state === "connected") return;
+    if (readiness.state === "failed") throw new Error(readiness.detail);
+    lastDetail = readiness.state === "pending" ? readiness.detail : lastDetail;
+    if (Date.now() >= deadline) {
+      const secs = Math.round(opts.timeoutMs / 1000);
+      throw new Error(`warden MCP server not connected within ${secs}s (last: ${lastDetail})`);
+    }
+    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveP) => setTimeout(resolveP, ms));
+}
+
 export interface DriveOptions {
   repoRoot: string;
   baseRef?: string;
@@ -273,6 +444,10 @@ export interface DriveOptions {
   volumeCap?: number;
   lanesOut?: string;
   timeoutSecs?: number;
+  /** Bounded wait for the warden MCP server (default 30 s). */
+  mcpTimeoutSecs?: number;
+  /** Settle delay after `connected` (default 1 s). */
+  mcpSettleMs?: number;
   /** Override for the smoke's fake executable. */
   opencodeBin?: string;
 }
@@ -336,12 +511,15 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
 
   const baseRef = resolved.baseRef ?? opts.baseRef ?? "HEAD";
   const model = opts.model ?? DOWN_LANE_SPEC.defaultModel;
-  const command = buildOpencodeCommand({
-    model,
-    message: buildLaneMessage(baseRef),
-    ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
-  });
+  const mcpTimeoutMs = (opts.mcpTimeoutSecs ?? DEFAULT_MCP_TIMEOUT_SECS) * 1000;
+  const settleMs = opts.mcpSettleMs ?? MCP_SETTLE_MS;
   const configPath = resolveLaneConfigPath();
+  // The serve child reads this env password for its API auth
+  // (`server-process.ts`: `Env.password`, else a random fallback the run
+  // client could never know); the run client sends it back as Basic
+  // `opencode:<password>` (`server-connection.ts`), so both children share
+  // it. It never leaves loopback.
+  const password = randomPassword();
   const childEnv: Record<string, string | undefined> = {
     ...process.env,
     [OPENCODE_AGENT_ENV]: configPath,
@@ -350,10 +528,138 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
       command: resolveWardenMcpCommand(),
       cwd: opts.repoRoot,
     }),
+    [OPENCODE_PASSWORD_ENV]: password,
   };
-  const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
-  const verdict = evaluateLane(parseLaneEvents(processResult.stdout), processResult);
 
+  // Warm-server sequence (operator amendment 2026-10-08): the shipped
+  // binary snapshots session tools before slow MCP servers connect, so a
+  // cold `run --standalone` never sees `warden_run_det_priors`. Serve
+  // first, wait for the warden server to connect, settle past the
+  // `mcp.tools.changed` debounces, then run against the warm server.
+  const port = await allocFreePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const serveCommand = buildOpencodeServeCommand({
+    port,
+    ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
+  });
+  const serve = spawn(serveCommand.bin, serveCommand.argv, {
+    cwd: opts.repoRoot,
+    env: childEnv,
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let serveStderr = "";
+  serve.stderr?.on("data", (d: Buffer) => {
+    serveStderr += d.toString();
+    if (serveStderr.length > STDERR_TAIL_BYTES) serveStderr = serveStderr.slice(-STDERR_TAIL_BYTES);
+  });
+  // A leaked `opencode serve` is a bug: the child dies on every path below.
+  try {
+    try {
+      await waitForWardenMcp({
+        baseUrl,
+        password,
+        directory: opts.repoRoot,
+        timeoutMs: mcpTimeoutMs,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return await publishFailed(
+        `mcp not ready: ${detail}${tailSuffix(serveStderr)}`,
+        opts,
+        resolved,
+        scope,
+        verbose,
+      );
+    }
+    await sleep(settleMs);
+
+    const command = buildOpencodeCommand({
+      serverUrl: baseUrl,
+      model,
+      message: buildLaneMessage(baseRef),
+      ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
+    });
+    const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
+    await publishVerdict(processResult, opts, resolved, scope, verbose);
+  } finally {
+    await killServe(serve);
+  }
+}
+
+type ResolvedDiff = Awaited<ReturnType<typeof resolveDiff>>;
+
+async function publishLanes(
+  opts: DriveOptions,
+  resolved: ResolvedDiff,
+  verbose: boolean,
+  lanes: LaneOutput[],
+  extraDegraded: DegradedEntry[],
+): Promise<void> {
+  const result = await runPostPass({
+    repoRoot: opts.repoRoot,
+    diff: resolved.diff,
+    lanes,
+    config: {
+      verbose,
+      ...(opts.volumeCap !== undefined ? { volumeCap: opts.volumeCap } : {}),
+    },
+    ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
+  });
+  if (isNotClean(result)) process.exitCode = 1;
+  if (opts.json === true) {
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    return;
+  }
+  process.stdout.write("\n" + formatCommentSet(result, "review", verbose) + "\n");
+}
+
+function writeLanesOut(opts: DriveOptions, lanes: LaneOutput[]): void {
+  if (opts.lanesOut !== undefined) {
+    writeFileSync(
+      resolve(opts.repoRoot, opts.lanesOut),
+      JSON.stringify({ version: 1, lanes }, null, 2) + "\n",
+    );
+  }
+}
+
+function laneTraceEntry(
+  status: string,
+  reason: string | undefined,
+  toolCalls: string,
+): DegradedEntry {
+  return {
+    kind: "info",
+    topic: "lane-trace",
+    message: `lane-trace: down ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`,
+  };
+}
+
+/** MCP-warmup failure: no run happened, so there are no tool calls to trace. */
+async function publishFailed(
+  reason: string,
+  opts: DriveOptions,
+  resolved: ResolvedDiff,
+  scope: string[],
+  verbose: boolean,
+): Promise<void> {
+  const lanes: LaneOutput[] = [
+    { lane: DOWN_LANE_SPEC.lane, status: "failed", reason, scope, findings: [] },
+  ];
+  writeLanesOut(opts, lanes);
+  await publishLanes(opts, resolved, verbose, lanes, [
+    ...(resolved.degraded ?? []),
+    laneTraceEntry("failed", reason, ""),
+  ]);
+}
+
+async function publishVerdict(
+  processResult: LaneProcessResult,
+  opts: DriveOptions,
+  resolved: ResolvedDiff,
+  scope: string[],
+  verbose: boolean,
+): Promise<void> {
+  const verdict = evaluateLane(parseLaneEvents(processResult.stdout), processResult);
   const traceCounts = verdict.toolCalls.map((t) => `${t.name}×${t.completed}`).join(", ");
   const lanes: LaneOutput[] = [
     {
@@ -364,20 +670,40 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
       findings: verdict.findings,
     },
   ];
-  if (opts.lanesOut !== undefined) {
-    writeFileSync(
-      resolve(opts.repoRoot, opts.lanesOut),
-      JSON.stringify({ version: 1, lanes }, null, 2) + "\n",
-    );
-  }
-  await publish(lanes, [
+  writeLanesOut(opts, lanes);
+  await publishLanes(opts, resolved, verbose, lanes, [
     ...(resolved.degraded ?? []),
-    {
-      kind: "info",
-      topic: "lane-trace",
-      message: `lane-trace: down ${verdict.status}${verdict.reason !== undefined ? ` (${verdict.reason})` : ""} — ${traceCounts === "" ? "no tool calls" : traceCounts}`,
-    },
+    laneTraceEntry(verdict.status, verdict.reason, traceCounts),
   ]);
+}
+
+function tailSuffix(tail: string): string {
+  return tail === "" ? "" : ` (serve stderr: ${tail})`;
+}
+
+/** SIGTERM, then SIGKILL after a grace period; always awaited, never throws. */
+async function killServe(serve: ChildProcess): Promise<void> {
+  if (serve.exitCode !== null || serve.signalCode !== null) return;
+  await new Promise<void>((resolveP) => {
+    const timer = setTimeout(() => {
+      try {
+        serve.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }, SERVE_KILL_GRACE_MS);
+    timer.unref?.();
+    serve.once("exit", () => {
+      clearTimeout(timer);
+      resolveP();
+    });
+    try {
+      serve.kill("SIGTERM");
+    } catch {
+      clearTimeout(timer);
+      resolveP();
+    }
+  });
 }
 
 function spawnLane(
@@ -389,29 +715,32 @@ function spawnLane(
   return new Promise((resolveP) => {
     const child = spawn(command.bin, command.argv, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
+    let stderrTail = "";
     let settled = false;
-    const timer = setTimeout(() => {
+    const finish = (partial: Omit<LaneProcessResult, "stderrTail">): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      resolveP({ ...partial, ...(stderrTail === "" ? {} : { stderrTail }) });
+    };
+    const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      resolveP({ exitCode: -1, stdout, timedOut: true });
+      finish({ exitCode: -1, stdout, timedOut: true });
     }, timeoutSecs * 1000);
     // Unref'd so the timer never holds the loop open on its own.
     timer.unref?.();
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
     });
+    child.stderr.on("data", (d: Buffer) => {
+      stderrTail += d.toString();
+      if (stderrTail.length > STDERR_TAIL_BYTES) stderrTail = stderrTail.slice(-STDERR_TAIL_BYTES);
+    });
     child.on("error", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolveP({ exitCode: -1, stdout, timedOut: false });
+      finish({ exitCode: -1, stdout, timedOut: false });
     });
     child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolveP({ exitCode: code ?? -1, stdout, timedOut: false });
+      finish({ exitCode: code ?? -1, stdout, timedOut: false });
     });
   });
 }
