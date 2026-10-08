@@ -516,7 +516,7 @@ try {
   writeFileSync(
     fakePath,
     `#!/usr/bin/env node
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 const argv = process.argv.slice(2);
 const fail = (msg) => { process.stderr.write("fake opencode: " + msg + "\\n"); process.exit(3); };
@@ -536,6 +536,8 @@ const checkSharedEnv = () => {
   if (!Array.isArray(wardenCmd) || !wardenCmd.some((p) => String(p).endsWith("mcp"))) fail("warden MCP command missing");
   if (wardenServer?.type !== "local" || wardenServer?.codemode !== false) fail("warden MCP server must keep type local + codemode false");
   if (!process.env.OPENCODE_PASSWORD) fail("OPENCODE_PASSWORD must be set for serve auth");
+  // opencode resolves its location from PWD, not the process cwd.
+  if (realpathSync(process.env.PWD ?? "") !== realpathSync(process.cwd())) fail("PWD must match the cwd");
 };
 if (argv[0] === "serve") {
   checkSharedEnv();

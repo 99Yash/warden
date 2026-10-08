@@ -529,6 +529,10 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
       cwd: opts.repoRoot,
     }),
     [OPENCODE_PASSWORD_ENV]: password,
+    // opencode resolves its location from PWD, not the process cwd. Under
+    // `pnpm --filter` PWD is the package dir, so `run` opened a second,
+    // cold location: the MCP race again, and the wrong directory.
+    PWD: opts.repoRoot,
   };
 
   // Warm-server sequence (operator amendment 2026-10-08): the shipped

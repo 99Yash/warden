@@ -151,6 +151,14 @@ The driver never uses `run --standalone`. Instead:
    (stderr: …)`); an MCP-warmup failure reason carries the serve tail. A
    failed lane always says why.
 
+Both children get `PWD=<repoRoot>`. OpenCode resolves its location from
+`PWD`, not from the process cwd. Under `pnpm --filter @warden/cli`, `PWD` is
+`packages/cli`, so without this `run` opens a second, cold location: the
+warm-up in step 2 does not apply to it, the MCP race comes back, and the
+model reviews the wrong directory. The operator found this on 2026-10-08:
+the same tracer passed by hand from the repo root and failed through
+`pnpm warden`. `smoke:opencode-lanes` asserts that `PWD` matches the cwd.
+
 ## `--standalone` + project config (superseded)
 
 The `--standalone` paragraph below describes the pre-amendment driver and
