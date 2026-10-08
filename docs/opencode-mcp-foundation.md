@@ -129,8 +129,11 @@ Rationale: a model can choose not to call a tool. Deterministic gates must not
 be discretionary. The post-pass runs as a driver step after the session
 returns (`warden post-pass` / `runPostPass`, ADR-0053 amendment 2026-10-08) —
 a plugin hook cannot guarantee interception: v2 has no session-end hook, and
-its `tool` `execute.after` hook (the v1 `tool.execute.after` name is stale)
-fires for MCP tools but cannot force the model to call a submit tool.
+its `tool` `execute.after` hook (the corrected v2 name for v1's
+`tool.execute.after`) fires for MCP tools — but no hook API sets `toolChoice`;
+only a provider-specific `http.request` body rewrite could
+(`core/src/session/model-request.ts:241-251`), and that plugin is removable
+and its load failure is swallowed. The decision does not change.
 
 **Open design points:** the det-priors bundle can be large — decide whether the
 tool returns paths + summary and the agent reads files (context-safe) or a full
@@ -209,7 +212,7 @@ Each is a vertical, demoable slice. Ordering and dependencies in §7.
 | W1 | `warden mcp` skeleton + first tool | stdio server, tool registration, versioned schemas; start with `lookup_type_def` (smallest) |
 | W2 | `run_det_priors` MCP tool | serialize the Phase 1 bundle; decide size discipline |
 | W3 | `search_index` MCP tool | needs an index loaded; pairs with W7 |
-| W4 | Mandatory post-pass integration | verify + scope + hard rules outside the model (driver: `warden post-pass` / `runPostPass`; plugin interception rejected — v2 has no session-end hook and `tool` `execute.after` cannot force a submit) |
+| W4 | Mandatory post-pass integration | verify + scope + hard rules outside the model (driver: `warden post-pass` / `runPostPass`; plugin interception rejected — v2 has no session-end hook and no hook API sets `toolChoice`) |
 | W5 | OpenCode lane config | motions → agents, prompt materialization, per-agent tools/models/permissions |
 | W6 | End-to-end tracer bullet | one `down`/correctness lane through W2+W4, scored on an existing fixture |
 | W7 | CI index cache | `warden index export/import` verbs + recipe |
@@ -243,7 +246,7 @@ proves every seam in the contract before the lane set is designed.
 2. **Prompt drift** between warden's method docs and materialized OpenCode
    agent configs — generate or validate?
 3. **Det-priors bundle size vs context budget.** Return-shape decision.
-4. **Where the mandatory post-pass actually runs.** Answered (slice #41, ADR-0053 amendment 2026-10-08): the driver runs it (`warden post-pass` / `runPostPass`) after the session returns. A plugin hook cannot guarantee interception — v2 has no session-end hook, `tool` `execute.after` cannot force a submit call, and plugins are removable.
+4. **Where the mandatory post-pass actually runs.** Answered (slice #41, ADR-0053 amendment 2026-10-08): the driver runs it (`warden post-pass` / `runPostPass`) after the session returns. A plugin hook cannot guarantee interception — v2 has no session-end hook, no hook API sets `toolChoice` (only a provider-specific `http.request` body rewrite could — removable plugin, swallowed load failure), and plugins are removable.
 5. **Observability re-homing** (ADR-0048): warden spans no longer wrap the lane
    calls. Bridge OpenCode events into `reviewRuns`, or move observability.
 6. **Cost control.** No warden hard cap today; CI needs one. Whose budget?
