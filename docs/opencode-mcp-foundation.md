@@ -121,8 +121,8 @@ enabled per agent via OpenCode's `tools` globs.
 **Mandatory post-pass — NOT tools:**
 
 - evidence/source verification (ADR-0044/0047)
-- lane / added-line scoping (`commentInLane`, `scopeCommentsToDiff`)
-- priority order, volume cap, confidence→kind (`applyHardRules`, ADR-0044)
+- lane / added-line scoping (`commentInScope` + `anchorInScope`, `scopeCommentsToDiff`)
+- priority order, volume cap, confidence→kind (`runPostPass`, ADR-0044 — not `applyHardRules`, which has neither the cap nor the demotion)
 - `CommentSet` shaping
 
 Rationale: a model can choose not to call a tool. Deterministic gates must not
@@ -209,7 +209,7 @@ Each is a vertical, demoable slice. Ordering and dependencies in §7.
 | W1 | `warden mcp` skeleton + first tool | stdio server, tool registration, versioned schemas; start with `lookup_type_def` (smallest) |
 | W2 | `run_det_priors` MCP tool | serialize the Phase 1 bundle; decide size discipline |
 | W3 | `search_index` MCP tool | needs an index loaded; pairs with W7 |
-| W4 | Mandatory post-pass integration | verify + scope + hard rules outside the model (plugin `tool.execute.after` or driver) |
+| W4 | Mandatory post-pass integration | verify + scope + hard rules outside the model (driver: `warden post-pass` / `runPostPass`; plugin interception rejected — v2 has no session-end hook and `tool` `execute.after` cannot force a submit) |
 | W5 | OpenCode lane config | motions → agents, prompt materialization, per-agent tools/models/permissions |
 | W6 | End-to-end tracer bullet | one `down`/correctness lane through W2+W4, scored on an existing fixture |
 | W7 | CI index cache | `warden index export/import` verbs + recipe |
@@ -243,9 +243,7 @@ proves every seam in the contract before the lane set is designed.
 2. **Prompt drift** between warden's method docs and materialized OpenCode
    agent configs — generate or validate?
 3. **Det-priors bundle size vs context budget.** Return-shape decision.
-4. **Where the mandatory post-pass actually runs.** Verify OpenCode's
-   `tool.execute.after` can intercept the terminal submit reliably; otherwise
-   the driver runs it.
+4. **Where the mandatory post-pass actually runs.** Answered (slice #41, ADR-0053 amendment 2026-10-08): the driver runs it (`warden post-pass` / `runPostPass`) after the session returns. A plugin hook cannot guarantee interception — v2 has no session-end hook, `tool` `execute.after` cannot force a submit call, and plugins are removable.
 5. **Observability re-homing** (ADR-0048): warden spans no longer wrap the lane
    calls. Bridge OpenCode events into `reviewRuns`, or move observability.
 6. **Cost control.** No warden hard cap today; CI needs one. Whose budget?
