@@ -317,11 +317,11 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
     // `sources[].path` (the canonical citation site) — drop the whole
     // Comment if none of its sources cite a file inside the lane. This
     // mirrors the M13 security sub-agent's lane policy.
-    const lane = new Set(args.files.map((p) => p.replace(/\\/g, "/")));
+    const scope = new Set(args.files.map((p) => p.replace(/\\/g, "/")));
     const inLane: Comment[] = [];
     const droppedCount = { value: 0 };
     for (const finding of result.findings) {
-      if (commentInScope(finding, lane)) {
+      if (commentInScope(finding, scope)) {
         inLane.push(finding);
       } else {
         droppedCount.value += 1;

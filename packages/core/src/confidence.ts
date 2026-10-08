@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { wardenEnv } from "@warden/env";
 import type { Category, Comment, DegradedEntry } from "./schema.js";
 
@@ -103,7 +104,10 @@ export interface ConfidenceDemotionResult {
  * label itself is model-chosen on this path too, so the exemption
  * additionally requires the `lookupTypeDef` output contract (`schema.ts`
  * `api_def` docs): a normalized path inside `node_modules/` ending in
- * `.d.ts`. The cost of being strict is a question instead of an
+ * `.d.ts`. Normalization is `path.posix.normalize` after `\`→`/`, and a
+ * result that escapes the repo (`..`, `../…`, or absolute) is rejected, so
+ * `node_modules/../src/x.d.ts` cannot smuggle a reviewed file past the
+ * check. The cost of being strict is a question instead of an
  * assertion, never a drop.
  *
  * Residual (shared with m14): a real but unrelated `.d.ts` line still
@@ -120,7 +124,11 @@ export function hasVerifiedAuthority(c: Comment): boolean {
     ) {
       return false;
     }
-    const normalized = s.path.replace(/\\/g, "/");
+    const slashed = s.path.replace(/\\/g, "/");
+    const normalized = posix.normalize(slashed);
+    if (normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
+      return false;
+    }
     const inNodeModules =
       normalized.startsWith("node_modules/") || normalized.includes("/node_modules/");
     return inNodeModules && normalized.endsWith(".d.ts");

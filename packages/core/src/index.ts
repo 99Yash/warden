@@ -449,7 +449,6 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
   };
 }
 
-// Priority order lives in `priority.ts` (shared with the post-pass).
 interface HardRulesOutput {
   comments: Comment[];
   degraded: DegradedEntry[];

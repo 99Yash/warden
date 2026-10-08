@@ -13,12 +13,13 @@ import {
 import { CommentSchema, type Comment, type CommentSet, type DegradedEntry } from "./schema.js";
 
 /**
- * Mandatory post-pass outside model discretion (ADR-0053 §4). The driver
- * owns publication: it runs the lanes, reads their submitted findings from
- * session messages, calls `runPostPass()`, and publishes only the returned
- * `CommentSet`. None of these steps is an MCP tool — a model can decline
- * to call a tool, so a model-invoked gate is not a gate. The only inputs
- * the model controls are the finding objects themselves (`unknown[]`,
+ * Mandatory post-pass outside model discretion (ADR-0053 §4). Publication
+ * ownership is procedural until the #42 driver publishes only the returned
+ * `CommentSet`: the driver runs the lanes, reads their submitted findings
+ * from session messages, calls `runPostPass()`, and publishes only the
+ * returned `CommentSet`. None of these steps is an MCP tool — a model can
+ * decline to call a tool, so a model-invoked gate is not a gate. The only
+ * inputs the model controls are the finding objects themselves (`unknown[]`,
  * validated one at a time); the diff, the per-lane scope envelope, and the
  * config are driver-owned.
  *
@@ -155,16 +156,22 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
 
   // 4. Added-line anchoring — identical derivation to runDetPriors
   // (det-priors.ts:129): parse, then prune, then scope to the pruned set.
-  // Zero files means no comment can anchor (e.g. an empty --diff-file) —
-  // an actionable entry, not a clean result.
-  const changed = pruneDiff(parseUnifiedDiff(input.diff)).pruned;
-  if (changed.length === 0) {
+  // Zero parsed files means no comment can anchor (e.g. an empty
+  // --diff-file) — an actionable entry, not a clean result. A diff that
+  // parses to files but prunes to nothing (e.g. only generated noise) is
+  // not empty: no entry here, and the prune's own degraded entries are
+  // forwarded below so the silence is visible.
+  const parsed = parseUnifiedDiff(input.diff);
+  if (parsed.length === 0) {
     postPass.push({
       kind: "actionable",
       topic: "diff-source",
       message: "post-pass: empty diff — no comment can anchor; this is NOT a clean result",
     });
   }
+  const pruned = pruneDiff(parsed);
+  const pruneDegraded = pruned.degraded;
+  const changed = pruned.pruned;
   const anchored = scopeCommentsToDiff(verified.comments, changed);
   if (anchored.droppedCount > 0) {
     postPass.push({
@@ -250,6 +257,7 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
         ...(input.extraDegraded ?? []),
         ...laneHealth,
         ...postPass,
+        ...pruneDegraded,
         ...verified.degraded,
         ...demotionEntries,
       ],

@@ -8,9 +8,11 @@ export interface DiffScopedComments {
 
 /**
  * A comment is in-scope iff at least one of its sources cites a path in
- * the lane's file set. Comments with zero path-bearing sources (e.g.
- * pure-tool sources with no `path`) are kept — they aren't pinned to any
- * file, so lane discipline doesn't apply. Extracted from the Phase 2
+ * the trusted scope set. The comment — including its sources — is
+ * model-owned on the externally-driven path; only the scope set is
+ * trusted. Comments with zero path-bearing sources (e.g. pure-tool
+ * sources with no `path`) are kept — they aren't pinned to any file, so
+ * lane discipline doesn't apply. Extracted from the Phase 2
  * worker-dispatch boundary (`dispatch-worker.ts`) for the externally-driven
  * post-pass (ADR-0053 §4): the dispatch's file set is model-chosen, but the
  * lane's scope envelope is driver-owned, so the same membership rule runs
@@ -28,40 +30,18 @@ export function commentInScope(comment: Comment, scope: ReadonlySet<string>): bo
 }
 
 /**
- * The post-pass anchor check (slice #41 must-fix 1): the finding's own
+ * The post-pass anchor check (ADR-0053 §4): the finding's own
  * `comment.file` must be in the lane's trusted scope set. `commentInScope`
  * above only inspects `sources[].path`, which is model-owned on the
  * externally-driven path — a finding with zero sources, or with one
  * in-scope source and an out-of-scope anchor, would otherwise publish on
  * any changed file. The anchor is model-owned too, but requiring both
  * closes the sourceless/out-of-scope-anchor sequences. Kept separate from
- * `commentInScope` (and `dispatch-worker.ts` unchanged): the Phase-2 hole
- * is pre-existing and queued as follow-up.
+ * `commentInScope` (and `dispatch-worker.ts` unchanged): the dispatch path
+ * enforces `commentInScope` only.
  */
 export function anchorInScope(comment: Comment, scope: ReadonlySet<string>): boolean {
   return scope.has(comment.file.replace(/\\/g, "/"));
-}
-
-/**
- * Keep only comments in the lane's trusted file set, normalizing `\`→`/`
- * on both sides. Returns the kept comments plus the drop count so the
- * caller can fold it into `CommentSet.degradedWorkers`.
- */
-export function scopeCommentsToFiles(
-  comments: Comment[],
-  files: readonly string[],
-): DiffScopedComments {
-  const scope = new Set(files.map((p) => p.replace(/\\/g, "/")));
-  const kept: Comment[] = [];
-  let droppedCount = 0;
-  for (const comment of comments) {
-    if (commentInScope(comment, scope)) {
-      kept.push(comment);
-    } else {
-      droppedCount += 1;
-    }
-  }
-  return { comments: kept, droppedCount };
 }
 
 /**
