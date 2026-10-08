@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { type ZodType, z } from "zod";
 import {
   TOOL_NAME_LOOKUP_TYPE_DEF,
+  TOOL_NAME_RUN_DET_PRIORS,
   degrade,
   errorEnvelope,
   toolResultEnvelopeSchema,
@@ -13,6 +14,12 @@ import {
   LookupTypeDefResultSchema,
   runLookupTypeDef,
 } from "./tools/lookup-type-def.js";
+import {
+  RunDetPriorsInputSchema,
+  RunDetPriorsResultSchema,
+  runRunDetPriors,
+} from "./tools/run-det-priors.js";
+import { createReviewResultCache, type ReviewResultCache } from "./review-cache.js";
 
 /**
  * Warden's MCP server — ADR-0053 §2/§3.
@@ -33,25 +40,56 @@ export const MCP_SERVER_NAME = "warden";
 export const MCP_SERVER_VERSION = "0.0.1";
 
 /**
- * Tool descriptors. Kept as data rather than closures so the advertised schema
- * and the handler cannot drift — one source, two projections.
+ * Tool descriptors. Kept as data rather than inline closures in the dispatch
+ * handler so the advertised schema and the handler cannot drift — one source,
+ * two projections.
+ *
+ * A function of the review cache rather than a module constant, because
+ * `run_det_priors` needs per-server retention to page findings. The cache is
+ * created inside `createMcpServer`, so each server in a process (and each
+ * process) gets its own — the stdio transport is one server per child.
  */
-const TOOL_DEFINITIONS = [
-  {
-    name: TOOL_NAME_LOOKUP_TYPE_DEF,
-    description:
-      "Resolve an exported symbol's TypeScript declaration from an installed package's .d.ts files. " +
-      "Returns the signature, kind, JSDoc, file and line range, plus a pre-shaped `suggestedSource` " +
-      "citation to copy verbatim. Use before claiming an API's shape — this is ground truth, not a guess. " +
-      "A negative result is a complete answer, not a failure: branch on the returned `reason`.",
-    inputSchema: LookupTypeDefInputSchema,
-    resultSchema: toolResultEnvelopeSchema(
-      LookupTypeDefResultSchema,
-      z.literal(TOOL_NAME_LOOKUP_TYPE_DEF),
-    ),
-    handler: runLookupTypeDef,
-  },
-] as const;
+function toolDefinitions(reviewCache: ReviewResultCache) {
+  return [
+    {
+      name: TOOL_NAME_LOOKUP_TYPE_DEF,
+      description:
+        "Resolve an exported symbol's TypeScript declaration from an installed package's .d.ts files. " +
+        "Returns the signature, kind, JSDoc, file and line range, plus a pre-shaped `suggestedSource` " +
+        "citation to copy verbatim. Use before claiming an API's shape — this is ground truth, not a guess. " +
+        "A negative result is a complete answer, not a failure: branch on the returned `reason`.",
+      inputSchema: LookupTypeDefInputSchema,
+      resultSchema: toolResultEnvelopeSchema(
+        LookupTypeDefResultSchema,
+        z.literal(TOOL_NAME_LOOKUP_TYPE_DEF),
+      ),
+      handler: runLookupTypeDef,
+    },
+    {
+      name: TOOL_NAME_RUN_DET_PRIORS,
+      description:
+        "Run Warden's Phase 1 deterministic review (tsc, eslint, jscpd, dependency/OSV audit, " +
+        "consistency, scalability, deadcode, leverage, react-doctor) over a review target. Returns " +
+        "the pruned changed-file set, the findings with their tier/category and citations, context " +
+        "locators, and any degraded runners. This is ground truth, not a guess — a clean result is " +
+        "a real answer.\n\n" +
+        "All arguments go inside a single `request` object. First page: " +
+        '{request:{target:"diff",diff:"<unified diff>"}} or {request:{target:"base",base:"<ref>"}}. ' +
+        "Findings are paged — follow `nextOffset` with " +
+        '{request:{target:"page",reviewHandle:"<handle>",offset:<n>}}, which re-reads the retained ' +
+        "result without re-running detectors or re-resolving refs.\n\n" +
+        "Changed files carry `addedLineCount`, never the raw line list. `omissions` names every " +
+        "capped component; `unretrievable` counts entries too large to return at any page size — " +
+        "those are skipped, not blocking, so paging still reaches everything else.",
+      inputSchema: RunDetPriorsInputSchema,
+      resultSchema: toolResultEnvelopeSchema(
+        RunDetPriorsResultSchema,
+        z.literal(TOOL_NAME_RUN_DET_PRIORS),
+      ),
+      handler: (root: string, args: unknown) => runRunDetPriors(root, args, { cache: reviewCache }),
+    },
+  ] as const;
+}
 
 /**
  * Convert a tool's zod input schema to the JSON Schema MCP advertises.
@@ -95,6 +133,10 @@ export function createMcpServer(repoRoot: string): WardenMcpServer {
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
+  // Bounded, session-scoped retention so `run_det_priors` can page findings
+  // without re-running tsc/eslint/jscpd per page. See review-cache.ts.
+  const reviewCache = createReviewResultCache();
+  const tools = toolDefinitions(reviewCache);
   let inFlight = 0;
   const idleWaiters: Array<() => void> = [];
   const trackedHandler = <Args extends unknown[], Result>(
@@ -115,39 +157,45 @@ export function createMcpServer(repoRoot: string): WardenMcpServer {
   const whenIdle = (): Promise<void> =>
     inFlight === 0 ? Promise.resolve() : new Promise<void>((r) => idleWaiters.push(r));
 
-  server.setRequestHandler(ListToolsRequestSchema, trackedHandler(async () => ({
-    tools: TOOL_DEFINITIONS.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: toInputJsonSchema(tool.inputSchema),
-      // MCP requires an object root. The union validates the *full envelope*,
-      // not bare success data; structuredContent below mirrors the JSON text.
-      outputSchema: { type: "object" as const, ...toOutputJsonSchema(tool.resultSchema) },
+  server.setRequestHandler(
+    ListToolsRequestSchema,
+    trackedHandler(async () => ({
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: toInputJsonSchema(tool.inputSchema),
+        // MCP requires an object root. The union validates the *full envelope*,
+        // not bare success data; structuredContent below mirrors the JSON text.
+        outputSchema: { type: "object" as const, ...toOutputJsonSchema(tool.resultSchema) },
+      })),
     })),
-  })));
+  );
 
-  server.setRequestHandler(CallToolRequestSchema, trackedHandler(async (request) => {
-    const name = request.params.name;
-    const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
-    return degrade(
-      name,
-      async () => {
-        if (tool === undefined) {
-          // An unknown tool name is a client error, not a degraded result — but it
-          // still returns an envelope rather than a protocol throw, so a client
-          // that probes for an optional tool degrades instead of erroring out.
-          return errorEnvelope(
-            name,
-            "invalid_input",
-            `Unknown tool "${name}". Available: ${TOOL_DEFINITIONS.map((t) => t.name).join(", ")}.`,
-          );
-        }
+  server.setRequestHandler(
+    CallToolRequestSchema,
+    trackedHandler(async (request) => {
+      const name = request.params.name;
+      const tool = tools.find((t) => t.name === name);
+      return degrade(
+        name,
+        async () => {
+          if (tool === undefined) {
+            // An unknown tool name is a client error, not a degraded result — but it
+            // still returns an envelope rather than a protocol throw, so a client
+            // that probes for an optional tool degrades instead of erroring out.
+            return errorEnvelope(
+              name,
+              "invalid_input",
+              `Unknown tool "${name}". Available: ${tools.map((t) => t.name).join(", ")}.`,
+            );
+          }
 
-        return await tool.handler(repoRoot, request.params.arguments);
-      },
-      tool?.resultSchema,
-    );
-  }));
+          return await tool.handler(repoRoot, request.params.arguments);
+        },
+        tool?.resultSchema,
+      );
+    }),
+  );
 
   return Object.assign(server, { whenIdle });
 }

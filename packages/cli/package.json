@@ -25,6 +25,8 @@
     "smoke:m10": "pnpm smoke:m10-verifier && pnpm smoke:m10-consistency",
     "smoke:m11-lookup": "node --import tsx/esm scripts/smoke-m11-lookup.mts",
     "smoke:mcp-server": "node --import tsx/esm scripts/smoke-mcp-server.mts",
+    "smoke:mcp-run-det-priors": "node --import tsx/esm scripts/smoke-mcp-run-det-priors.mts",
+    "measure:review-bundle": "node --import tsx/esm scripts/measure-review-bundle.mts",
     "smoke:m11-verifier": "node --import tsx/esm scripts/smoke-m11-verifier.mts",
     "smoke:m11-no-node-modules": "node --import tsx/esm scripts/smoke-m11-no-node-modules.mts",
     "smoke:m11": "pnpm smoke:m11-lookup && pnpm smoke:m11-verifier && pnpm smoke:m11-no-node-modules",
