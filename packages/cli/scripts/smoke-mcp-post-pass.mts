@@ -98,6 +98,15 @@ function mkLane(
   return { lane, status: "ok", scope: [SRC], findings, ...opts };
 }
 
+/**
+ * Model-supplied `id` keys are stripped by `LaneFindingSchema`, so cases
+ * track findings by their unique `claim` (or the minted id), never by a
+ * supplied id.
+ */
+function claimOf(f: Record<string, unknown>): string {
+  return f["claim"] as string;
+}
+
 try {
   // ---------------------------------------------------------------------------
   // [1] malformed findings drop + count per lane; missing id minted + stable.
@@ -125,7 +134,7 @@ try {
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[2] scope — out-of-scope drops, in-scope + no-path kept\n");
   const inScope = {
-    ...mkFinding({ id: "W-scope-in" }),
+    ...mkFinding(),
     sources: [
       {
         type: "tool",
@@ -139,7 +148,7 @@ try {
     ],
   };
   const outOfScope = {
-    ...mkFinding({ id: "W-scope-out" }),
+    ...mkFinding(),
     sources: [
       {
         type: "tool",
@@ -152,17 +161,42 @@ try {
       },
     ],
   };
-  const noPath = { ...mkFinding({ id: "W-scope-nopath" }), sources: [] };
+  const noPath = { ...mkFinding(), sources: [] };
+  const sourcelessOutOfScope = { ...mkFinding(), file: "src/other.ts", sources: [] };
+  const inScopeSourceOutOfScopeAnchor = {
+    ...mkFinding(),
+    file: "src/other.ts",
+    sources: [
+      {
+        type: "tool",
+        id: "t",
+        title: "t",
+        retrievedAt: nowIso,
+        path: SRC,
+        line: 2,
+        snippet: SRC_LINES[1],
+      },
+    ],
+  };
   const r2 = await runPostPass({
     repoRoot: TMP_ROOT,
     diff: DIFF,
-    lanes: [mkLane("up", [inScope, outOfScope, noPath])],
+    lanes: [
+      mkLane("up", [
+        inScope,
+        outOfScope,
+        noPath,
+        sourcelessOutOfScope,
+        inScopeSourceOutOfScopeAnchor,
+      ]),
+    ],
   });
-  const ids2 = r2.comments
-    .map((c) => c.id)
+  const kept2 = r2.comments
+    .map((c) => c.claim)
     .sort()
     .join(",");
-  assert(ids2 === "W-scope-in,W-scope-nopath", `in-scope + no-path kept, other dropped (${ids2})`);
+  const want2 = [claimOf(inScope), claimOf(noPath)].sort().join(",");
+  assert(kept2 === want2, `in-scope + no-path kept, others dropped (${kept2})`);
   assert(
     r2.metadata.degradedWorkers.some(
       (d) => d.topic === "post-pass" && d.message.includes("outside the lane scope"),
@@ -175,7 +209,7 @@ try {
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[3] verifier — fabricated snippet drops, real snippet kept\n");
   const fabricated = {
-    ...mkFinding({ id: "W-verify-bad" }),
+    ...mkFinding(),
     sources: [
       {
         type: "tool",
@@ -189,7 +223,7 @@ try {
     ],
   };
   const real = {
-    ...mkFinding({ id: "W-verify-good" }),
+    ...mkFinding(),
     sources: [
       {
         type: "tool",
@@ -208,7 +242,7 @@ try {
     lanes: [mkLane("up", [fabricated, real])],
   });
   assert(
-    r3.comments.length === 1 && r3.comments[0]?.id === "W-verify-good",
+    r3.comments.length === 1 && r3.comments[0]?.claim === claimOf(real),
     "fabricated-snippet comment drops, real-snippet comment kept",
   );
   assert(
@@ -220,9 +254,9 @@ try {
   // [4] added-line anchoring.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[4] anchoring — unchanged line drops, added + 0:0 kept\n");
-  const added = mkFinding({ id: "W-anchor-added", lineStart: 2, lineEnd: 2 });
+  const added = mkFinding({ lineStart: 2, lineEnd: 2 });
   const unchanged = {
-    ...mkFinding({ id: "W-anchor-unchanged", lineStart: 6, lineEnd: 6 }),
+    ...mkFinding({ lineStart: 6, lineEnd: 6 }),
     sources: [
       {
         type: "tool",
@@ -235,29 +269,30 @@ try {
       },
     ],
   };
-  const fileLevel = mkFinding({ id: "W-anchor-file", lineStart: 0, lineEnd: 0 });
+  const fileLevel = mkFinding({ lineStart: 0, lineEnd: 0 });
   const r4 = await runPostPass({
     repoRoot: TMP_ROOT,
     diff: DIFF,
     lanes: [mkLane("up", [added, unchanged, fileLevel])],
   });
-  const ids4 = r4.comments
-    .map((c) => c.id)
+  const kept4 = r4.comments
+    .map((c) => c.claim)
     .sort()
     .join(",");
-  assert(ids4 === "W-anchor-added,W-anchor-file", `added + file-level kept (${ids4})`);
+  const want4 = [claimOf(added), claimOf(fileLevel)].sort().join(",");
+  assert(kept4 === want4, `added + file-level kept (${kept4})`);
 
   // ---------------------------------------------------------------------------
   // [5] confidence→kind demotion.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[5] demotion — below threshold asks, authority exempts\n");
-  const lowReasoned = mkFinding({ id: "W-demote-low", confidence: 0.6 });
-  const atThreshold = mkFinding({ id: "W-demote-at", confidence: 0.7 });
-  const above = mkFinding({ id: "W-demote-high", confidence: 0.9 });
-  const lowSecurity = mkFinding({ id: "W-demote-sec", category: "security", confidence: 0.75 });
-  const tier1Low = mkFinding({ id: "W-demote-t1", tier: 1, confidence: 0.1 });
+  const lowReasoned = mkFinding({ confidence: 0.6 });
+  const atThreshold = mkFinding({ confidence: 0.7 });
+  const above = mkFinding({ confidence: 0.9 });
+  const lowSecurity = mkFinding({ category: "security", confidence: 0.75 });
+  const tier1Low = mkFinding({ tier: 1, confidence: 0.1 });
   const apiDefLow = {
-    ...mkFinding({ id: "W-demote-apidef", confidence: 0.1 }),
+    ...mkFinding({ confidence: 0.1 }),
     sources: [
       {
         type: "api_def",
@@ -270,8 +305,22 @@ try {
       },
     ],
   };
+  const apiDefSrc = {
+    ...mkFinding({ confidence: 0.2 }),
+    sources: [
+      {
+        type: "api_def",
+        id: "selfcite",
+        title: "function add",
+        retrievedAt: nowIso,
+        path: SRC,
+        line: 2,
+        snippet: SRC_LINES[1],
+      },
+    ],
+  };
   const cveLow = {
-    ...mkFinding({ id: "W-demote-cve", confidence: 0.5 }),
+    ...mkFinding({ confidence: 0.5 }),
     sources: [{ type: "cve", id: "CVE-2026-0001", title: "t", retrievedAt: nowIso }],
   };
   const r5 = await runPostPass({
@@ -282,27 +331,44 @@ try {
         lane: "up",
         status: "ok",
         scope: [SRC, DTS],
-        findings: [lowReasoned, atThreshold, above, lowSecurity, tier1Low, apiDefLow, cveLow],
+        findings: [
+          lowReasoned,
+          atThreshold,
+          above,
+          lowSecurity,
+          tier1Low,
+          apiDefLow,
+          apiDefSrc,
+          cveLow,
+        ],
       },
     ],
-    // 7 findings, all gated through — the default cap of 5 would clip two.
+    // 8 findings, all gated through — the default cap of 5 would clip three.
     config: { volumeCap: Infinity },
   });
-  const kindOf = (id: string): string | undefined => r5.comments.find((c) => c.id === id)?.kind;
-  assert(kindOf("W-demote-low") === "question", "reasoned assertion below 0.7 demotes to question");
-  assert(kindOf("W-demote-at") === "assertion", "assertion at the threshold stays");
-  assert(kindOf("W-demote-high") === "assertion", "assertion above the threshold stays");
-  assert(kindOf("W-demote-sec") === "question", "security 0.75 demotes under the 0.8 floor");
+  const kindOf = (claim: string): string | undefined =>
+    r5.comments.find((c) => c.claim === claim)?.kind;
   assert(
-    r5.comments.some((c) => c.id === "W-demote-t1" && c.kind === "question"),
+    kindOf(claimOf(lowReasoned)) === "question",
+    "reasoned assertion below 0.7 demotes to question",
+  );
+  assert(kindOf(claimOf(atThreshold)) === "assertion", "assertion at the threshold stays");
+  assert(kindOf(claimOf(above)) === "assertion", "assertion above the threshold stays");
+  assert(kindOf(claimOf(lowSecurity)) === "question", "security 0.75 demotes under the 0.8 floor");
+  assert(
+    r5.comments.some((c) => c.claim === claimOf(tier1Low) && c.kind === "question"),
     "Tier-1 low-confidence demotes to question instead of dropping",
   );
   assert(
-    kindOf("W-demote-apidef") === "assertion",
+    kindOf(claimOf(apiDefLow)) === "assertion",
     "verified api_def low-confidence stays an assertion",
   );
   assert(
-    kindOf("W-demote-cve") === "question",
+    kindOf(claimOf(apiDefSrc)) === "question",
+    "api_def on a reviewed source file is not authority — demotes",
+  );
+  assert(
+    kindOf(claimOf(cveLow)) === "question",
     "model-labelled cve low-confidence demotes — the label is not authority",
   );
 
@@ -311,7 +377,6 @@ try {
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[6] tier-3 gate — gated by default, kept verbose\n");
   const t3 = mkFinding({
-    id: "W-t3",
     tier: 3,
     category: "clarity",
     kind: "question",
@@ -332,35 +397,45 @@ try {
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[7] priority order — category, then tier, then confidence\n");
   const styleHi = mkFinding({
-    id: "W-ord-style",
     category: "style",
     kind: "question",
     confidence: 0.95,
   });
-  const corrT2 = mkFinding({ id: "W-ord-corr2", kind: "question", confidence: 0.9 });
-  const corrT1 = mkFinding({ id: "W-ord-corr1", tier: 1, kind: "question", confidence: 0.1 });
+  const corrT2 = mkFinding({ kind: "question", confidence: 0.9 });
+  const corrT1 = mkFinding({ tier: 1, kind: "question", confidence: 0.1 });
   const r7 = await runPostPass({
     repoRoot: TMP_ROOT,
     diff: DIFF,
     lanes: [mkLane("up", [styleHi, corrT2, corrT1])],
   });
-  assert(
-    r7.comments.map((c) => c.id).join(",") === "W-ord-corr1,W-ord-corr2,W-ord-style",
-    `correctness before style, tier before confidence (${r7.comments.map((c) => c.id).join(",")})`,
-  );
+  const order7 = r7.comments.map((c) => c.claim).join(",");
+  const want7 = [claimOf(corrT1), claimOf(corrT2), claimOf(styleHi)].join(",");
+  assert(order7 === want7, `correctness before style, tier before confidence (${order7})`);
 
   // ---------------------------------------------------------------------------
   // [8] cross-lane id dedupe.
   // ---------------------------------------------------------------------------
-  process.stdout.write("\n[8] dedupe — same id across two lanes posts once\n");
-  const dupe = mkFinding({ id: "W-dupe" });
-  const dupeCopy = { ...mkFinding(), id: "W-dupe" };
+  process.stdout.write("\n[8] dedupe — identical content across two lanes posts once\n");
+  const sharedClaim = "shared cross-lane claim";
+  const dupA = mkFinding({ claim: sharedClaim });
+  const dupB = mkFinding({ claim: sharedClaim });
   const r8 = await runPostPass({
     repoRoot: TMP_ROOT,
     diff: DIFF,
-    lanes: [mkLane("up", [dupe]), mkLane("down", [dupeCopy])],
+    lanes: [mkLane("up", [dupA]), mkLane("down", [dupB])],
   });
-  assert(r8.comments.length === 1, `duplicate id dedupes (${r8.comments.length})`);
+  assert(r8.comments.length === 1, `byte-identical findings dedupe (${r8.comments.length})`);
+  const sameIdA = { ...mkFinding({ claim: "distinct finding A" }), id: "1" };
+  const sameIdB = { ...mkFinding({ claim: "distinct finding B" }), id: "1" };
+  const r8b = await runPostPass({
+    repoRoot: TMP_ROOT,
+    diff: DIFF,
+    lanes: [mkLane("up", [sameIdA]), mkLane("down", [sameIdB])],
+  });
+  assert(
+    r8b.comments.length === 2,
+    `model-supplied ids are stripped — distinct findings both survive (${r8b.comments.length})`,
+  );
 
   // ---------------------------------------------------------------------------
   // [9] volume cap.
@@ -438,6 +513,26 @@ try {
       r10d.metadata.degradedWorkers.every((d) => d.topic !== "lane-health"),
     "ok + empty is a clean contribution — no lane-health entry",
   );
+  const r10e = await runPostPass({
+    repoRoot: TMP_ROOT,
+    diff: DIFF,
+    lanes: [mkLane("up", [mkFinding()]), mkLane("down", [42, "nope"])],
+  });
+  const unhealthyOne = r10e.metadata.degradedWorkers.find((d) => d.topic === "lane-health");
+  assert(
+    unhealthyOne?.kind === "warning" && (unhealthyOne.message.includes("down") ?? false),
+    "ok lane losing all findings to validation/scope is unhealthy — warning naming the lane",
+  );
+  const r10f = await runPostPass({
+    repoRoot: TMP_ROOT,
+    diff: DIFF,
+    lanes: [mkLane("up", [42, "nope"])],
+  });
+  const unhealthyAll = r10f.metadata.degradedWorkers.find((d) => d.topic === "lane-health");
+  assert(
+    unhealthyAll?.kind === "actionable",
+    "every lane unhealthy → actionable, not a clean result",
+  );
 
   // ---------------------------------------------------------------------------
   // [11] volumeCap validation.
@@ -490,9 +585,10 @@ try {
   assert(badLlm.length === 0, `no llm/ except verify-citations (${badLlm.join(",") || "clean"})`);
 
   process.stdout.write("\n[12b] CLI runs with no provider keys\n");
+  const cliFinding = mkFinding();
   const lanesJson = JSON.stringify({
     version: 1,
-    lanes: [mkLane("up", [mkFinding({ id: "W-cli" })])],
+    lanes: [mkLane("up", [cliFinding])],
   });
   const stripKeys = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
     const next = { ...env };
@@ -506,6 +602,8 @@ try {
       delete next[k];
     }
     next["WARDEN_CACHE_PATH"] = resolve(TMP_ROOT, ".warden/cache.sqlite");
+    // The global warden env file must not re-inject keys into the child.
+    next["XDG_CONFIG_HOME"] = resolve(TMP_ROOT, ".config");
     return next;
   };
   const cliOut = execFileSync(
@@ -527,7 +625,7 @@ try {
   assert(cliParsed.success, "keyless CLI run exits 0 with a schema-valid CommentSet");
   if (cliParsed.success) {
     assert(
-      cliParsed.data.comments.some((c) => c.id === "W-cli"),
+      cliParsed.data.comments.some((c) => c.claim === claimOf(cliFinding)),
       "keyless CLI run emits the finding",
     );
   }
@@ -560,6 +658,64 @@ try {
     exit1 = (err as { status?: number }).status ?? -1;
   }
   assert(exit1 === 1, `empty lanes exits 1 (got ${exit1})`);
+
+  process.stdout.write("\n[12d] CLI exits 1 on bad --base and empty --diff-file\n");
+  let badBaseExit = -1;
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx/esm"),
+        resolve(CLI_ROOT, "src/index.ts"),
+        "post-pass",
+        "--json",
+        "--base",
+        "warden-smoke-nonexistent-ref",
+        "--lanes",
+        "-",
+      ],
+      {
+        cwd: TMP_ROOT,
+        env: stripKeys(process.env),
+        input: lanesJson,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+  } catch (err) {
+    badBaseExit = (err as { status?: number }).status ?? -1;
+  }
+  assert(badBaseExit === 1, `bad --base exits 1 (got ${badBaseExit})`);
+  const EMPTY_DIFF_PATH = resolve(TMP_ROOT, "empty.diff");
+  writeFileSync(EMPTY_DIFF_PATH, "");
+  let emptyDiffExit = -1;
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx/esm"),
+        resolve(CLI_ROOT, "src/index.ts"),
+        "post-pass",
+        "--json",
+        "--diff-file",
+        EMPTY_DIFF_PATH,
+        "--lanes",
+        "-",
+      ],
+      {
+        cwd: TMP_ROOT,
+        env: stripKeys(process.env),
+        input: lanesJson,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+  } catch (err) {
+    emptyDiffExit = (err as { status?: number }).status ?? -1;
+  }
+  assert(emptyDiffExit === 1, `empty --diff-file exits 1 (got ${emptyDiffExit})`);
 
   // ---------------------------------------------------------------------------
   // [13] not an MCP tool.
