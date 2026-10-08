@@ -16,15 +16,21 @@ model tier and read-only permissions.
 
 ## Acceptance criteria
 
-- [ ] A generation/assembly step produces the lane agent definition from
+- [x] A generation/assembly step produces the lane agent definition from
       Warden's method source; the source remains canonical.
-- [ ] A drift check fails when the materialized config diverges from source.
-- [ ] The `down`/correctness agent runs against the Warden MCP server, calls
+      (`docs/reference/lanes/down.md` + `packages/cli/src/opencode/materialize.ts`,
+      `pnpm lanes:materialize`; slice #42.)
+- [x] A drift check fails when the materialized config diverges from source.
+      (`pnpm lanes:check`; slice #42.)
+- [x] The `down`/correctness agent runs against the Warden MCP server, calls
       det-priors/lookup, and produces findings in the expected shape.
-- [ ] Per-agent model tier and read-only permissions are configured and
-      documented.
-- [ ] The agent's findings feed the mandatory post-pass (slice 3) and yield a
-      `CommentSet`.
+      (`warden opencode-review`; fake-opencode e2e in `smoke:opencode-lanes`
+      + the live tracer in the slice #42 item file; slice #42.)
+- [x] Per-agent model tier and read-only permissions are configured and
+      documented. (`packages/cli/opencode/opencode.json`, `docs/opencode-lanes.md`;
+      slice #42.)
+- [x] The agent's findings feed the mandatory post-pass (slice 3) and yield a
+      `CommentSet`. (Driver publishes only `runPostPass` output; slice #42.)
 
 ## Blocked by
 
