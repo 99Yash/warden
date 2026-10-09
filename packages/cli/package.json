@@ -30,6 +30,7 @@
     "smoke:mcp-run-det-priors": "node --import tsx/esm scripts/smoke-mcp-run-det-priors.mts",
     "smoke:mcp-post-pass": "node --import tsx/esm scripts/smoke-mcp-post-pass.mts",
     "smoke:opencode-lanes": "node --import tsx/esm scripts/smoke-opencode-lanes.mts",
+    "smoke:eval-opencode": "node --import tsx/esm scripts/smoke-eval-opencode.mts",
     "measure:review-bundle": "node --import tsx/esm scripts/measure-review-bundle.mts",
     "smoke:m11-verifier": "node --import tsx/esm scripts/smoke-m11-verifier.mts",
     "smoke:m11-no-node-modules": "node --import tsx/esm scripts/smoke-m11-no-node-modules.mts",
@@ -73,7 +74,8 @@
     "smoke:m18-triage-gate": "node --import tsx/esm scripts/smoke-m18-triage-gate.mts",
     "smoke:m18": "pnpm smoke:m18-triage-gate",
     "smoke:adr-0048-observability": "node --import tsx/esm scripts/smoke-adr-0048-observability.mts",
-    "eval": "node --import tsx/esm scripts/eval/run.mts"
+    "eval": "node --import tsx/esm scripts/eval/run.mts",
+    "eval:parity": "node --import tsx/esm scripts/eval/run.mts --parity programmatic-dispatch-multi opencode-down"
   },
   "dependencies": {
     "@warden/core": "workspace:*",

@@ -5,6 +5,10 @@
  * samples, and emits a JSON scorecard + markdown table + verdict line per
  * the multi-criteria threshold defined in `score.mts`.
  *
+ * Slice #43 adds the `opencode-down` runtime (`--parity`), which scores
+ * the OpenCode down lane through `driveOpencodeLane` on two-commit
+ * fixture repos, plus a `--max-cost` ceiling that fails closed.
+ *
  * Usage:
  *   pnpm eval                            # all configs × all fixtures, N=3
  *   pnpm eval --config <name>            # one config × all fixtures
@@ -12,6 +16,8 @@
  *   pnpm eval --fixture-regex misses     # all configs × matching fixture names
  *   pnpm eval --samples <n>              # override sample count
  *   pnpm eval --compare <cfgA> <cfgB>    # side-by-side scorecard diff
+ *   pnpm eval --parity <ref> <cand>      # parity gate + opencode-parity scorecard
+ *   pnpm eval --max-cost <usd>            # cumulative spend ceiling (default 4)
  *
  * Requires at least one configured review LLM provider key; emits a skip
  * notice and exits 0 when unset. Each run takes ~$0.20–$1.00 per fixture per sample per
@@ -19,22 +25,34 @@
  * configs × 3 samples) ≈ $20–90.
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runReviewHarness, type CommentSet, type ReviewHarnessInput } from "@warden/core";
+import {
+  runReviewHarness,
+  type CommentSet,
+  type LaneOutput,
+  type ReviewHarnessInput,
+} from "@warden/core";
 import { configuredReviewLlmProviders, loadWardenRuntime, providerApiKey } from "@warden/env";
-import { ALL_CONFIGS } from "./configs/index.js";
-import { aggregateScores, checkThreshold, renderMarkdownTable, scoreFixtureRun } from "./score.mjs";
+import { DOWN_LANE_SPEC } from "../../src/opencode/materialize.js";
+import { driveOpencodeLane, type SessionUsage } from "../../src/opencode/drive.js";
+import { ALL_CONFIGS, OPENCODE_CONFIGS } from "./configs/index.js";
+import {
+  buildFixtureRepo,
+  cleanupMaterialized,
+  materializePatchPostImages,
+  removeFixtureRepo,
+} from "./fixture-repo.mjs";
+import {
+  aggregateScores,
+  checkParity,
+  checkThreshold,
+  renderMarkdownTable,
+  scoreFixtureRun,
+} from "./score.mjs";
 import type {
   AggregateScore,
   EvalConfig,
@@ -55,10 +73,14 @@ interface Args {
   fixtureRegex?: RegExp;
   samples: number;
   compare?: [string, string];
+  parity?: [string, string];
+  maxCost: number;
 }
 
+const DEFAULT_MAX_COST_USD = 4;
+
 function parseArgs(argv: string[]): Args {
-  const args: Args = { samples: 3 };
+  const args: Args = { samples: 3, maxCost: DEFAULT_MAX_COST_USD };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--config" && argv[i + 1]) {
@@ -75,6 +97,13 @@ function parseArgs(argv: string[]): Args {
       const a = argv[++i];
       const b = argv[++i];
       if (a && b) args.compare = [a, b];
+    } else if (arg === "--parity" && argv[i + 1] && argv[i + 2]) {
+      const a = argv[++i];
+      const b = argv[++i];
+      if (a && b) args.parity = [a, b];
+    } else if (arg === "--max-cost" && argv[i + 1]) {
+      const n = Number(argv[++i]);
+      if (Number.isFinite(n) && n >= 0) args.maxCost = n;
     }
   }
   return args;
@@ -108,7 +137,7 @@ function resolveRepoPath(repo: string): string | null {
 
 function loadConfigs(filter: string | undefined): EvalConfig[] {
   if (!filter) return ALL_CONFIGS;
-  return ALL_CONFIGS.filter((c) => c.name === filter);
+  return [...ALL_CONFIGS, ...OPENCODE_CONFIGS].filter((c) => c.name === filter);
 }
 
 function loadFixtures(filter: string | undefined, regex: RegExp | undefined): Fixture[] {
@@ -282,6 +311,88 @@ function parseLabelExpectation(raw: string | undefined): "present" | "absent" {
 // Harness invocation
 // ---------------------------------------------------------------------------
 
+interface OnceResult {
+  result: CommentSet | null;
+  error: string | null;
+  wallMs: number;
+  usage?: SessionUsage;
+  lanes?: LaneOutput[];
+  excludedBinary?: number;
+}
+
+/** Extra scoring inputs for the OpenCode runtime (absent = harness). */
+interface OpencodeScoreExtra {
+  usage?: SessionUsage;
+  lanes?: LaneOutput[];
+  excludedBinary: number;
+}
+
+/**
+ * Measured only when the session usage was read AND (`costUsd > 0` or all
+ * token counts are 0 — a free or unpriced model that did work).
+ */
+function isUsageMeasured(usage: SessionUsage | undefined): boolean {
+  if (usage === undefined) return false;
+  if (usage.costUsd > 0) return true;
+  const t = usage.tokens;
+  return (
+    t.input === 0 && t.output === 0 && t.reasoning === 0 && t.cacheRead === 0 && t.cacheWrite === 0
+  );
+}
+
+async function runOnce(
+  fixture: Fixture,
+  config: EvalConfig,
+  repoRoot: string,
+): Promise<OnceResult> {
+  if (config.runtime === "opencode") return await runOnceOpencode(fixture, config);
+  return await runOnceHarness(fixture, config, repoRoot);
+}
+
+/**
+ * Run the OpenCode down lane on a two-commit fixture repo through the
+ * same driver code as `warden opencode-review`: the scored output is the
+ * published `CommentSet` from `runPostPass`, not eval-only logic.
+ */
+async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<OnceResult> {
+  const startedAt = Date.now();
+  let repo;
+  try {
+    repo = buildFixtureRepo(fixture);
+  } catch (err) {
+    return {
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+      wallMs: Date.now() - startedAt,
+      excludedBinary: 0,
+    };
+  }
+  try {
+    const driven = await driveOpencodeLane({
+      repoRoot: repo.root,
+      baseRef: repo.baseSha,
+      ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
+    });
+    return {
+      result: driven.result,
+      error: null,
+      wallMs: Date.now() - startedAt,
+      ...(driven.usage !== undefined ? { usage: driven.usage } : {}),
+      lanes: driven.lanes,
+      excludedBinary: repo.excludedBinary,
+    };
+  } catch (err) {
+    return {
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+      wallMs: Date.now() - startedAt,
+      excludedBinary: repo.excludedBinary,
+    };
+  } finally {
+    removeFixtureRepo(repo);
+  }
+}
+
 /**
  * Run one harness invocation against a fixture. Two steps:
  *
@@ -302,15 +413,11 @@ function parseLabelExpectation(raw: string | undefined): "present" | "absent" {
  *   3. **Clean up** the materialized files between runs so fixtures don't
  *      leak state into each other.
  */
-async function runOnce(
+async function runOnceHarness(
   fixture: Fixture,
   config: EvalConfig,
   repoRoot: string,
-): Promise<{
-  result: CommentSet | null;
-  error: string | null;
-  wallMs: number;
-}> {
+): Promise<OnceResult> {
   const startedAt = Date.now();
   const materializedPaths: string[] = [];
   // Real-PR fixtures check out the PR's head commit as a detached worktree so
@@ -362,117 +469,6 @@ async function runOnce(
 }
 
 /**
- * Parse a unified diff and write sparse post-image files under `repoRoot`.
- * Returns the list of paths written so the caller can clean them up after
- * the harness invocation.
- *
- * This intentionally does not reconstruct unchanged file regions outside
- * diff hunks; it preserves line numbers and local hunk context, which are
- * the only pieces the review workers and verifier need for fixture scoring.
- *
- * Handles standard two-sided git unified diffs only: it relies on `diff --git`
- * separators to reset state (so a `+++` file header is never misread as hunk
- * body), and the `@@ -a +b @@` hunk regex does not match combined/merge `@@@`
- * headers. No fixture uses either of those shapes; broaden the regex if that
- * changes.
- */
-function materializePatchPostImages(diff: string, repoRoot: string): string[] {
-  const written = new Set<string>();
-  let currentPath: string | null = null;
-  let currentLines = new Map<number, string>();
-  let nextNewLine: number | null = null;
-
-  const flush = (): void => {
-    if (currentPath === null || currentLines.size === 0) {
-      currentPath = null;
-      currentLines = new Map<number, string>();
-      nextNewLine = null;
-      return;
-    }
-
-    const maxLine = Math.max(...currentLines.keys());
-    const out: string[] = [];
-    for (let line = 1; line <= maxLine; line++) {
-      out.push(currentLines.get(line) ?? "");
-    }
-    const fullPath = resolve(repoRoot, currentPath);
-    const rootAbs = resolve(repoRoot);
-    // Defense-in-depth: never write outside repoRoot (an absolute or traversing
-    // `+++` target in a hand-authored fixture would otherwise escape).
-    if (fullPath !== rootAbs && !fullPath.startsWith(rootAbs + sep)) {
-      currentPath = null;
-      currentLines = new Map<number, string>();
-      nextNewLine = null;
-      return;
-    }
-    mkdirSync(dirname(fullPath), { recursive: true });
-    writeFileSync(fullPath, out.join("\n") + "\n");
-    written.add(fullPath);
-
-    currentPath = null;
-    currentLines = new Map<number, string>();
-    nextNewLine = null;
-  };
-
-  const lines = diff.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-
-    if (line.startsWith("diff --git ")) {
-      flush();
-      continue;
-    }
-
-    if (nextNewLine === null && line.startsWith("+++ ")) {
-      const target = line.slice(4).trim();
-      currentPath = target.startsWith("b/") ? target.slice(2) : target;
-      continue;
-    }
-
-    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunk) {
-      nextNewLine = Number(hunk[1]);
-      continue;
-    }
-
-    if (currentPath === null || nextNewLine === null) continue;
-
-    if (line.startsWith("+")) {
-      currentLines.set(nextNewLine, line.slice(1));
-      nextNewLine++;
-    } else if (line.startsWith(" ")) {
-      currentLines.set(nextNewLine, line.slice(1));
-      nextNewLine++;
-    } else if (line.startsWith("-")) {
-      // Deleted lines have no post-image line number.
-    } else if (line.startsWith("\\")) {
-      // "\ No newline at end of file" marker.
-    } else if (line === "") {
-      // Bare empty line inside an active hunk = blank context line. Git emits a
-      // single-space " " for these, but hand-authored fixtures write a bare "".
-      // Treat it as context (advance the counter) so the rest of the hunk is not
-      // silently truncated — dropping it would shift every later line's number.
-      currentLines.set(nextNewLine, "");
-      nextNewLine++;
-    } else {
-      nextNewLine = null;
-    }
-  }
-  flush();
-  return [...written];
-}
-
-function cleanupMaterialized(paths: string[]): void {
-  for (const p of paths) {
-    try {
-      unlinkSync(p);
-    } catch {
-      // Ignore — best-effort cleanup.
-    }
-  }
-}
-
-/**
  * Score a single harness result against the fixture's labels.
  *
  * A `present` label is "caught" iff at least one Comment cites its `path` AND
@@ -487,6 +483,7 @@ function scoreOne(
   result: CommentSet | null,
   sample: number,
   configName: string,
+  opencodeExtra?: OpencodeScoreExtra,
 ): FixtureSample {
   const base: FixtureSample = {
     fixture: fixture.name,
@@ -502,6 +499,8 @@ function scoreOne(
     costUsd: 0,
     durationMs: 0,
     error: null,
+    costMeasured: opencodeExtra === undefined ? true : isUsageMeasured(opencodeExtra.usage),
+    ...(opencodeExtra !== undefined ? { excludedBinary: opencodeExtra.excludedBinary } : {}),
   };
   if (!result) {
     base.error = "harness threw";
@@ -522,8 +521,19 @@ function scoreOne(
     sourcesCount: c.sources.length,
   }));
   base.durationMs = result.metadata.durationMs;
-  base.costUsd = result.metadata.costUsd ?? 0;
-  base.dispatchCount = approximateDispatchCount(result);
+  if (opencodeExtra !== undefined) {
+    base.costUsd = opencodeExtra.usage?.costUsd ?? 0;
+    // The lane envelope's status reads "the lane ran" for criterion (e):
+    // 1 when the lane completed, 0 when it failed or threw.
+    const laneOk =
+      opencodeExtra.lanes !== undefined
+        ? opencodeExtra.lanes.some((l) => l.status === "ok")
+        : false;
+    base.dispatchCount = laneOk ? 1 : 0;
+  } else {
+    base.costUsd = result.metadata.costUsd ?? 0;
+    base.dispatchCount = approximateDispatchCount(result);
+  }
 
   const presentLabels = fixture.labels.filter((l) => labelExpectation(l) === "present");
   const absentLabels = fixture.labels.filter((l) => labelExpectation(l) === "absent");
@@ -586,6 +596,10 @@ function labelExpectation(label: FixtureLabel): "present" | "absent" {
  * grained dispatch metrics, but enough for the (e) threshold (≥1 dispatch
  * on substantive fixtures). The scratchpad's per-worker count isn't on the
  * public surface; exposing it for measurement-only is out of scope for M15.
+ *
+ * The OpenCode runtime does not use this: its samples set `dispatchCount`
+ * from the lane envelope's status (1 when the lane ran `ok`, else 0), so
+ * criterion (e) reads "the lane ran".
  */
 function approximateDispatchCount(set: CommentSet): number {
   const usage = set.metadata.tokenUsage;
@@ -612,20 +626,19 @@ async function main(): Promise<void> {
   const configuredProviders = configuredReviewLlmProviders().filter(
     (providerId) => providerApiKey(providerId) !== undefined,
   );
-  if (configuredProviders.length === 0) {
-    process.stdout.write(
-      "[eval] no review LLM provider key set — skipping (set ANTHROPIC_API_KEY or OPENAI_API_KEY).\n",
-    );
-    process.exit(0);
-  }
 
   // `--compare a b` without an explicit `--config` runs just those two
   // configs (not all of ALL_CONFIGS) — the comparison table only needs the
-  // named pair, so running the rest just burns tokens.
+  // named pair, so running the rest just burns tokens. `--parity` resolves
+  // against both lists so the opencode candidate is reachable.
   let configs = loadConfigs(args.configFilter);
   if (!args.configFilter && args.compare) {
     const [a, b] = args.compare;
     configs = configs.filter((c) => c.name === a || c.name === b);
+  }
+  if (!args.configFilter && args.parity) {
+    const [a, b] = args.parity;
+    configs = [...ALL_CONFIGS, ...OPENCODE_CONFIGS].filter((c) => c.name === a || c.name === b);
   }
   const fixtures = loadFixtures(args.fixtureFilter, args.fixtureRegex);
 
@@ -638,22 +651,82 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Provider-key preflight runs only when a selected config is a harness
+  // config. The OpenCode runtime needs no warden provider key.
+  const needsHarness = configs.some((c) => c.runtime !== "opencode");
+  const needsOpencode = configs.some((c) => c.runtime === "opencode");
+  if (needsHarness && configuredProviders.length === 0) {
+    process.stdout.write(
+      "[eval] no review LLM provider key set — skipping (set ANTHROPIC_API_KEY or OPENAI_API_KEY).\n",
+    );
+    process.exit(0);
+  }
+  // OpenCode preflight: the binary must exist. When absent, print a skip
+  // notice and exit 0, mirroring the missing-key skip.
+  if (needsOpencode) {
+    try {
+      execFileSync("opencode", ["--version"], { stdio: "ignore" });
+    } catch {
+      process.stdout.write("[eval] opencode binary not found — skipping (install opencode).\n");
+      process.exit(0);
+    }
+  }
+
   // Minimal repoRoot with a package.json so the harness's ecosystem
   // detector doesn't short-circuit. Reuses the same temp dir across runs.
   const repoRoot = await ensureRepoRoot();
 
+  // Cumulative measured spend across every sample of every config. Checked
+  // before each sample; the run stops before it spends past the ceiling.
+  let spentUsd = 0;
+  let stoppedAtCostCeiling = false;
   const aggregates: AggregateScore[] = [];
   for (const config of configs) {
     process.stdout.write(`\n## Config: ${config.name}\n${config.description}\n\n`);
     const rows: FixtureScore[] = [];
+    let configStopped = false;
     for (const fixture of fixtures) {
       process.stdout.write(`  → ${fixture.category}/${fixture.name} ×${args.samples}\n`);
       const samples: FixtureSample[] = [];
       for (let i = 0; i < args.samples; i++) {
-        const { result, error } = await runOnce(fixture, config, repoRoot);
-        const score = scoreOne(fixture, result, i + 1, config.name);
+        if (spentUsd >= args.maxCost) {
+          stoppedAtCostCeiling = true;
+          process.stdout.write(
+            `[eval] cost ceiling $${args.maxCost} reached ($${spentUsd.toFixed(4)} spent) — stopping\n`,
+          );
+          configStopped = true;
+          break;
+        }
+        const { result, error, usage, lanes, excludedBinary } = await runOnce(
+          fixture,
+          config,
+          repoRoot,
+        );
+        const score = scoreOne(
+          fixture,
+          result,
+          i + 1,
+          config.name,
+          config.runtime === "opencode"
+            ? {
+                ...(usage !== undefined ? { usage } : {}),
+                ...(lanes !== undefined ? { lanes } : {}),
+                excludedBinary: excludedBinary ?? 0,
+              }
+            : undefined,
+        );
         if (error !== null) score.error = error;
         samples.push(score);
+        if (!score.costMeasured) {
+          // Fail closed: the ceiling cannot bound unmeasured spend.
+          stoppedAtCostCeiling = true;
+          process.stdout.write(
+            `[eval] unmeasured spend on ${config.name}/${fixture.name} sample ${i + 1} — stopping\n`,
+          );
+          configStopped = true;
+          break;
+        }
+        spentUsd += score.costUsd;
         const presentLabelCount = fixture.labels.filter(
           (l) => labelExpectation(l) === "present",
         ).length;
@@ -668,25 +741,52 @@ async function main(): Promise<void> {
             "\n",
         );
       }
-      rows.push(scoreFixtureRun(fixture, samples, config.name));
+      if (samples.length > 0) rows.push(scoreFixtureRun(fixture, samples, config.name));
+      if (configStopped) break;
     }
-    const agg = aggregateScores(rows, config.name);
-    aggregates.push(agg);
-    process.stdout.write(`\n${renderMarkdownTable(agg)}\n`);
+    if (rows.length > 0) {
+      const agg = aggregateScores(rows, config.name);
+      aggregates.push(agg);
+      process.stdout.write(`\n${renderMarkdownTable(agg)}\n`);
 
-    const verdict = checkThreshold(agg, rows);
-    process.stdout.write(`\nThreshold details:\n`);
-    for (const d of verdict.details) process.stdout.write(`  ${d}\n`);
-    process.stdout.write(
-      `\nM15 threshold: ${verdict.cleared ? "CLEARED" : `NOT MET (criteria failed: ${verdict.failed.join(", ")})`}\n`,
-    );
+      const verdict = checkThreshold(agg, rows);
+      process.stdout.write(`\nThreshold details:\n`);
+      for (const d of verdict.details) process.stdout.write(`  ${d}\n`);
+      process.stdout.write(
+        `\nM15 threshold: ${verdict.cleared ? "CLEARED" : `NOT MET (criteria failed: ${verdict.failed.join(", ")})`}\n`,
+      );
+    }
+    if (configStopped) break;
+  }
+
+  if (args.parity) {
+    await writeParityScorecard(args, configs, aggregates, stoppedAtCostCeiling);
+    const [refName, candName] = args.parity;
+    const reference = aggregates.find((x) => x.config === refName);
+    const candidate = aggregates.find((x) => x.config === candName);
+    if (reference && candidate) {
+      process.stdout.write(`\n## Compare: ${reference.config} vs ${candidate.config}\n\n`);
+      process.stdout.write(renderCompareTable(reference, candidate) + "\n");
+      const parity = checkParity(reference, candidate);
+      process.stdout.write(`\nParity details:\n`);
+      for (const d of parity.details) process.stdout.write(`  ${d}\n`);
+      process.stdout.write(
+        `\nPARITY: ${parity.cleared ? "MET" : `NOT MET (criteria failed: ${parity.failed.join(", ")})`}\n`,
+      );
+      process.exit(parity.cleared && !stoppedAtCostCeiling ? 0 : 1);
+    }
+    process.stdout.write(`[eval] --parity needs both configs in the run.\n`);
+    process.exit(1);
   }
 
   // Write the JSON scorecard
   if (!existsSync(RESULTS_DIR)) mkdirSync(RESULTS_DIR, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const out = resolve(RESULTS_DIR, `${ts}.json`);
-  writeFileSync(out, JSON.stringify({ samples: args.samples, aggregates }, null, 2));
+  writeFileSync(
+    out,
+    JSON.stringify({ samples: args.samples, aggregates, stoppedAtCostCeiling }, null, 2),
+  );
   process.stdout.write(`\nWrote ${out}\n`);
 
   if (args.compare && aggregates.length >= 2) {
@@ -702,7 +802,96 @@ async function main(): Promise<void> {
     const verdict = checkThreshold(agg, agg.rows);
     return !verdict.cleared;
   });
-  process.exit(anyFailed ? 1 : 0);
+  process.exit(anyFailed || stoppedAtCostCeiling ? 1 : 0);
+}
+
+function opencodeVersion(): string {
+  try {
+    return (execFileSync("opencode", ["--version"], { encoding: "utf8" }) as string).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+function wardenHead(): string {
+  try {
+    return (
+      execFileSync("git", ["-C", WARDEN_ROOT, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }) as string
+    ).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Parity scorecard: JSON + rendered markdown under
+ * `results/opencode-parity/<ts>.(json|md)` — the rendered tables plus
+ * threshold details plus parity details plus run metadata.
+ */
+async function writeParityScorecard(
+  args: Args,
+  configs: EvalConfig[],
+  aggregates: AggregateScore[],
+  stoppedAtCostCeiling: boolean,
+): Promise<void> {
+  const [refName, candName] = args.parity ?? ["", ""];
+  const reference = aggregates.find((x) => x.config === refName);
+  const candidate = aggregates.find((x) => x.config === candName);
+  const parity =
+    reference && candidate
+      ? checkParity(reference, candidate)
+      : { cleared: false, failed: ["missing-config"], details: [] as string[] };
+  const candidateConfig = configs.find((c) => c.name === candName);
+  const meta = {
+    samples: args.samples,
+    fixtureFilter: args.fixtureFilter ?? args.fixtureRegex?.source ?? null,
+    maxCost: args.maxCost,
+    candidateModel: candidateConfig?.opencodeModel ?? DOWN_LANE_SPEC.defaultModel,
+    opencodeVersion: opencodeVersion(),
+    wardenHead: wardenHead(),
+    stoppedAtCostCeiling,
+  };
+  const dir = resolve(RESULTS_DIR, "opencode-parity");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  writeFileSync(
+    resolve(dir, `${ts}.json`),
+    JSON.stringify({ ...meta, aggregates, parity }, null, 2),
+  );
+  const lines: string[] = [
+    `# OpenCode parity — ${ts}`,
+    ``,
+    `- samples: ${meta.samples}`,
+    `- fixture filter: ${meta.fixtureFilter ?? "(all)"}`,
+    `- --max-cost: $${meta.maxCost}`,
+    `- candidate model: ${meta.candidateModel}`,
+    `- opencode --version: ${meta.opencodeVersion}`,
+    `- warden HEAD: ${meta.wardenHead}`,
+    `- stoppedAtCostCeiling: ${meta.stoppedAtCostCeiling}`,
+    ``,
+  ];
+  for (const agg of aggregates) {
+    lines.push(`## Config: ${agg.config}`, ``, renderMarkdownTable(agg), ``);
+    const verdict = checkThreshold(agg, agg.rows);
+    lines.push(`Threshold details:`, ...verdict.details.map((d) => `- ${d}`), ``);
+  }
+  if (reference && candidate) {
+    lines.push(
+      `## Compare: ${reference.config} vs ${candidate.config}`,
+      ``,
+      renderCompareTable(reference, candidate),
+      ``,
+      `Parity details:`,
+      ...parity.details.map((d) => `- ${d}`),
+      ``,
+      `PARITY: ${parity.cleared ? "MET" : `NOT MET (criteria failed: ${parity.failed.join(", ")})`}`,
+    );
+  }
+  const mdPath = resolve(dir, `${ts}.md`);
+  writeFileSync(mdPath, lines.join("\n") + "\n");
+  process.stdout.write(`\nWrote ${mdPath}\n`);
 }
 
 function renderCompareTable(a: AggregateScore, b: AggregateScore): string {

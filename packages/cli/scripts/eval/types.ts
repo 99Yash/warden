@@ -21,6 +21,10 @@ export interface EvalConfig {
   name: string;
   description: string;
   bossLoop?: BossLoopConfig;
+  /** Eval runtime: absent means the in-process boss-loop harness. */
+  runtime?: "harness" | "opencode";
+  /** OpenCode lane model override; absent means the driver default. */
+  opencodeModel?: string;
 }
 
 /**
@@ -103,6 +107,15 @@ export interface FixtureSample {
   durationMs: number;
   /** Any error during the run; null when clean. */
   error: string | null;
+  /**
+   * Whether the sample's spend was measured. Harness samples are always
+   * measured (the catalog prices them). OpenCode samples are measured only
+   * when the session usage was read AND (`costUsd > 0` or all token counts
+   * are 0 — a free or unpriced model that did work).
+   */
+  costMeasured: boolean;
+  /** Binary sections excluded from the fixture repo (`git apply` cannot reverse them). */
+  excludedBinary?: number;
 }
 
 export interface EvalCommentSummary {
@@ -182,3 +195,9 @@ export interface ThresholdVerdict {
   /** Human-readable summary of every criterion's pass/fail with the numbers. */
   details: string[];
 }
+
+/**
+ * Verdict from `checkParity()`. Same shape as `ThresholdVerdict` plus the
+ * compared config names.
+ */
+export type ParityVerdict = ThresholdVerdict & { reference: string; candidate: string };

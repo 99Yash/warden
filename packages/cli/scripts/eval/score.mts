@@ -25,6 +25,7 @@ import type {
   Fixture,
   FixtureSample,
   FixtureScore,
+  ParityVerdict,
   ThresholdVerdict,
 } from "./types.js";
 
@@ -209,6 +210,91 @@ export function checkThreshold(agg: AggregateScore, rows: FixtureScore[]): Thres
     cleared: failed.length === 0,
     failed,
     details,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Parity gate (slice #43)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compare an OpenCode candidate against a harness reference on the same
+ * fixture set in the same invocation. Ties pass (parity, not superiority).
+ * `checkThreshold` is unchanged.
+ */
+export function checkParity(reference: AggregateScore, candidate: AggregateScore): ParityVerdict {
+  const failed: string[] = [];
+  const details: string[] = [];
+
+  // P0 same fixtures — the row fixture-name sets must be equal.
+  const refNames = new Set(reference.rows.map((r) => r.fixture));
+  const candNames = new Set(candidate.rows.map((r) => r.fixture));
+  const passP0 = refNames.size === candNames.size && [...refNames].every((n) => candNames.has(n));
+  details.push(
+    `(P0) Same fixtures: reference ${refNames.size}, candidate ${candNames.size} — ${passP0 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP0) failed.push("P0-same-fixtures");
+
+  // P1 real-PR recall.
+  const passP1 = candidate.realCaught >= reference.realCaught;
+  details.push(
+    `(P1) Real-PR recall: candidate ${candidate.realCaught}/${candidate.realPlants} ` +
+      `vs reference ${reference.realCaught}/${reference.realPlants} — ${passP1 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP1) failed.push("P1-real-recall");
+
+  // P2 synthetic recall.
+  const passP2 = candidate.syntheticCaught >= reference.syntheticCaught;
+  details.push(
+    `(P2) Synthetic recall: candidate ${candidate.syntheticCaught}/${candidate.syntheticPlants} ` +
+      `vs reference ${reference.syntheticCaught}/${reference.syntheticPlants} — ${passP2 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP2) failed.push("P2-synthetic-recall");
+
+  // P3 precision traps.
+  const passP3 = candidate.falsePositiveTrapHits === 0;
+  details.push(
+    `(P3) Precision traps: ${candidate.falsePositiveTrapHits}/${candidate.falsePositiveTraps} ` +
+      `(threshold 0) — ${passP3 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP3) failed.push("P3-precision-traps");
+
+  // P4 clean zero-hit.
+  const passP4 = candidate.cleanFixtureUnlabeled === 0;
+  details.push(
+    `(P4) Clean zero-hit: ${candidate.cleanFixtureUnlabeled} ` +
+      `(threshold 0) — ${passP4 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP4) failed.push("P4-clean-zero-hit");
+
+  // P5 cost — criterion (d) plus every candidate sample measured.
+  const passP5cost = candidate.totalCost < COST_BUDGET_USD;
+  const unmeasured = candidate.rows.filter((r) =>
+    r.rawSamples.some((s) => s.costMeasured !== true),
+  ).length;
+  const passP5 = passP5cost && unmeasured === 0;
+  details.push(
+    `(P5) Cost: $${candidate.totalCost.toFixed(4)} ` +
+      `(threshold <$${COST_BUDGET_USD}) + ${unmeasured} row(s) with unmeasured spend — ${passP5 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP5) failed.push("P5-cost");
+
+  // P6 lane health — every substantive candidate row ran and stayed clean.
+  const substantive = candidate.rows.filter((r) => !r.expectsEmpty);
+  const unhealthy = substantive.filter((r) => r.medianDispatches < 1 || r.hadError);
+  const passP6 = unhealthy.length === 0;
+  details.push(
+    `(P6) Lane health: ${substantive.length - unhealthy.length}/${substantive.length} ` +
+      `substantive rows with ≥1 dispatch and no error — ${passP6 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP6) failed.push("P6-lane-health");
+
+  return {
+    cleared: failed.length === 0,
+    failed,
+    details,
+    reference: reference.config,
+    candidate: candidate.config,
   };
 }
 

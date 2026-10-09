@@ -170,3 +170,17 @@ export const ALL_CONFIGS: EvalConfig[] = [
   reasonedAssertions,
   diligent,
 ];
+
+/**
+ * Slice #43: the OpenCode down lane as an eval candidate. Kept out of
+ * `ALL_CONFIGS` on purpose — a bare `pnpm eval` must not start paying
+ * for OpenCode runs. Reach it via `--parity <reference> opencode-down`
+ * (or `--config opencode-down`).
+ */
+export const opencodeDown: EvalConfig = {
+  name: "opencode-down",
+  description: "OpenCode down lane via driveOpencodeLane (same path as warden opencode-review).",
+  runtime: "opencode",
+};
+
+export const OPENCODE_CONFIGS: EvalConfig[] = [opencodeDown];

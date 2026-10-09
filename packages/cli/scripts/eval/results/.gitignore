@@ -6,3 +6,7 @@
 !m15-final/
 !m15-final/*.json
 m15-final/*.tmp
+# Slice #43: the operator's parity scorecard is committed.
+!opencode-parity/
+!opencode-parity/*.json
+!opencode-parity/*.md
