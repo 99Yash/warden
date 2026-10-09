@@ -26,8 +26,10 @@ import {
   buildMcpConfigContent,
   buildOpencodeCommand,
   buildOpencodeServeCommand,
+  DOWN_LANE_MAX_SCOPE_FILES,
   driveOpencodeLane,
   evaluateLane,
+  laneScopeOverCeiling,
   parseLaneEvents,
   parseMcpServers,
   parseSessionUsage,
@@ -1395,6 +1397,97 @@ if (mode === "runfail") {
     "missing binary carries an actionable lane-health entry",
   );
   rmSync(NOBIN, { recursive: true, force: true });
+
+  // (Y) scope over the ceiling (issue #57): the step cap cannot fund one
+  // read per changed file, so the driver fails the lane before it spawns
+  // serve or run — a known $0, like the empty-scope path.
+  assert(
+    DOWN_LANE_MAX_SCOPE_FILES === DOWN_LANE_SPEC.steps - 2,
+    `ceiling derives from the step cap (${DOWN_LANE_MAX_SCOPE_FILES} = steps ${DOWN_LANE_SPEC.steps} - 2)`,
+  );
+  const scopeOf = (n: number): string[] => Array.from({ length: n }, (_, i) => `src/f${i}.ts`);
+  assert(
+    laneScopeOverCeiling(scopeOf(DOWN_LANE_MAX_SCOPE_FILES)) === undefined,
+    `scope at the ceiling (${DOWN_LANE_MAX_SCOPE_FILES} files) is allowed`,
+  );
+  const overReason = laneScopeOverCeiling(scopeOf(DOWN_LANE_MAX_SCOPE_FILES + 1)) ?? "";
+  assert(
+    overReason.includes(`${DOWN_LANE_MAX_SCOPE_FILES + 1} changed files`) &&
+      overReason.includes(`ceiling of ${DOWN_LANE_MAX_SCOPE_FILES}`) &&
+      overReason.includes(`DOWN_LANE_SPEC.steps ${DOWN_LANE_SPEC.steps}`),
+    `scope one over the ceiling fails naming the numbers and their source (${overReason})`,
+  );
+  const BIG = mkdtempSync(resolve(tmpdir(), "warden-lanes-big-"));
+  const bigGit = (args: string[]): void => {
+    execFileSync("git", args, { cwd: BIG, stdio: "ignore" });
+  };
+  bigGit(["init"]);
+  bigGit(["config", "user.email", "smoke@example.com"]);
+  bigGit(["config", "user.name", "smoke"]);
+  execFileSync("mkdir", ["-p", resolve(BIG, "src")]);
+  writeFileSync(resolve(BIG, "src/base.ts"), "export const base = 0;\n");
+  bigGit(["add", "-A"]);
+  bigGit(["commit", "-m", "base"]);
+  for (let i = 0; i <= DOWN_LANE_MAX_SCOPE_FILES; i++) {
+    writeFileSync(resolve(BIG, `src/f${i}.ts`), `export const f${i} = ${i};\n`);
+  }
+  bigGit(["add", "-A"]);
+  bigGit(["commit", "-m", "big"]);
+  const bigRunMarker = resolve(TMP_ROOT, "run-invoked-big");
+  const bigServePort = resolve(TMP_ROOT, "fake-serve-port-big");
+  process.env.WARDEN_SMOKE_RUN_MARKER = bigRunMarker;
+  process.env.WARDEN_SMOKE_SERVE_PORT = bigServePort;
+  const big = await driveOpencodeLane({
+    repoRoot: BIG,
+    baseRef: "HEAD~1",
+    opencodeBin: fakePath,
+    lanesOut: "lanes.json",
+  });
+  delete process.env.WARDEN_SMOKE_RUN_MARKER;
+  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  const fileExists = (path: string): boolean => {
+    try {
+      readFileSync(path, "utf8");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  assert(
+    big.lanes[0]?.scope.length === DOWN_LANE_MAX_SCOPE_FILES + 1,
+    `over-ceiling repo yields ${DOWN_LANE_MAX_SCOPE_FILES + 1} scope files (got ${big.lanes[0]?.scope.length})`,
+  );
+  assert(
+    big.runSpawned === false && big.usage === undefined && big.lanes[0]?.status === "failed",
+    "over-ceiling scope → failed lane, runSpawned false, no usage",
+  );
+  assert(!fileExists(bigRunMarker), "over-ceiling scope never spawns run");
+  assert(!fileExists(bigServePort), "over-ceiling scope never spawns serve");
+  assert(
+    big.result.metadata.degradedWorkers.some(
+      (d) =>
+        d.kind === "actionable" &&
+        d.topic === "lane-health" &&
+        d.message.includes("review target too large"),
+    ) === true && isNotClean(big.result),
+    "over-ceiling scope carries an actionable lane-health entry and is not clean",
+  );
+  assert(
+    isOpencodeCostMeasured(big.runSpawned, big.usage),
+    "over-ceiling scope → measured $0 (the eval run continues)",
+  );
+  let bigLanesOut: { lanes: Array<{ status: string; reason?: string }> } | undefined;
+  try {
+    bigLanesOut = JSON.parse(readFileSync(resolve(BIG, "lanes.json"), "utf8"));
+  } catch {
+    bigLanesOut = undefined;
+  }
+  assert(
+    bigLanesOut?.lanes[0]?.status === "failed" &&
+      bigLanesOut.lanes[0]?.reason?.includes("review target too large") === true,
+    "over-ceiling scope still writes the failed envelope to --lanes-out",
+  );
+  rmSync(BIG, { recursive: true, force: true });
   rmSync(REPO, { recursive: true, force: true });
   rmSync(FAKE_BIN, { recursive: true, force: true });
 

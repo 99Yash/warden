@@ -48,6 +48,24 @@ export const MCP_POLL_INTERVAL_MS = 500;
 export const MCP_SETTLE_MS = 1000;
 /** Bounded stderr tail kept for failed-lane diagnostics. */
 export const STDERR_TAIL_BYTES = 2048;
+/**
+ * Issue #57: the most changed files the down lane can cover. OpenCode
+ * starts the step counter at 1 and forces a text-only step at
+ * `step >= steps` (`session/runner/llm.ts`; the same check is in the
+ * shipped binary v2.0.25), so `steps` leaves `steps - 1` steps that can
+ * call tools. The charter spends the first on `warden_run_det_priors`
+ * (its result pages cost more, but their count is unknown before the run,
+ * so they are left out), and each changed file needs at least one
+ * whole-file read. At one read per step — the rate in the recorded
+ * down-lane streams — a larger scope cannot get one read per file before
+ * any trace starts, so the run would only spend its timeout.
+ *
+ * Not a hard limit: a model can batch reads in one step (recorded up to
+ * 4). The timeout is left out because its rate depends on the model; on
+ * the issue #57 run (`opencode/space-bunny-free`), the lane made 54 tool
+ * calls in 900 s, which is also below this ceiling.
+ */
+export const DOWN_LANE_MAX_SCOPE_FILES = DOWN_LANE_SPEC.steps - 2;
 /** Grace between SIGTERM and SIGKILL when stopping the serve child. */
 const SERVE_KILL_GRACE_MS = 2000;
 /** Rejection reason when the MCP wait stops because the serve child failed to start. */
@@ -426,6 +444,20 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
   return { status: "ok", findings, toolCalls };
 }
 
+/**
+ * The lane failure reason for a scope too large to cover, or `undefined`
+ * when the scope fits. The reason names the numbers and the derivation of
+ * `DOWN_LANE_MAX_SCOPE_FILES`.
+ */
+export function laneScopeOverCeiling(scope: string[]): string | undefined {
+  if (scope.length <= DOWN_LANE_MAX_SCOPE_FILES) return undefined;
+  return (
+    `review target too large: ${scope.length} changed files exceed the down lane ceiling of ` +
+    `${DOWN_LANE_MAX_SCOPE_FILES} (DOWN_LANE_SPEC.steps ${DOWN_LANE_SPEC.steps} - 1 text-only final step ` +
+    `- 1 warden_run_det_priors call, at one read per changed file)`
+  );
+}
+
 function withTail(reason: string, tail: string | undefined): string {
   if (tail === undefined || tail === "") return reason;
   return `${reason} (stderr: ${tail})`;
@@ -673,8 +705,9 @@ export interface DriveLaneResult {
   lanes: LaneOutput[];
   usage?: SessionUsage;
   /**
-   * Whether `opencode run` was spawned. False on the empty-scope and
-   * MCP-warmup-failure paths: no model call happened, so the spend is a
+   * Whether `opencode run` was spawned. False on the empty-scope,
+   * scope-over-ceiling, and MCP-warmup-failure paths: no model call
+   * happened, so the spend is a
    * known $0 (the eval does not infer this from `usage`).
    */
   runSpawned: boolean;
@@ -722,6 +755,20 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
         scope,
         findings: [],
       },
+    ];
+    writeLanesOut(opts, lanes);
+    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
+      runSpawned: false,
+    });
+  }
+
+  // Scope over the ceiling: do not spawn OpenCode — the step cap cannot
+  // fund one read per changed file, so a run would only spend its timeout.
+  // The lane is failed with the numbers, at a known $0.
+  const overCeiling = laneScopeOverCeiling(scope);
+  if (overCeiling !== undefined) {
+    const lanes: LaneOutput[] = [
+      { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: overCeiling, scope, findings: [] },
     ];
     writeLanesOut(opts, lanes);
     return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {

@@ -240,6 +240,17 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   anchors against.
 - Empty scope never spawns OpenCode: the lane is `failed` with
   `empty review target` so the fail-closed entries fire.
+- A scope above `DOWN_LANE_MAX_SCOPE_FILES` (58 files) never spawns
+  OpenCode either (issue #57): the lane is `failed` with a
+  `review target too large: …` reason that names the file count, the
+  ceiling, and its source, and `runSpawned` is `false` (a known $0). The
+  ceiling is `DOWN_LANE_SPEC.steps - 2`: OpenCode forces a text-only step
+  at `step >= steps` (the step counter starts at 1, so 59 steps can call
+  tools), the first goes to `warden_run_det_priors`, and each changed
+  file needs at least one whole-file read. It assumes one read per step,
+  the rate in the recorded down-lane streams. It is not a hard limit: a
+  model can batch reads (recorded up to 4 in one step). The timeout is
+  not in the formula because its rate depends on the model.
 - Warms its own `opencode serve` (free loopback port, random password),
   waits for the warden MCP server to connect (default 30 s,
   `--mcp-timeout`), settles 1 s, then runs against it; the serve child is
@@ -265,4 +276,5 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   `lane-trace` entry gains a `· cost $<4dp> · tokens <in>/<out>` suffix
   (`in` = input + cache reads + cache writes). A failed read leaves the
   entry as it was — usage is telemetry and never fails the lane. The
-  MCP-warmup failure path has no run and no usage.
+  MCP-warmup failure, empty-scope, and scope-over-ceiling paths have no
+  run and no usage.
