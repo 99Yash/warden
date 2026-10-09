@@ -55,8 +55,13 @@ would fail every sample. Run it with `--config`.
   model `opencode/muse-spark-1.3-contributor-free` on the driven
   `run --server` path with "OpenCode's free tier can only be used from
   within OpenCode". Each such sample is a measured $0 failed lane, so P6
-  fails on every sample. Do not plan a free-model tracer; budget a paid
-  one.
+  fails on every sample. `opencode/space-bunny-free` does run on that
+  path (2026-10-09, PR #55 diff: 52 tool calls, including
+  `warden_run_det_priors`, $0). But it stalled and sent no submission
+  before the 900 s or the 2400 s timeout, so each sample is a failed
+  lane. `meta/muse-spark-1.3` on the Meta provider hung after the first
+  step, also on a one-word prompt. Do not plan a free-model tracer;
+  budget a paid one.
 
 ## How a fixture becomes a two-commit repo
 
