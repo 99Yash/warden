@@ -61,7 +61,7 @@ agent rules are appended after global rules so they win:
 | --- | --- |
 | deny `*` / `*` | Closed by default; a `deny *` also removes the tool from the model's view. |
 | allow `read` | Read changed files and their context. |
-| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — an ask interrupts the run. |
+| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — an ask interrupts the run. Residuals: the guard covers `read` only — `grep` with an explicit `.env` path is not guarded (the host permission resource is the pattern); `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
 | allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
 | allow `grep` | Trace symbols to callers (the `grepRepo` role in method docs). |
 | allow `glob` | Locate files by pattern. |
@@ -73,8 +73,8 @@ diff arrives through `warden_run_det_priors`), no `edit` (the lane never
 writes), no `webfetch`/`websearch` (claims must be repo- or `.d.ts`
 grounded), no `subagent` (one agent-sized unit of work), no `*` allow.
 Without `--auto`, any `ask` (no matching rule) is rejected and the session
-is interrupted — so the driver never passes `--auto`: an unexpected ask
-fails closed.
+is interrupted — so the driver never passes `--auto`: the run then exits
+0, but the interrupted final message has no submission, so the lane fails.
 
 ## Model tier and `--model`
 
