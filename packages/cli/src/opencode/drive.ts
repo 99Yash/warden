@@ -222,6 +222,7 @@ export interface SessionUsage {
     cacheRead: number;
     cacheWrite: number;
   };
+  /** `<providerID>/<id>#<variant>`, or `<providerID>/<id>` without a variant. */
   model?: string;
 }
 
@@ -479,8 +480,10 @@ export function wardenMcpReadiness(servers: McpServerState[] | undefined): Warde
  * `{data:{id, model:{id,providerID,variant}, cost, tokens:{input, output,
  * reasoning, cache:{read,write}}, outcome}}`. Returns `undefined` when the
  * shape is wrong, the cost is negative, or (when `expectedId` is given)
- * `data.id` is not the requested session. `model` is `<providerID>/<id>`
- * when present.
+ * `data.id` is not the requested session. `model` is
+ * `<providerID>/<id>#<variant>` (the same form as the requested `--model`,
+ * so the two compare as strings), or `<providerID>/<id>` when the session
+ * has no variant.
  */
 export function parseSessionUsage(body: unknown, expectedId?: string): SessionUsage | undefined {
   if (typeof body !== "object" || body === null) return undefined;
@@ -517,7 +520,11 @@ export function parseSessionUsage(body: unknown, expectedId?: string): SessionUs
   if (typeof model === "object" && model !== null) {
     const m = model as Record<string, unknown>;
     if (typeof m["id"] === "string" && typeof m["providerID"] === "string") {
-      usage.model = `${m["providerID"]}/${m["id"]}`;
+      const variant = m["variant"];
+      usage.model =
+        typeof variant === "string" && variant !== ""
+          ? `${m["providerID"]}/${m["id"]}#${variant}`
+          : `${m["providerID"]}/${m["id"]}`;
     }
   }
   return usage;
@@ -659,6 +666,8 @@ export interface DriveLaneResult {
    * known $0 (the eval does not infer this from `usage`).
    */
   runSpawned: boolean;
+  /** The requested model: `opts.model`, else `DOWN_LANE_SPEC.defaultModel`. */
+  model: string;
 }
 
 /**
@@ -703,11 +712,13 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
       },
     ];
     writeLanesOut(opts, lanes);
-    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])]);
+    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
+      runSpawned: false,
+    });
   }
 
   const baseRef = resolved.baseRef ?? opts.baseRef ?? "HEAD";
-  const model = opts.model ?? DOWN_LANE_SPEC.defaultModel;
+  const model = requestedModel(opts);
   const mcpTimeoutMs = (opts.mcpTimeoutSecs ?? DEFAULT_MCP_TIMEOUT_SECS) * 1000;
   const settleMs = opts.mcpSettleMs ?? MCP_SETTLE_MS;
   const configPath = resolveLaneConfigPath();
@@ -846,12 +857,22 @@ function laneTraceEntry(
   };
 }
 
-/** Shared returning helper: every path builds the post-pass CommentSet through this. */
+function requestedModel(opts: DriveOptions): string {
+  return opts.model ?? DOWN_LANE_SPEC.defaultModel;
+}
+
+/**
+ * Shared returning helper: every path builds the post-pass CommentSet
+ * through this. `runSpawned` has no default: each path states whether it
+ * spawned `opencode run`, so a new path cannot report a known $0 by
+ * omission.
+ */
 async function buildLaneResult(
   opts: DriveOptions,
   resolved: ResolvedDiff,
   lanes: LaneOutput[],
   extraDegraded: DegradedEntry[],
+  facts: { runSpawned: boolean; usage?: SessionUsage },
 ): Promise<DriveLaneResult> {
   const verbose = opts.verbose === true;
   const result = await runPostPass({
@@ -864,7 +885,13 @@ async function buildLaneResult(
     },
     ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
   });
-  return { result, lanes, runSpawned: false };
+  return {
+    result,
+    lanes,
+    runSpawned: facts.runSpawned,
+    model: requestedModel(opts),
+    ...(facts.usage !== undefined ? { usage: facts.usage } : {}),
+  };
 }
 
 /** MCP-warmup failure: no run happened, so there are no tool calls to trace. */
@@ -878,10 +905,13 @@ async function buildFailed(
     { lane: DOWN_LANE_SPEC.lane, status: "failed", reason, scope, findings: [] },
   ];
   writeLanesOut(opts, lanes);
-  return await buildLaneResult(opts, resolved, lanes, [
-    ...(resolved.degraded ?? []),
-    laneTraceEntry("failed", reason, ""),
-  ]);
+  return await buildLaneResult(
+    opts,
+    resolved,
+    lanes,
+    [...(resolved.degraded ?? []), laneTraceEntry("failed", reason, "")],
+    { runSpawned: false },
+  );
 }
 
 async function buildVerdict(
@@ -903,13 +933,16 @@ async function buildVerdict(
     },
   ];
   writeLanesOut(opts, lanes);
-  const built = await buildLaneResult(opts, resolved, lanes, [
-    ...(resolved.degraded ?? []),
-    laneTraceEntry(verdict.status, verdict.reason, traceCounts, usage),
-  ]);
-  built.runSpawned = true;
-  if (usage !== undefined) built.usage = usage;
-  return built;
+  return await buildLaneResult(
+    opts,
+    resolved,
+    lanes,
+    [
+      ...(resolved.degraded ?? []),
+      laneTraceEntry(verdict.status, verdict.reason, traceCounts, usage),
+    ],
+    { runSpawned: true, ...(usage !== undefined ? { usage } : {}) },
+  );
 }
 
 function tailSuffix(tail: string): string {

@@ -28,8 +28,10 @@
  * so a run can exceed it by at most one sample's cost. Raise it for a
  * full-suite run.
  *
- * Usage errors (unknown config name, bad `--max-cost`, `--parity` with
- * `--config`) print one line and exit 2 before any preflight or spend.
+ * Usage errors (an unknown flag, a missing or flag-shaped value, an
+ * unknown config name, a bad `--max-cost` or `--samples`, `--parity` with
+ * `--config` or `--compare`, or `--parity` roles reversed) print one line
+ * and exit 2 before any preflight or spend.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -44,7 +46,6 @@ import {
   type ReviewHarnessInput,
 } from "@warden/core";
 import { configuredReviewLlmProviders, loadWardenRuntime, providerApiKey } from "@warden/env";
-import { DOWN_LANE_SPEC } from "../../src/opencode/materialize.js";
 import { driveOpencodeLane, type SessionUsage } from "../../src/opencode/drive.js";
 import { ALL_CONFIGS, OPENCODE_CONFIGS } from "./configs/index.js";
 import {
@@ -70,6 +71,7 @@ import type {
   FixtureSample,
   FixtureScore,
   ParityVerdict,
+  StopReason,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -94,38 +96,59 @@ function usageError(message: string): never {
   process.exit(2);
 }
 
+/**
+ * Parse argv strictly: an unknown flag, a stray positional, or a flag
+ * whose value is missing or flag-shaped (`--samples --max-cost 0`) is a
+ * usage error, so a typo cannot silently restore the default ceiling.
+ */
 function parseArgs(argv: string[]): Args {
   const args: Args = { samples: 3, maxCost: DEFAULT_MAX_COST_USD };
-  for (let i = 0; i < argv.length; i++) {
+  let i = 0;
+  const value = (flag: string): string => {
+    const raw = argv[++i];
+    if (raw === undefined || raw.trim() === "" || raw.startsWith("--")) {
+      usageError(`${flag} needs a value (got ${raw === undefined ? "no value" : `"${raw}"`})`);
+    }
+    return raw;
+  };
+  for (; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--config" && argv[i + 1]) {
-      args.configFilter = argv[++i];
-    } else if (arg === "--fixture" && argv[i + 1]) {
-      args.fixtureFilter = argv[++i];
-    } else if (arg === "--fixture-regex" && argv[i + 1]) {
-      const pattern = argv[++i];
-      if (pattern) args.fixtureRegex = new RegExp(pattern);
-    } else if (arg === "--samples" && argv[i + 1]) {
-      const n = Number(argv[++i]);
-      if (Number.isFinite(n) && n > 0) args.samples = Math.trunc(n);
+    if (arg === "--config") {
+      args.configFilter = value(arg);
+    } else if (arg === "--fixture") {
+      args.fixtureFilter = value(arg);
+    } else if (arg === "--fixture-regex") {
+      const pattern = value(arg);
+      try {
+        args.fixtureRegex = new RegExp(pattern);
+      } catch {
+        usageError(`--fixture-regex needs a valid regular expression (got "${pattern}")`);
+      }
+    } else if (arg === "--samples") {
+      const raw = value(arg);
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1) {
+        usageError(`--samples needs an integer ≥ 1 (got "${raw}")`);
+      }
+      args.samples = n;
     } else if (arg === "--compare" || arg === "--parity") {
-      const a = argv[++i];
-      const b = argv[++i];
-      if (!a || !b) usageError(`${arg} needs two config names`);
-      if (arg === "--compare") args.compare = [a, b];
-      else args.parity = [a, b];
+      const pair: [string, string] = [value(arg), value(arg)];
+      if (arg === "--compare") args.compare = pair;
+      else args.parity = pair;
     } else if (arg === "--max-cost") {
-      const raw = argv[++i];
-      // `Number("")` is 0, so an empty value is rejected explicitly.
-      const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+      const raw = value(arg);
+      const n = Number(raw);
       if (!Number.isFinite(n) || n < 0) {
-        usageError(`--max-cost needs a finite number ≥ 0 (got ${raw ?? "no value"})`);
+        usageError(`--max-cost needs a finite number ≥ 0 (got "${raw}")`);
       }
       args.maxCost = n;
+    } else {
+      usageError(`unknown argument "${arg}"`);
     }
   }
   if (args.parity) {
     if (args.configFilter !== undefined) usageError("--parity cannot be combined with --config");
+    if (args.compare !== undefined) usageError("--parity cannot be combined with --compare");
     if (args.parity[0] === args.parity[1]) usageError("--parity needs two distinct configs");
   }
   return args;
@@ -174,13 +197,21 @@ function resolveConfigNames(names: string[]): EvalConfig[] {
 
 /**
  * Select the configs to run. `--compare a b` without `--config` runs just
- * that pair. `--parity <ref> <cand>` runs the candidate first: its cost
- * is the unknown, while the harness reference cost is known.
+ * that pair. `--parity <ref> <cand>` needs a harness reference and an
+ * OpenCode candidate (the gate's roles, not only its names), and runs the
+ * candidate first: its cost is the unknown, while the harness reference
+ * cost is known.
  */
 function selectConfigs(args: Args): EvalConfig[] {
   if (args.parity) {
     const [reference, candidate] = resolveConfigNames(args.parity);
     if (!reference || !candidate) usageError("--parity needs two config names");
+    if (reference.runtime === "opencode") {
+      usageError(`--parity reference "${reference.name}" must be a harness config`);
+    }
+    if (candidate.runtime !== "opencode") {
+      usageError(`--parity candidate "${candidate.name}" must be an OpenCode config`);
+    }
     return [candidate, reference];
   }
   const compared = args.compare ? resolveConfigNames(args.compare) : undefined;
@@ -243,7 +274,7 @@ function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo" | "sparse
     );
     return { sparseReason: `commit ${meta.commit} unreachable in ${meta.repo}` };
   }
-  return { realRepo: { repoPath, commit: meta.commit } };
+  return { realRepo: { repo: meta.repo, repoPath, commit: meta.commit } };
 }
 
 /** The sparse tree-source note for a fixture without a resolved real repo. */
@@ -371,24 +402,23 @@ interface OnceResult {
   wallMs: number;
   /** The tree the sample reviewed (see `FixtureSample.treeSource`). */
   treeSource: string;
-  usage?: SessionUsage;
-  lanes?: LaneOutput[];
-  excludedBinary?: number;
-  /**
-   * OpenCode only: whether `opencode run` may have been spawned. False on
-   * a fixture build failure and when the driver reports no spawn (empty
-   * scope, MCP warmup failure); a driver throw counts as spawned.
-   */
-  runSpawned?: boolean;
+  /** OpenCode runtime only (absent = harness). */
+  opencode?: OpencodeScoreExtra;
 }
 
-/** Extra scoring inputs for the OpenCode runtime (absent = harness). */
+/** Extra scoring inputs for the OpenCode runtime. */
 interface OpencodeScoreExtra {
   usage?: SessionUsage;
   lanes?: LaneOutput[];
   excludedBinary: number;
+  /**
+   * Whether `opencode run` may have been spawned. False on a fixture
+   * build failure and when the driver reports no spawn (empty scope, MCP
+   * warmup failure); a driver throw counts as spawned.
+   */
   runSpawned: boolean;
-  requestedModel: string;
+  /** The driver's resolved model; absent when the driver did not return. */
+  requestedModel?: string;
 }
 
 async function runOnce(
@@ -408,7 +438,7 @@ async function runOnce(
 async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<OnceResult> {
   const startedAt = Date.now();
   const treeSource = fixture.realRepo
-    ? `archive ${fixture.realRepo.repoPath}@${fixture.realRepo.commit}`
+    ? `archive ${fixture.realRepo.repo}@${fixture.realRepo.commit}`
     : sparseTreeSource(fixture);
   let repo;
   try {
@@ -420,8 +450,7 @@ async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<On
       error: err instanceof Error ? err.message : String(err),
       wallMs: Date.now() - startedAt,
       treeSource,
-      excludedBinary: 0,
-      runSpawned: false,
+      opencode: { excludedBinary: 0, runSpawned: false },
     };
   }
   try {
@@ -440,10 +469,13 @@ async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<On
         : null,
       wallMs: Date.now() - startedAt,
       treeSource,
-      ...(driven.usage !== undefined ? { usage: driven.usage } : {}),
-      lanes: driven.lanes,
-      excludedBinary: repo.excludedBinary,
-      runSpawned: driven.runSpawned,
+      opencode: {
+        ...(driven.usage !== undefined ? { usage: driven.usage } : {}),
+        lanes: driven.lanes,
+        excludedBinary: repo.excludedBinary,
+        runSpawned: driven.runSpawned,
+        requestedModel: driven.model,
+      },
     };
   } catch (err) {
     return {
@@ -451,8 +483,7 @@ async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<On
       error: err instanceof Error ? err.message : String(err),
       wallMs: Date.now() - startedAt,
       treeSource,
-      excludedBinary: repo.excludedBinary,
-      runSpawned: true,
+      opencode: { excludedBinary: repo.excludedBinary, runSpawned: true },
     };
   } finally {
     removeFixtureRepo(repo);
@@ -498,7 +529,7 @@ async function runOnceHarness(
     if (fixture.realRepo) {
       try {
         worktree = addWorktree(fixture.realRepo.repoPath, fixture.realRepo.commit);
-        treeSource = `worktree ${fixture.realRepo.repoPath}@${fixture.realRepo.commit}`;
+        treeSource = `worktree ${fixture.realRepo.repo}@${fixture.realRepo.commit}`;
       } catch (err) {
         process.stdout.write(
           `[eval] ${fixture.name}: worktree add failed ` +
@@ -578,7 +609,9 @@ function scoreOne(
     ...(opencodeExtra !== undefined
       ? {
           excludedBinary: opencodeExtra.excludedBinary,
-          requestedModel: opencodeExtra.requestedModel,
+          ...(opencodeExtra.requestedModel !== undefined
+            ? { requestedModel: opencodeExtra.requestedModel }
+            : {}),
           ...(opencodeExtra.usage?.model !== undefined
             ? { sessionModel: opencodeExtra.usage.model }
             : {}),
@@ -750,7 +783,7 @@ async function main(): Promise<void> {
   // budget. Checked before each sample, so the last sample can exceed the
   // ceiling by at most its own cost.
   let spentUsd = 0;
-  let stoppedAtCostCeiling = false;
+  let stopReason: StopReason | null = null;
   const aggregates: AggregateScore[] = [];
   for (const config of configs) {
     process.stdout.write(`\n## Config: ${config.name}\n${config.description}\n\n`);
@@ -761,36 +794,20 @@ async function main(): Promise<void> {
       const samples: FixtureSample[] = [];
       for (let i = 0; i < args.samples; i++) {
         if (spentUsd >= args.maxCost) {
-          stoppedAtCostCeiling = true;
+          stopReason = "cost-ceiling";
           process.stdout.write(
             `[eval] cost ceiling $${args.maxCost} reached ($${spentUsd.toFixed(4)} spent) — stopping\n`,
           );
           configStopped = true;
           break;
         }
-        const { result, error, usage, lanes, excludedBinary, runSpawned, treeSource } =
-          await runOnce(fixture, config, repoRoot);
-        const score = scoreOne(
-          fixture,
-          result,
-          i + 1,
-          config.name,
-          treeSource,
-          config.runtime === "opencode"
-            ? {
-                ...(usage !== undefined ? { usage } : {}),
-                ...(lanes !== undefined ? { lanes } : {}),
-                excludedBinary: excludedBinary ?? 0,
-                runSpawned: runSpawned ?? true,
-                requestedModel: config.opencodeModel ?? DOWN_LANE_SPEC.defaultModel,
-              }
-            : undefined,
-        );
+        const { result, error, treeSource, opencode } = await runOnce(fixture, config, repoRoot);
+        const score = scoreOne(fixture, result, i + 1, config.name, treeSource, opencode);
         if (error !== null) score.error = error;
         samples.push(score);
         if (!score.costMeasured) {
           // Fail closed: the ceiling cannot bound unmeasured spend.
-          stoppedAtCostCeiling = true;
+          stopReason = "unmeasured-spend";
           process.stdout.write(
             `[eval] unmeasured spend on ${config.name}/${fixture.name} sample ${i + 1} — stopping\n`,
           );
@@ -831,30 +848,22 @@ async function main(): Promise<void> {
   }
 
   if (args.parity) {
-    // One verdict feeds the `PARITY:` line, the `.md`, and the `.json`.
+    // `checkParity` is the one verdict owner: it feeds the `PARITY:` line,
+    // the `.md`, and the `.json`, also for a run that stopped before the
+    // reference ran (absent reference) or before any candidate sample (an
+    // empty candidate aggregate).
     const [refName, candName] = args.parity;
     const reference = aggregates.find((x) => x.config === refName);
-    const candidate = aggregates.find((x) => x.config === candName);
-    const parity: ParityVerdict =
-      reference && candidate
-        ? checkParity(reference, candidate, {
-            samples: args.samples,
-            fixtureFilter: args.fixtureFilter !== undefined || args.fixtureRegex !== undefined,
-            stoppedAtCostCeiling,
-          })
-        : {
-            cleared: false,
-            failed: ["missing-config"],
-            details: [
-              stoppedAtCostCeiling
-                ? `(missing-config) the run stopped before both configs ran — FAIL`
-                : `(missing-config) a config produced no rows — FAIL`,
-            ],
-            reference: refName,
-            candidate: candName,
-          };
-    await writeParityScorecard(args, configs, aggregates, stoppedAtCostCeiling, parity);
-    if (reference && candidate) {
+    const candidate =
+      aggregates.find((x) => x.config === candName) ?? aggregateScores([], candName);
+    const parity = checkParity(reference, candidate, {
+      reference: refName,
+      samples: args.samples,
+      fixtureFilter: args.fixtureFilter !== undefined || args.fixtureRegex !== undefined,
+      stopReason,
+    });
+    writeParityScorecard(args, aggregates, stopReason, parity);
+    if (reference && candidate.rows.length > 0) {
       process.stdout.write(`\n## Compare: ${reference.config} vs ${candidate.config}\n\n`);
       process.stdout.write(renderCompareTable(reference, candidate) + "\n");
     }
@@ -868,10 +877,7 @@ async function main(): Promise<void> {
   if (!existsSync(RESULTS_DIR)) mkdirSync(RESULTS_DIR, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const out = resolve(RESULTS_DIR, `${ts}.json`);
-  writeFileSync(
-    out,
-    JSON.stringify({ samples: args.samples, aggregates, stoppedAtCostCeiling }, null, 2),
-  );
+  writeFileSync(out, JSON.stringify({ samples: args.samples, aggregates, stopReason }, null, 2));
   process.stdout.write(`\nWrote ${out}\n`);
 
   if (args.compare && aggregates.length >= 2) {
@@ -887,7 +893,7 @@ async function main(): Promise<void> {
     const verdict = checkThreshold(agg, agg.rows);
     return !verdict.cleared;
   });
-  process.exit(anyFailed || stoppedAtCostCeiling ? 1 : 0);
+  process.exit(anyFailed || stopReason !== null ? 1 : 0);
 }
 
 function opencodeVersion(): string {
@@ -934,17 +940,19 @@ function sparseFallbackWarning(fixtures: Fixture[]): string | null {
  * Parity scorecard: JSON + rendered markdown under
  * `results/opencode-parity/<ts>.(json|md)` — the rendered tables plus
  * threshold details plus parity details plus run metadata, including the
- * tree source per fixture and config and the session-reported models.
+ * tree source per fixture and config and the requested and session-reported
+ * models. Every recorded repo is a logical name, never a local path.
  */
-async function writeParityScorecard(
+function writeParityScorecard(
   args: Args,
-  configs: EvalConfig[],
   aggregates: AggregateScore[],
-  stoppedAtCostCeiling: boolean,
+  stopReason: StopReason | null,
   parity: ParityVerdict,
-): Promise<void> {
-  const candidateConfig = configs.find((c) => c.name === parity.candidate);
+): void {
   const samples = aggregates.flatMap((agg) => agg.rows.flatMap((r) => r.rawSamples));
+  const requestedModels = [
+    ...new Set(samples.flatMap((s) => (s.requestedModel !== undefined ? [s.requestedModel] : []))),
+  ];
   const sessionModels = [
     ...new Set(samples.flatMap((s) => (s.sessionModel !== undefined ? [s.sessionModel] : []))),
   ];
@@ -961,11 +969,11 @@ async function writeParityScorecard(
     samples: args.samples,
     fixtureFilter: args.fixtureFilter ?? args.fixtureRegex?.source ?? null,
     maxCost: args.maxCost,
-    candidateModel: candidateConfig?.opencodeModel ?? DOWN_LANE_SPEC.defaultModel,
+    requestedModels,
     sessionModels,
     opencodeVersion: opencodeVersion(),
     wardenHead: wardenHead(),
-    stoppedAtCostCeiling,
+    stopReason,
     treeSources,
   };
   const dir = resolve(RESULTS_DIR, "opencode-parity");
@@ -981,11 +989,11 @@ async function writeParityScorecard(
     `- samples: ${meta.samples}`,
     `- fixture filter: ${meta.fixtureFilter ?? "(all)"}`,
     `- --max-cost: $${meta.maxCost}`,
-    `- candidate model (requested): ${meta.candidateModel}`,
+    `- candidate model (requested): ${requestedModels.length > 0 ? requestedModels.join(", ") : "(no sample reached the driver)"}`,
     `- candidate model (session): ${sessionModels.length > 0 ? sessionModels.join(", ") : "(none reported)"}`,
     `- opencode --version: ${meta.opencodeVersion}`,
     `- warden HEAD: ${meta.wardenHead}`,
-    `- stoppedAtCostCeiling: ${meta.stoppedAtCostCeiling}`,
+    `- stop reason: ${meta.stopReason ?? "none (complete run)"}`,
     ``,
   ];
   const fixtures = Object.keys(treeSources);

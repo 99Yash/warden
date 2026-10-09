@@ -18,8 +18,13 @@
  *       and a tie that passes. P4/P6 read every raw sample: a failed lane
  *       on a clean fixture, a 1-of-3 clean hit, and a 1-of-3 failed lane
  *       each fail. P0/P7/P8 cover a short row, a failed reference, a
- *       filtered run, a stopped run, and N=1.
- *   (e) `parseSessionUsage`: the verified shape; missing `data`;
+ *       filtered run, a stopped run, and N=1. P0 compares tree kinds per
+ *       fixture (`archive X@c` ≡ `worktree X@c`, else `sparse`). An absent
+ *       reference (a run that stopped in the candidate) fails P0 + P7,
+ *       prints "no reference" for P1/P2, still reports P3–P6, and P8
+ *       names the stop reason. P6 fails a session-model variant mismatch.
+ *   (e) `parseSessionUsage`: the verified shape (model with `#<variant>`);
+ *       a model without a variant; missing `data`;
  *       non-number `cost`; negative `cost`; a `data.id` that is not the
  *       requested ID; missing `tokens.cache` → `undefined`.
  *
@@ -39,7 +44,7 @@ import {
   materializePatchPostImages,
   removeFixtureRepo,
 } from "./eval/fixture-repo.mjs";
-import { aggregateScores, checkParity, scoreFixtureRun } from "./eval/score.mjs";
+import { aggregateScores, checkParity, scoreFixtureRun, type ParityRun } from "./eval/score.mjs";
 import type { Fixture, FixtureSample, FixtureScore } from "./eval/types.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -111,7 +116,7 @@ function loadFixtures(): LoadedFixture[] {
               execFileSync("git", ["-C", resolved, "cat-file", "-e", `${meta.commit}^{commit}`], {
                 stdio: "ignore",
               });
-              fixture.realRepo = { repoPath: resolved, commit: meta.commit };
+              fixture.realRepo = { repo: meta.repo, repoPath: resolved, commit: meta.commit };
               how = `real (archive ${meta.repo}@${meta.commit.slice(0, 8)})`;
               repoPath = resolved;
               worktreeBefore = execFileSync("git", ["-C", resolved, "worktree", "list"], {
@@ -344,7 +349,12 @@ function passRows(suffix = ""): FixtureScore[] {
   ];
 }
 
-const GATE_RUN = { samples: 3, fixtureFilter: false, stoppedAtCostCeiling: false };
+const GATE_RUN: ParityRun = {
+  reference: "ref",
+  samples: 3,
+  fixtureFilter: false,
+  stopReason: null,
+};
 const refAgg = aggregateScores(passRows(), "ref");
 const candAgg = aggregateScores(passRows(), "cand");
 const passVerdict = checkParity(refAgg, candAgg, GATE_RUN);
@@ -465,8 +475,8 @@ expectSingleFail(
 // P8: a tracer is never a gate — filtered, stopped, N=1.
 for (const [label, run] of [
   ["P8-filtered", { ...GATE_RUN, fixtureFilter: true }],
-  ["P8-stopped", { ...GATE_RUN, stoppedAtCostCeiling: true }],
-] as const) {
+  ["P8-stopped", { ...GATE_RUN, stopReason: "cost-ceiling" }],
+] as const satisfies readonly (readonly [string, ParityRun])[]) {
   const verdict = checkParity(refAgg, candAgg, run);
   assert(
     !verdict.cleared && verdict.failed.length === 1 && verdict.failed[0] === "P8-gate-run",
@@ -492,6 +502,97 @@ for (const [label, run] of [
   const tie = checkParity(refAgg, aggregateScores(passRows(), "cand-tie"), GATE_RUN);
   assert(tie.cleared, `identical tie passes`);
 }
+// An absent reference: the run stopped in the candidate (it runs first).
+for (const stopReason of ["cost-ceiling", "unmeasured-spend"] as const) {
+  const verdict = checkParity(undefined, candAgg, { ...GATE_RUN, stopReason });
+  const line = (p: string): string => verdict.details.find((d) => d.startsWith(`(${p})`)) ?? "";
+  assert(
+    !verdict.cleared &&
+      verdict.failed.join(",") === "P0-same-fixtures,P7-reference-health,P8-gate-run",
+    `absent reference (${stopReason}) → NOT MET, failed is exactly [P0, P7, P8] (got [${verdict.failed.join(",")}])`,
+  );
+  assert(
+    ["P1", "P2"].every((p) => line(p).endsWith("NO REFERENCE") && !line(p).includes("PASS")),
+    `absent reference (${stopReason}) → P1/P2 print "no reference", not PASS`,
+  );
+  assert(
+    ["P3", "P4", "P5", "P6"].every((p) => line(p).endsWith("— PASS")),
+    `absent reference (${stopReason}) → P3–P6 still report on the candidate`,
+  );
+  assert(
+    line("P8").includes(`stop reason ${stopReason}`),
+    `P8 names the stop reason ${stopReason}`,
+  );
+  assert(verdict.reference === "ref", `absent reference → the verdict still names it`);
+}
+{
+  // The zero-spend dry check: the ceiling stops before the first candidate
+  // sample, so the candidate aggregate is empty. No lane ran: P6 fails.
+  const verdict = checkParity(undefined, aggregateScores([], "cand"), {
+    ...GATE_RUN,
+    stopReason: "cost-ceiling",
+  });
+  assert(
+    verdict.failed.join(",") === "P0-same-fixtures,P6-lane-health,P7-reference-health,P8-gate-run",
+    `empty candidate + absent reference → failed is exactly [P0, P6, P7, P8] (got [${verdict.failed.join(",")}])`,
+  );
+}
+
+/** Set the tree source on every sample of one row. */
+function retree(rows: FixtureScore[], name: string, treeSource: string): FixtureScore[] {
+  return resample(rows, name, (s) => ({ ...s, treeSource }));
+}
+{
+  // A reference `worktree add` failure: sparse for the reference, the real
+  // tree for the candidate.
+  const ref = aggregateScores(
+    retree(passRows(), "m14-closeout", "sparse (worktree add failed)"),
+    "ref",
+  );
+  const cand = aggregateScores(retree(passRows(), "m14-closeout", "archive warden@abc123"), "cand");
+  const verdict = checkParity(ref, cand, GATE_RUN);
+  const p0 = verdict.details.find((d) => d.startsWith("(P0)")) ?? "";
+  assert(
+    verdict.failed.join(",") === "P0-same-fixtures" &&
+      p0.includes("tree-kind mismatch m14-closeout"),
+    `P0-tree-kind mismatch → failed is exactly [P0-same-fixtures], names m14-closeout (got [${verdict.failed.join(",")}])`,
+  );
+}
+{
+  const ref = aggregateScores(retree(passRows(), "m14-closeout", "worktree warden@abc123"), "ref");
+  const cand = aggregateScores(retree(passRows(), "m14-closeout", "archive warden@abc123"), "cand");
+  const verdict = checkParity(ref, cand, GATE_RUN);
+  assert(verdict.cleared, `archive X@c vs worktree X@c → the same tree kind, no P0 failure`);
+}
+{
+  const ref = aggregateScores(retree(passRows(), "m14-closeout", "worktree warden@abc123"), "ref");
+  const cand = aggregateScores(retree(passRows(), "m14-closeout", "archive warden@def456"), "cand");
+  const verdict = checkParity(ref, cand, GATE_RUN);
+  assert(
+    verdict.failed.join(",") === "P0-same-fixtures",
+    `archive X@c1 vs worktree X@c2 → P0 fails (got [${verdict.failed.join(",")}])`,
+  );
+}
+// P6: the session ran without the requested variant.
+expectSingleFail(
+  "P6-model-variant-mismatch",
+  (rows) =>
+    resample(rows, "plant", (s, i) => ({
+      ...s,
+      requestedModel: "anthropic/claude-opus-5-5#high",
+      sessionModel: i === 0 ? "anthropic/claude-opus-5-5" : "anthropic/claude-opus-5-5#high",
+    })),
+  "P6-lane-health",
+);
+{
+  // An absent session model is P5's concern (unmeasured), not P6's.
+  const rows = resample(passRows(), "plant", (s) => ({
+    ...s,
+    requestedModel: "anthropic/claude-opus-5-5#high",
+  }));
+  const verdict = checkParity(refAgg, aggregateScores(rows, "cand"), GATE_RUN);
+  assert(verdict.cleared, `P6 → an absent session model does not fail P6`);
+}
 
 // ---------------------------------------------------------------------------
 // (e) parseSessionUsage
@@ -515,8 +616,18 @@ process.stdout.write("\n(e) parseSessionUsage\n");
       usage.tokens.reasoning === 10 &&
       usage.tokens.cacheRead === 20 &&
       usage.tokens.cacheWrite === 30 &&
-      usage.model === "anthropic/claude-opus-5-5",
-    `verified shape parses with model + tokens`,
+      usage.model === "anthropic/claude-opus-5-5#high",
+    `verified shape parses with model#variant + tokens`,
+  );
+  assert(
+    parseSessionUsage({
+      data: {
+        model: { id: "claude-opus-5-5", providerID: "anthropic" },
+        cost: 0.1,
+        tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    })?.model === "anthropic/claude-opus-5-5",
+    `a session model without a variant → <providerID>/<id>`,
   );
   assert(parseSessionUsage({ foo: 1 }) === undefined, `missing data → undefined`);
   assert(

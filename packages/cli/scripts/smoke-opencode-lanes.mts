@@ -1094,7 +1094,7 @@ if (mode === "runfail") {
   assert(
     smokeUsage !== undefined &&
       smokeUsage.costUsd === 0.0123 &&
-      smokeUsage.model === "fake-provider/fake-model",
+      smokeUsage.model === "fake-provider/fake-model#high",
     "parseSessionUsage reads the fake serve shape",
   );
 
@@ -1210,6 +1210,11 @@ if (mode === "runfail") {
   assert(
     driven.runSpawned === true && isOpencodeCostMeasured(driven.runSpawned, driven.usage),
     "spawned run with a priced session usage → measured",
+  );
+  assert(
+    driven.model === DOWN_LANE_SPEC.defaultModel &&
+      warmupFailed.model === DOWN_LANE_SPEC.defaultModel,
+    "the returning core reports the resolved requested model (the driver default) on every path",
   );
   assert(
     !isOpencodeCostMeasured(true, undefined),
