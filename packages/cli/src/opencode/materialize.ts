@@ -8,8 +8,10 @@ import { LaneFindingSchema } from "@warden/core";
  * I/O; the smoke drives these functions directly.
  *
  * One typed const (`DOWN_LANE_SPEC`) is the single source for the lane
- * id, agent id, tier, default model, step cap, includes, and allowed
- * tools — the agent config and the driver both read it.
+ * id, agent id, tier, default model, step cap, and allowed tools — the
+ * agent config and the driver both read it. The included method sections
+ * have one home only: the fenced `includes` list in the charter, which
+ * `materializeLane` parses (format `<path> :: <heading>`, one per line).
  */
 
 export interface LaneInclude {
@@ -29,7 +31,6 @@ export interface LaneSpec {
   description: string;
   /** Read-only v2 tool names, verified against `core/src/tool/plugin/*`. */
   allowedTools: string[];
-  includes: LaneInclude[];
 }
 
 export const DOWN_LANE_SPEC: LaneSpec = {
@@ -41,29 +42,6 @@ export const DOWN_LANE_SPEC: LaneSpec = {
   description:
     "Warden down lane: invariant proof with a correctness focus. Traces claimed behavior through callers, state, and failure; submits findings as JSON.",
   allowedTools: ["read", "grep", "glob"],
-  includes: [
-    { file: "docs/reference/structural-review.md", heading: "## Three review motions" },
-    {
-      file: "docs/reference/structural-review.md",
-      heading: "## Three dimensions for drilling down",
-    },
-    {
-      file: "packages/core/src/review-harness/prompts/workers/correctness-system.md",
-      heading: "# What counts as a correctness finding",
-    },
-    {
-      file: "packages/core/src/review-harness/prompts/workers/correctness-system.md",
-      heading: "# What you do NOT flag",
-    },
-    {
-      file: "packages/core/src/review-harness/prompts/workers/diligent-preamble.md",
-      heading: "## Investigate before you judge (mandatory, not optional)",
-    },
-    {
-      file: "packages/core/src/review-harness/prompts/workers/diligent-preamble.md",
-      heading: "## Two archetypes to hunt explicitly",
-    },
-  ],
 };
 
 export const CHARTER_PATH = "docs/reference/lanes/down.md";
@@ -116,7 +94,7 @@ function isCommentLine(line: string): boolean {
 }
 
 export interface MaterializeInput {
-  /** Charter file content (includes the fenced include list, kept verbatim). */
+  /** Charter file content (the fenced include list is parsed, not just kept verbatim). */
   charter: string;
   /** Method source contents keyed by repo-root-relative path. */
   sources: Map<string, string>;
@@ -128,12 +106,53 @@ export interface MaterializeOutput {
 }
 
 /**
+ * Parses the charter's fenced `includes` list — the single home of "the
+ * method sections this lane carries". Format `<path> :: <heading>`, one
+ * entry per line. A malformed entry fails naming the charter line.
+ */
+export function parseCharterIncludes(charter: string): LaneInclude[] {
+  return parseCharterIncludesLined(charter).map(({ include }) => include);
+}
+
+function parseCharterIncludesLined(
+  charter: string,
+): Array<{ include: LaneInclude; lineNo: number }> {
+  const fence = /```includes[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/m.exec(charter);
+  if (fence === null) {
+    throw new Error(`materialize: no fenced includes list in ${CHARTER_PATH}`);
+  }
+  const fenceLine = charter.slice(0, fence.index).split("\n").length;
+  const body = (fence[1] as string).split("\n");
+  const includes: Array<{ include: LaneInclude; lineNo: number }> = [];
+  body.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed === "") return;
+    const lineNo = fenceLine + index + 1;
+    const sep = trimmed.indexOf(" :: ");
+    const file = sep === -1 ? "" : trimmed.slice(0, sep).trim();
+    const heading = sep === -1 ? "" : trimmed.slice(sep + 4).trim();
+    if (sep === -1 || file === "" || heading === "" || !heading.startsWith("#")) {
+      throw new Error(
+        `materialize: ${CHARTER_PATH} line ${lineNo}: malformed includes entry "${trimmed}" (want "<path> :: <heading>")`,
+      );
+    }
+    includes.push({ include: { file, heading }, lineNo });
+  });
+  if (includes.length === 0) {
+    throw new Error(`materialize: empty includes list in ${CHARTER_PATH}`);
+  }
+  return includes;
+}
+
+/**
  * Assembles the system prompt (banner → charter → included sections →
  * finding schema) and the v2 agent config. Output is byte-stable: fixed
  * key order, `\n` endings, trailing newline.
  */
 export function materializeLane(spec: LaneSpec, input: MaterializeInput): MaterializeOutput {
-  const sourceFiles = uniqueFiles(spec.includes);
+  const lined = parseCharterIncludesLined(input.charter);
+  const includes = lined.map(({ include }) => include);
+  const sourceFiles = uniqueFiles(includes);
   for (const file of sourceFiles) {
     if (!input.sources.has(file)) {
       throw new Error(`materialize: source file not provided: ${file}`);
@@ -141,9 +160,20 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
   }
   const bannerSources = [CHARTER_PATH, ...sourceFiles].join(", ");
   const banner = `<!-- GENERATED by pnpm lanes:materialize from ${bannerSources} — do not edit -->`;
-  const sections = spec.includes.map((include) =>
-    extractSection(input.sources.get(include.file) as string, include.file, include.heading),
-  );
+  // A charter entry that names a missing section fails naming the charter
+  // line, so `lanes:check` catches a stale include list.
+  const sections = lined.map(({ include, lineNo }) => {
+    try {
+      return extractSection(
+        input.sources.get(include.file) as string,
+        include.file,
+        include.heading,
+      );
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(`materialize: ${CHARTER_PATH} line ${lineNo}: ${detail}`);
+    }
+  });
   const schemaJson = JSON.stringify(z.toJSONSchema(LaneFindingSchema), null, 2);
   const prompt = [
     banner,

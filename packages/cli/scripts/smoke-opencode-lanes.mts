@@ -18,6 +18,7 @@ import {
   LANE_MCP_TOOLS,
   materializeLane,
   extractSection,
+  parseCharterIncludes,
   type MaterializeInput,
 } from "../src/opencode/materialize.js";
 import {
@@ -57,7 +58,7 @@ function materializeInput(): MaterializeInput {
     "utf8",
   );
   const sources = new Map<string, string>();
-  for (const include of DOWN_LANE_SPEC.includes) {
+  for (const include of parseCharterIncludes(charter)) {
     if (!sources.has(include.file)) {
       sources.set(include.file, readFileSync(resolve(CLI_ROOT, "..", "..", include.file), "utf8"));
     }
@@ -156,8 +157,9 @@ try {
     "one changed value breaks the config match",
   );
   const changedSources = new Map(input.sources);
-  const firstFile = DOWN_LANE_SPEC.includes[0]?.file as string;
-  const firstHeading = DOWN_LANE_SPEC.includes[0]?.heading as string;
+  const charterIncludes = parseCharterIncludes(input.charter);
+  const firstFile = charterIncludes[0]?.file as string;
+  const firstHeading = charterIncludes[0]?.heading as string;
   changedSources.set(
     firstFile,
     (input.sources.get(firstFile) as string).replace(
@@ -187,6 +189,22 @@ try {
   assert(
     missingErr.includes("some/file.md") && missingErr.includes("## Absent heading"),
     `throw names file + heading (${missingErr})`,
+  );
+  // A charter that names a missing section fails materialization naming
+  // the charter line (the fence entry below no longer matches any heading
+  // in the method source).
+  let charterErr = "";
+  try {
+    materializeLane(DOWN_LANE_SPEC, {
+      charter: input.charter.replace(":: ## Three review motions", ":: ## No such section"),
+      sources: input.sources,
+    });
+  } catch (err) {
+    charterErr = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    charterErr.includes("down.md") && charterErr.includes("## No such section"),
+    `charter include of a missing section fails naming file + heading (${charterErr})`,
   );
 
   // ---------------------------------------------------------------------------

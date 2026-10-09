@@ -13,6 +13,7 @@ import {
   DOWN_LANE_SPEC,
   PROMPT_FILENAME,
   materializeLane,
+  parseCharterIncludes,
 } from "../src/opencode/materialize.js";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,7 +26,7 @@ function readSource(rel: string): string {
 
 const charter = readSource(CHARTER_PATH);
 const sources = new Map<string, string>();
-for (const include of DOWN_LANE_SPEC.includes) {
+for (const include of parseCharterIncludes(charter)) {
   if (!sources.has(include.file)) sources.set(include.file, readSource(include.file));
 }
 const { prompt, configJson } = materializeLane(DOWN_LANE_SPEC, { charter, sources });

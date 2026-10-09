@@ -24,8 +24,9 @@ names each drifted file. Any method-source edit requires re-running
 contents, outputs are file contents — with the script entry at
 `packages/cli/scripts/materialize-lanes.mts`. One typed const,
 `DOWN_LANE_SPEC`, carries the lane id, agent id, tier, default model, step
-cap, includes, and allowed tools, so the agent config and the driver read
-one source. Section extraction matches headings exactly (a missing heading
+cap, and allowed tools, so the agent config and the driver read
+one source; the included sections have one home only — the charter's
+fenced `includes` list, which the materializer parses. Section extraction matches headings exactly (a missing heading
 throws naming the file and heading) and strips single-line `<!-- … -->`
 comment lines.
 
