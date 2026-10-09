@@ -52,6 +52,13 @@ patch`, no full index) are excluded from both applies — the prune drops
 binary files anyway. The candidate and the reference run the same fixture
 set in the same invocation, scored by the existing scorer and threshold.
 
+The sparse writer (shared with the harness reference) writes no extra
+trailing blank line. It also omits the final newline of a file whose
+section ends with `\ No newline at end of file`. For the harness, this
+changes the EOF newline of those sparse files (in the real-PR sparse
+fallback: `.sql`, `.json`, `pnpm-lock.yaml`, `.gitignore`). No scored
+line moves.
+
 The scorecard records the tree each sample reviewed, per fixture and per
 config: `archive <repo>@<commit>` (candidate), `worktree <repo>@<commit>`
 (reference), or `sparse (<reason>)`. It also records the requested
