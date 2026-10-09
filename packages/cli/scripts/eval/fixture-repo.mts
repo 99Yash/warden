@@ -105,10 +105,12 @@ export function buildFixtureRepo(fixture: Fixture): FixtureRepo {
     const excluded = binaryPatchPaths(fixture.diff);
     const excludeArgs = excluded.flatMap((p) => [`--exclude=${p}`]);
     applyPatch(root, patchFile, ["-R", ...excludeArgs]);
-    git(root, ["add", "-A"]);
+    // `-f`: the tree holds only tracked or patch files, and an ignore rule
+    // (the tree's own or the operator's global excludes) must not drop one.
+    git(root, ["add", "-A", "-f"]);
     git(root, ["commit", "--allow-empty", "-q", "-m", "base"]);
     applyPatch(root, patchFile, excludeArgs);
-    git(root, ["add", "-A"]);
+    git(root, ["add", "-A", "-f"]);
     git(root, ["commit", "--allow-empty", "-q", "-m", "head"]);
     const baseSha = git(root, ["rev-parse", "HEAD~1"]).trim();
     const names = execFileSync("git", ["-C", root, "diff", "--name-only", `${baseSha}...HEAD`], {

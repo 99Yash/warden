@@ -834,8 +834,15 @@ async function main(): Promise<void> {
           configStopped = true;
           break;
         }
-        const { result, error, treeSource, opencode } = await runOnce(fixture, config, repoRoot);
+        const { result, error, wallMs, treeSource, opencode } = await runOnce(
+          fixture,
+          config,
+          repoRoot,
+        );
         const score = scoreOne(fixture, result, i + 1, config.name, treeSource, opencode);
+        // A lane's CommentSet duration covers only `runPostPass`, not the
+        // lane process; the wall time covers both.
+        if (opencode !== undefined) score.durationMs = wallMs;
         if (error !== null) score.error = error;
         samples.push(score);
         if (!score.costMeasured) {
