@@ -25,9 +25,34 @@ performance, drift, or structure.
    tool reports no further pages. Do not restate det-prior findings as your
    own; they belong to the surface lane (not yet shipped) and are not
    published on this path.
-2. Investigate with the read-only tools: `read`, `grep`, `glob`. Read the
-   whole changed file, not just the hunk; trace changed symbols to their
-   callers; follow called functions into their definitions.
+2. Investigate with the read-only tools: `read`, `grep`, `glob`. These tools
+   trace code. Never `read` or `grep` `**/fixtures/**` (eval fixtures),
+   `**/*.patch` (diff fixtures), or root-level `*.md` (`decisions.md`,
+   `vision.md`, `CONTEXT.md`, `m*-plan.md`): method and history, not the
+   behavior under review, and hundreds of KB each. Pass `path` or `include`
+   to every `grep` so it cannot land in them.
+
+   Read each changed file whole, not just the hunk. Then trace each claim
+   **one hop** from a changed symbol, and open **at most 3 files per claim**:
+   - the changed file that makes the claim;
+   - at most one caller-side file — a direct caller or consumer of the
+     changed symbol;
+   - at most one definition-side file — the definition of a function the
+     changed code calls directly.
+
+   A file that a one-hop file leads to is a second hop: do not open it.
+   `grep` finds the one-hop site and does not count as an opened file, but
+   do not grep for a second hop. `warden_lookup_type_def` (step 3) is not a
+   file open.
+
+   **Reaching the bound is a normal end, not a failure.** If the claim is
+   neither closed nor broken when its 3 files are read, conclude
+   **unproven**: the missing evidence is the next file you would have
+   opened (name its path, or the symbol to find), and the residual risk is
+   what breaks if that file does not hold the invariant. Do not open a
+   fourth file to avoid this conclusion — the submission contract decides
+   whether an unproven claim posts. Spend the step cap on more claims,
+   riskiest first, not on deeper ones.
 3. Call `warden_lookup_type_def` before asserting how any library API
    behaves. Copy `result.suggestedSource` verbatim into the finding's
    `sources[]` alongside the in-scope file source (see the submission
@@ -37,7 +62,10 @@ performance, drift, or structure.
 
 Included method sections below name warden-loop tools (`readFile`,
 `grepRepo`, `lookupTypeDef`); in this lane those mean `read`, `grep`, and
-`warden_lookup_type_def`.
+`warden_lookup_type_def`. They also say to trace *every* symbol, caller,
+consumer, or entry point, and to spend the whole step cap on
+investigation. In this lane, read each of those as "within the step 2
+bound": where they differ, the bound wins.
 
 ## Submission contract
 
@@ -51,9 +79,10 @@ verbatim from the file. A `lookup_type_def` `suggestedSource` (a path under
 `node_modules/`) is authority for the library-API claim but is outside the
 scope, so it needs an in-scope companion source. Down ends with one of
 three conclusions per traced claim — **closed within scope**, **broken**, or
-**unproven** (name the missing evidence and the residual risk). Only
-**broken** and high-risk **unproven** become findings; closed claims and
-low-risk unproven claims post nothing.
+**unproven** (name the missing evidence and the residual risk). A claim
+that reaches the step 2 bound is **unproven**, with the next unopened file
+as its missing evidence. Only **broken** and high-risk **unproven** become
+findings; closed claims and low-risk unproven claims post nothing.
 
 ```includes
 docs/reference/structural-review.md :: ## Three review motions

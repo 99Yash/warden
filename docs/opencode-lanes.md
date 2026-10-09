@@ -63,7 +63,7 @@ agent rules are appended after global rules so they win:
 | allow `read` | Read changed files and their context. |
 | deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
 | allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
-| allow `grep` | Trace symbols to callers (the `grepRepo` role in method docs). |
+| allow `grep` | Find the one-hop caller or definition site of a changed symbol (the `grepRepo` role in method docs). A grep hit does not count against the per-claim file bound (see the submission contract). |
 | allow `glob` | Locate files by pattern. |
 | allow `warden_run_det_priors` | Phase-1 ground truth; the driver fails the lane on zero completed calls. |
 | allow `warden_lookup_type_def` | Verify library-API claims before asserting them. |
@@ -77,6 +77,27 @@ continue without the action — the action does not run, and the lane
 continues (verified against the shipped binary v2.0.25; the `v2` source
 checkout interrupts the session instead — trust the binary). So the
 driver never passes `--auto`: `--auto` replies `once` (allow).
+
+## Read/grep output bounds (issue #57)
+
+The host bounds each call but no config tightens it, so the charter's
+read/grep scope rule (`down.md` protocol step 2) is the only lever.
+Verified at commit `b1e3a7b222` and in the shipped binary v2.0.25:
+
+- `read` pages at 2,000 lines / 50 KiB, lines cut at 2,000 chars —
+  hard-coded (`packages/core/src/tool/read-filesystem.ts:14-18`, `:283-305`).
+- `grep` returns 100 matching lines by default, each cut at 2,000 chars
+  (`packages/core/src/filesystem.ts:34`, `packages/core/src/ripgrep.ts:255`);
+  the model-supplied `limit` has no upper bound (`filesystem.ts:47`).
+- The configurable `tool_output.max_lines` / `max_bytes` truncation skips
+  any result that already sets `metadata.truncated`
+  (`packages/core/src/tool-output.ts:66`), and `read` and `grep` always set
+  it (`tool/plugin/read.ts:117`, `tool/plugin/grep.ts:152`). Setting
+  `tool_output` in `opencode.json` does not bound either tool.
+
+Context is re-sent every turn, so even bounded calls compound: a 50 KiB
+page of `decisions.md` or a fixture `diff.patch` costs its tokens on every
+later turn.
 
 ## Model tier and `--model`
 
@@ -191,6 +212,16 @@ source with an in-scope companion, uses `kind: "question"` below 0.7
 confidence, and reports only **broken** and high-risk **unproven** down
 conclusions.
 
+Investigation is bounded (issue #57). The lane reads each changed file
+whole, then traces each claim one hop from a changed symbol and opens at
+most 3 files for it: the changed file, one caller-side file, and one
+definition-side file. A claim that reaches the bound concludes
+**unproven**, with the next unopened file as its missing evidence. The
+included method sections ask the model to trace every symbol and to spend
+the whole step cap; the charter states that the bound wins over them.
+`smoke:opencode-lanes` fails if the charter or the materialized prompt
+loses the bound.
+
 Residual: det-prior findings are not published on the driven path — they
 belong to the surface lane, which is not shipped yet, and the charter
 tells the down lane not to restate them.
@@ -209,6 +240,17 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   anchors against.
 - Empty scope never spawns OpenCode: the lane is `failed` with
   `empty review target` so the fail-closed entries fire.
+- A scope above `DOWN_LANE_MAX_SCOPE_FILES` (58 files) never spawns
+  OpenCode either (issue #57): the lane is `failed` with a
+  `review target too large: …` reason that names the file count, the
+  ceiling, and its source, and `runSpawned` is `false` (a known $0). The
+  ceiling is `DOWN_LANE_SPEC.steps - 2`: OpenCode forces a text-only step
+  at `step >= steps` (the step counter starts at 1, so 59 steps can call
+  tools), the first goes to `warden_run_det_priors`, and each changed
+  file needs at least one whole-file read. It assumes one read per step,
+  the rate in the recorded down-lane streams. It is not a hard limit: a
+  model can batch reads (recorded up to 4 in one step). The timeout is
+  not in the formula because its rate depends on the model.
 - Warms its own `opencode serve` (free loopback port, random password),
   waits for the warden MCP server to connect (default 30 s,
   `--mcp-timeout`), settles 1 s, then runs against it; the serve child is
@@ -234,4 +276,5 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   `lane-trace` entry gains a `· cost $<4dp> · tokens <in>/<out>` suffix
   (`in` = input + cache reads + cache writes). A failed read leaves the
   entry as it was — usage is telemetry and never fails the lane. The
-  MCP-warmup failure path has no run and no usage.
+  MCP-warmup failure, empty-scope, and scope-over-ceiling paths have no
+  run and no usage.
