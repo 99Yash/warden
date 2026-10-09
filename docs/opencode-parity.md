@@ -45,7 +45,9 @@ the driven lane. A bare `pnpm eval` never touches the OpenCode runtime —
 `opencode-down` lives in `LANE_CONFIGS`, not `ALL_CONFIGS`, so a bare
 run cannot start paying for OpenCode sessions. `LANE_CONFIGS` also holds
 `claude-code-down`, the same lane run by `claude -p` on a Claude
-subscription login (see Results). It is a valid `--parity` candidate.
+subscription login (see Results). It is not a `--parity` candidate:
+`claude -p` reports the session model without an effort variant, so P6
+would fail every sample. Run it with `--config`.
 
 ### Operator notes
 
@@ -202,6 +204,9 @@ pnpm --filter @warden/cli eval --config claude-code-down --samples 1 --max-cost 
 
 Scorecard:
 `results/opencode-parity/2026-10-09T06-43-53-982Z-claude-code-down.json`.
+The command writes `results/<timestamp>.json` (gitignored). The operator
+moved that file by hand. It is a lane-only scorecard (no parity block,
+no `.md`). The run used the uncommitted tree just before `a53ff65`.
 `--max-cost` bounds the notional cost here (`total_cost_usd` is the API
 price equivalent; no money moves on a subscription login).
 
@@ -236,6 +241,13 @@ price equivalent; no money moves on a subscription login).
 - The real PRs produced correctness findings that have no label (for
   example 4 on `m6-misses-2d4dc0b`). A comment with no label is not
   proof of a false positive.
-- On `correctness-off-by-one`, the OpenCode lane cost $0.1427 (an earlier
-  one-fixture tracer through the `warden-dev` gateway) and the Claude
-  Code lane cost $0.06–0.13.
+- Real-PR 2/15 undercounts by one. On `alfred-pr235-misses-a99d732f`,
+  comment `W-27e09cfd5d` finds the `pinned-demanding-never-wired` bug,
+  but it is anchored at `attention.ts:125`, and the label is at
+  `read.ts:167`. Labels match on file and line ±5, so it scored as a
+  miss plus an unlabeled comment.
+- On `correctness-off-by-one`, the Claude Code lane cost $0.0550 in this
+  scorecard. The operator also saw $0.1427 for the OpenCode lane (an
+  earlier one-fixture tracer through the `warden-dev` gateway) and
+  $0.1311 for an earlier Claude Code run. Those two runs are not
+  committed.

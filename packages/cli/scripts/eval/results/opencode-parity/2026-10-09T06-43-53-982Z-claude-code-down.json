@@ -112,9 +112,7 @@
               "commentCount": 0,
               "comments": [],
               "caughtLabels": [],
-              "missedLabels": [
-                "debugger-leftover"
-              ],
+              "missedLabels": ["debugger-leftover"],
               "forbiddenLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 1,
@@ -165,9 +163,7 @@
                 }
               ],
               "caughtLabels": [],
-              "missedLabels": [
-                "docstring-drift"
-              ],
+              "missedLabels": ["docstring-drift"],
               "forbiddenLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -217,9 +213,7 @@
                   "sourcesCount": 2
                 }
               ],
-              "caughtLabels": [
-                "off-by-one"
-              ],
+              "caughtLabels": ["off-by-one"],
               "missedLabels": [],
               "forbiddenLabels": [],
               "unlabeledComments": 0,
@@ -258,9 +252,7 @@
               "commentCount": 0,
               "comments": [],
               "caughtLabels": [],
-              "missedLabels": [
-                "stringify-clone"
-              ],
+              "missedLabels": ["stringify-clone"],
               "forbiddenLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 1,
@@ -311,9 +303,7 @@
                 }
               ],
               "caughtLabels": [],
-              "missedLabels": [
-                "sequential-await"
-              ],
+              "missedLabels": ["sequential-await"],
               "forbiddenLabels": [],
               "unlabeledComments": 1,
               "dispatchCount": 1,
@@ -351,9 +341,7 @@
               "commentCount": 0,
               "comments": [],
               "caughtLabels": [],
-              "missedLabels": [
-                "eval-rce"
-              ],
+              "missedLabels": ["eval-rce"],
               "forbiddenLabels": [],
               "unlabeledComments": 0,
               "dispatchCount": 1,
@@ -478,9 +466,7 @@
                   "sourcesCount": 5
                 }
               ],
-              "caughtLabels": [
-                "text-offset-vs-prosemirror-position-unit-mismatch"
-              ],
+              "caughtLabels": ["text-offset-vs-prosemirror-position-unit-mismatch"],
               "missedLabels": [
                 "filter-tabs-slice-1-ui-dead-state",
                 "settings-refactor-lost-navigate"
@@ -546,9 +532,7 @@
                   "sourcesCount": 3
                 }
               ],
-              "caughtLabels": [
-                "day-shape-shipped-ignores-window"
-              ],
+              "caughtLabels": ["day-shape-shipped-ignores-window"],
               "missedLabels": [
                 "pinned-demanding-never-wired",
                 "recurrence-reversed-for-newest-first",

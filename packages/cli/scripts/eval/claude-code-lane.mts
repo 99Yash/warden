@@ -27,8 +27,9 @@ import { DOWN_LANE_SPEC, PROMPT_FILENAME } from "../../src/opencode/materialize.
  *
  * Isolation: `--setting-sources ""` skips user/project settings, hooks,
  * and CLAUDE.md; `--strict-mcp-config` loads only the warden server;
- * `--tools` limits built-ins to read/grep/glob; `dontAsk` denies anything
- * not pre-approved. Not a product surface — ADR-0053 names OpenCode as
+ * `--tools` limits built-ins to read/grep/glob; `--restricted` confines
+ * them to the repo; `dontAsk` denies anything not pre-approved;
+ * `--max-turns` matches the OpenCode lane's step cap. Not a product surface — ADR-0053 names OpenCode as
  * the engine; this lane only measures the same method on another client.
  */
 
@@ -37,6 +38,7 @@ export const CLAUDE_CODE_DEFAULT_EFFORT = "high";
 /** Claude Code names MCP tools `mcp__<server>__<tool>`; OpenCode names them `<server>_<tool>`. */
 const MCP_PREFIX = "mcp__warden__";
 const MCP_TOOLS = ["run_det_priors", "lookup_type_def"] as const;
+const MAX_TURNS = 60;
 
 /** Variables the child must not inherit: API auth, and the parent session's own Claude Code state. */
 function isStrippedEnv(name: string): boolean {
@@ -60,10 +62,12 @@ export function buildClaudeCodeArgv(opts: {
 }): string[] {
   const [command, ...args] = opts.mcpCommand;
   const mcpConfig = JSON.stringify({ mcpServers: { warden: { command, args } } });
-  // Read deny rules also cover Grep and Glob. `.env.example` is denied too
+  // Read deny rules also cover Grep and Glob, but only inside the cwd:
+  // `--restricted` confines the file tools to it, so an absolute path
+  // outside the repo cannot reach a `.env`. `.env.example` is denied too
   // (stricter than the OpenCode lane's allow): a deny rule wins over an allow.
   const settings = JSON.stringify({
-    permissions: { deny: ["Read(**/.env)", "Read(**/.env.*)"] },
+    permissions: { deny: ["Read(**/.env)", "Read(**/.env.*)", "Read(**/*.env)"] },
   });
   return [
     "-p",
@@ -76,6 +80,7 @@ export function buildClaudeCodeArgv(opts: {
     opts.systemPromptFile,
     "--setting-sources",
     "",
+    "--restricted",
     "--settings",
     settings,
     "--strict-mcp-config",
@@ -87,6 +92,10 @@ export function buildClaudeCodeArgv(opts: {
     ["Read", "Grep", "Glob", ...MCP_TOOLS.map((t) => `${MCP_PREFIX}${t}`)].join(","),
     "--permission-mode",
     "dontAsk",
+    // The OpenCode lane's `steps: 60`. A capped run ends `error_max_turns`,
+    // which fails the lane.
+    "--max-turns",
+    String(MAX_TURNS),
     "--disable-slash-commands",
     "--no-session-persistence",
     "--output-format",
@@ -196,16 +205,38 @@ function normalizeToolName(name: string): string {
  * login (no money moves), which is the number the gate compares. The
  * model is every `modelUsage` key, so a background call on another model
  * shows up instead of hiding behind the init model.
+ *
+ * As strict as `parseSessionUsage`: a negative cost or a missing token
+ * count is unmeasured (`undefined`), never a measured $0. Only the
+ * reasoning count may be absent (a run with no thinking).
  */
 function parseResultUsage(
   record: Record<string, unknown>,
   initModel: string | undefined,
 ): SessionUsage | undefined {
   const cost = record["total_cost_usd"];
-  const u = record["usage"] as Record<string, unknown> | undefined;
-  if (typeof cost !== "number" || u === undefined) return undefined;
-  const num = (v: unknown): number => (typeof v === "number" ? v : 0);
-  const details = u["output_tokens_details"] as Record<string, unknown> | undefined;
+  const u = record["usage"];
+  if (typeof cost !== "number" || cost < 0 || typeof u !== "object" || u === null) {
+    return undefined;
+  }
+  const usage = u as Record<string, unknown>;
+  const input = usage["input_tokens"];
+  const output = usage["output_tokens"];
+  const cacheRead = usage["cache_read_input_tokens"];
+  const cacheWrite = usage["cache_creation_input_tokens"];
+  if (
+    typeof input !== "number" ||
+    typeof output !== "number" ||
+    typeof cacheRead !== "number" ||
+    typeof cacheWrite !== "number"
+  ) {
+    return undefined;
+  }
+  const details = usage["output_tokens_details"];
+  const thinking =
+    typeof details === "object" && details !== null
+      ? (details as Record<string, unknown>)["thinking_tokens"]
+      : undefined;
   const modelUsage = record["modelUsage"];
   const models =
     typeof modelUsage === "object" && modelUsage !== null ? Object.keys(modelUsage) : [];
@@ -213,11 +244,11 @@ function parseResultUsage(
   return {
     costUsd: cost,
     tokens: {
-      input: num(u["input_tokens"]),
-      output: num(u["output_tokens"]),
-      reasoning: num(details?.["thinking_tokens"]),
-      cacheRead: num(u["cache_read_input_tokens"]),
-      cacheWrite: num(u["cache_creation_input_tokens"]),
+      input,
+      output,
+      reasoning: typeof thinking === "number" ? thinking : 0,
+      cacheRead,
+      cacheWrite,
     },
     ...(model !== undefined ? { model } : {}),
   };

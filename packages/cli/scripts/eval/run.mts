@@ -214,8 +214,10 @@ function selectConfigs(args: Args): EvalConfig[] {
     if (isLaneRuntime(reference)) {
       usageError(`--parity reference "${reference.name}" must be a harness config`);
     }
-    if (!isLaneRuntime(candidate)) {
-      usageError(`--parity candidate "${candidate.name}" must be a lane config`);
+    // Not `claude-code-down`: `claude -p` reports no effort variant, so its
+    // session model never equals the requested one and P6 fails every sample.
+    if (candidate.runtime !== "opencode") {
+      usageError(`--parity candidate "${candidate.name}" must be an OpenCode config`);
     }
     return [candidate, reference];
   }
