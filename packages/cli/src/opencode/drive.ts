@@ -9,6 +9,7 @@ import {
   isNotClean,
   resolveDiff,
   runPostPass,
+  type CommentSet,
   type DegradedEntry,
   type LaneOutput,
 } from "@warden/core";
@@ -212,6 +213,18 @@ export interface ToolCallCount {
   completed: number;
 }
 
+export interface SessionUsage {
+  costUsd: number;
+  tokens: {
+    input: number;
+    output: number;
+    reasoning: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
+  model?: string;
+}
+
 export interface ParsedLane {
   /**
    * Assistant `text` parts of the last assistant message only — the
@@ -229,6 +242,12 @@ export interface ParsedLane {
    * `step_start` at all.
    */
   parseError?: string;
+  /**
+   * Top-level `sessionID` of the first event that carries a non-empty
+   * string one. It does not affect `parseError` or the verdict — it only
+   * lets the driver read the session total from the serve API.
+   */
+  sessionId?: string;
 }
 
 /** Parses `opencode run --format json` JSONL. Unknown lines are skipped — the stream is host-owned, not schema-bound. */
@@ -254,6 +273,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
   const completedByTool = new Map<string, number>();
   const seenByTool = new Map<string, number>();
   const errors: string[] = [];
+  let sessionId: string | undefined;
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (trimmed === "") continue;
@@ -265,6 +285,10 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     }
     if (typeof event !== "object" || event === null) continue;
     const record = event as Record<string, unknown>;
+    if (sessionId === undefined) {
+      const sid = record["sessionID"];
+      if (typeof sid === "string" && sid !== "") sessionId = sid;
+    }
     if (record["type"] === "step_start") {
       const part = record["part"] as Record<string, unknown> | undefined;
       const id = part?.["messageID"];
@@ -320,7 +344,13 @@ export function parseLaneEvents(stdout: string): ParsedLane {
   }
   const texts =
     parseError !== undefined || lastStepId === undefined ? [] : (textsById.get(lastStepId) ?? []);
-  return { texts, toolCalls, errors, ...(parseError !== undefined ? { parseError } : {}) };
+  return {
+    texts,
+    toolCalls,
+    errors,
+    ...(parseError !== undefined ? { parseError } : {}),
+    ...(sessionId !== undefined ? { sessionId } : {}),
+  };
 }
 
 export interface LaneVerdict {
@@ -444,6 +474,80 @@ export function wardenMcpReadiness(servers: McpServerState[] | undefined): Warde
 }
 
 /**
+ * The `GET /api/session/<id>` response is untrusted JSON: validate at this
+ * boundary. Shape (verified live against v2.0.25):
+ * `{data:{id, model:{id,providerID,variant}, cost, tokens:{input, output,
+ * reasoning, cache:{read,write}}, outcome}}`. Returns `undefined` when the
+ * shape is wrong. `model` is `<providerID>/<id>` when present.
+ */
+export function parseSessionUsage(body: unknown): SessionUsage | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const data = (body as Record<string, unknown>)["data"];
+  if (typeof data !== "object" || data === null) return undefined;
+  const d = data as Record<string, unknown>;
+  if (typeof d["cost"] !== "number") return undefined;
+  const tokens = d["tokens"];
+  if (typeof tokens !== "object" || tokens === null) return undefined;
+  const t = tokens as Record<string, unknown>;
+  if (
+    typeof t["input"] !== "number" ||
+    typeof t["output"] !== "number" ||
+    typeof t["reasoning"] !== "number"
+  ) {
+    return undefined;
+  }
+  const cache = t["cache"];
+  if (typeof cache !== "object" || cache === null) return undefined;
+  const c = cache as Record<string, unknown>;
+  if (typeof c["read"] !== "number" || typeof c["write"] !== "number") return undefined;
+  const usage: SessionUsage = {
+    costUsd: d["cost"],
+    tokens: {
+      input: t["input"],
+      output: t["output"],
+      reasoning: t["reasoning"],
+      cacheRead: c["read"],
+      cacheWrite: c["write"],
+    },
+  };
+  const model = d["model"];
+  if (typeof model === "object" && model !== null) {
+    const m = model as Record<string, unknown>;
+    if (typeof m["id"] === "string" && typeof m["providerID"] === "string") {
+      usage.model = `${m["providerID"]}/${m["id"]}`;
+    }
+  }
+  return usage;
+}
+
+/**
+ * Read one session total from the serve API. Usage is telemetry — any
+ * failure returns `undefined` and never fails the lane.
+ */
+export async function fetchSessionUsage(opts: {
+  baseUrl: string;
+  password: string;
+  directory: string;
+  sessionId: string;
+  timeoutMs: number;
+}): Promise<SessionUsage | undefined> {
+  try {
+    const url = new URL(`/api/session/${encodeURIComponent(opts.sessionId)}`, opts.baseUrl);
+    url.searchParams.set("location[directory]", opts.directory);
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Basic ${Buffer.from(`opencode:${opts.password}`, "utf8").toString("base64")}`,
+      },
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+    if (!res.ok) return undefined;
+    return parseSessionUsage(await res.json());
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Poll `GET <baseUrl>/api/mcp` until the warden server shows `connected`.
  * This call also boots the location, so a cold serve reports pending
  * entries first. Connection refusals mean the serve child is still
@@ -542,39 +646,39 @@ export interface DriveOptions {
   opencodeBin?: string;
 }
 
+export interface DriveLaneResult {
+  result: CommentSet;
+  lanes: LaneOutput[];
+  usage?: SessionUsage;
+}
+
 /**
- * The driven path: resolve the diff exactly like `warden post-pass`,
- * spawn the lane, build the trusted envelope, and publish only the
- * post-pass `CommentSet`.
+ * Printing wrapper: the `warden opencode-review` entry. Output and exit
+ * codes are exactly as before the split.
  */
 export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
+  const { result } = await driveOpencodeLane(opts);
+  const verbose = opts.verbose === true;
+  if (isNotClean(result)) process.exitCode = 1;
+  if (opts.json === true) {
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    return;
+  }
+  process.stdout.write("\n" + formatCommentSet(result, "review", verbose) + "\n");
+}
+
+export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneResult> {
+  // Returning core: everything the printing wrapper does except writing
+  // stdout and setting `process.exitCode`. It still writes `--lanes-out`
+  // (part of the driver contract). The eval runner calls this directly so
+  // the scored output is the same published `CommentSet` a user gets.
   const resolved = await resolveDiff({
     repoRoot: opts.repoRoot,
     mode: "review",
     baseRef: opts.baseRef,
   });
   const scope = deriveLaneScope(resolved.diff);
-  const verbose = opts.verbose === true;
   const timeoutSecs = opts.timeoutSecs ?? DEFAULT_LANE_TIMEOUT_SECS;
-
-  const publish = async (lanes: LaneOutput[], extraDegraded: DegradedEntry[]): Promise<void> => {
-    const result = await runPostPass({
-      repoRoot: opts.repoRoot,
-      diff: resolved.diff,
-      lanes,
-      config: {
-        verbose,
-        ...(opts.volumeCap !== undefined ? { volumeCap: opts.volumeCap } : {}),
-      },
-      ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
-    });
-    if (isNotClean(result)) process.exitCode = 1;
-    if (opts.json === true) {
-      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-      return;
-    }
-    process.stdout.write("\n" + formatCommentSet(result, "review", verbose) + "\n");
-  };
 
   // Empty scope: do not spawn OpenCode — the lane is failed so the
   // existing fail-closed entries fire (plus the post-pass diff-source
@@ -589,14 +693,8 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
         findings: [],
       },
     ];
-    if (opts.lanesOut !== undefined) {
-      writeFileSync(
-        resolve(opts.repoRoot, opts.lanesOut),
-        JSON.stringify({ version: 1, lanes }, null, 2) + "\n",
-      );
-    }
-    await publish(lanes, [...(resolved.degraded ?? [])]);
-    return;
+    writeLanesOut(opts, lanes);
+    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])]);
   }
 
   const baseRef = resolved.baseRef ?? opts.baseRef ?? "HEAD";
@@ -674,12 +772,11 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
       ]);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      return await publishFailed(
+      return await buildFailed(
         `mcp not ready: ${detail}${tailSuffix(serveStderr)}`,
         opts,
         resolved,
         scope,
-        verbose,
       );
     }
     await sleep(settleMs);
@@ -691,7 +788,20 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
       ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
     });
     const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
-    await publishVerdict(processResult, opts, resolved, scope, verbose);
+    // The serve child is still alive here (killed in `finally` below),
+    // so the session total can be read before it goes away.
+    let usage: SessionUsage | undefined;
+    const sessionId = parseLaneEvents(processResult.stdout).sessionId;
+    if (sessionId !== undefined) {
+      usage = await fetchSessionUsage({
+        baseUrl,
+        password,
+        directory: opts.repoRoot,
+        sessionId,
+        timeoutMs: Math.min(mcpTimeoutMs, 10000),
+      });
+    }
+    return await buildVerdict(processResult, opts, resolved, scope, usage);
   } finally {
     mcpAbort.abort();
     await killServe(serve);
@@ -699,31 +809,6 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
 }
 
 type ResolvedDiff = Awaited<ReturnType<typeof resolveDiff>>;
-
-async function publishLanes(
-  opts: DriveOptions,
-  resolved: ResolvedDiff,
-  verbose: boolean,
-  lanes: LaneOutput[],
-  extraDegraded: DegradedEntry[],
-): Promise<void> {
-  const result = await runPostPass({
-    repoRoot: opts.repoRoot,
-    diff: resolved.diff,
-    lanes,
-    config: {
-      verbose,
-      ...(opts.volumeCap !== undefined ? { volumeCap: opts.volumeCap } : {}),
-    },
-    ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
-  });
-  if (isNotClean(result)) process.exitCode = 1;
-  if (opts.json === true) {
-    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-    return;
-  }
-  process.stdout.write("\n" + formatCommentSet(result, "review", verbose) + "\n");
-}
 
 function writeLanesOut(opts: DriveOptions, lanes: LaneOutput[]): void {
   if (opts.lanesOut !== undefined) {
@@ -738,39 +823,65 @@ function laneTraceEntry(
   status: string,
   reason: string | undefined,
   toolCalls: string,
+  usage?: SessionUsage,
 ): DegradedEntry {
+  const base = `lane-trace: down ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`;
+  if (usage === undefined) {
+    return { kind: "info", topic: "lane-trace", message: base };
+  }
+  const input = usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite;
   return {
     kind: "info",
     topic: "lane-trace",
-    message: `lane-trace: down ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`,
+    message: `${base} · cost $${usage.costUsd.toFixed(4)} · tokens ${input}/${usage.tokens.output}`,
   };
 }
 
+/** Shared returning helper: every path builds the post-pass CommentSet through this. */
+async function buildLaneResult(
+  opts: DriveOptions,
+  resolved: ResolvedDiff,
+  lanes: LaneOutput[],
+  extraDegraded: DegradedEntry[],
+): Promise<DriveLaneResult> {
+  const verbose = opts.verbose === true;
+  const result = await runPostPass({
+    repoRoot: opts.repoRoot,
+    diff: resolved.diff,
+    lanes,
+    config: {
+      verbose,
+      ...(opts.volumeCap !== undefined ? { volumeCap: opts.volumeCap } : {}),
+    },
+    ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
+  });
+  return { result, lanes };
+}
+
 /** MCP-warmup failure: no run happened, so there are no tool calls to trace. */
-async function publishFailed(
+async function buildFailed(
   reason: string,
   opts: DriveOptions,
   resolved: ResolvedDiff,
   scope: string[],
-  verbose: boolean,
-): Promise<void> {
+): Promise<DriveLaneResult> {
   const lanes: LaneOutput[] = [
     { lane: DOWN_LANE_SPEC.lane, status: "failed", reason, scope, findings: [] },
   ];
   writeLanesOut(opts, lanes);
-  await publishLanes(opts, resolved, verbose, lanes, [
+  return await buildLaneResult(opts, resolved, lanes, [
     ...(resolved.degraded ?? []),
     laneTraceEntry("failed", reason, ""),
   ]);
 }
 
-async function publishVerdict(
+async function buildVerdict(
   processResult: LaneProcessResult,
   opts: DriveOptions,
   resolved: ResolvedDiff,
   scope: string[],
-  verbose: boolean,
-): Promise<void> {
+  usage?: SessionUsage,
+): Promise<DriveLaneResult> {
   const verdict = evaluateLane(parseLaneEvents(processResult.stdout), processResult);
   const traceCounts = verdict.toolCalls.map((t) => `${t.name}×${t.completed}`).join(", ");
   const lanes: LaneOutput[] = [
@@ -783,10 +894,12 @@ async function publishVerdict(
     },
   ];
   writeLanesOut(opts, lanes);
-  await publishLanes(opts, resolved, verbose, lanes, [
+  const built = await buildLaneResult(opts, resolved, lanes, [
     ...(resolved.degraded ?? []),
-    laneTraceEntry(verdict.status, verdict.reason, traceCounts),
+    laneTraceEntry(verdict.status, verdict.reason, traceCounts, usage),
   ]);
+  if (usage !== undefined) built.usage = usage;
+  return built;
 }
 
 function tailSuffix(tail: string): string {

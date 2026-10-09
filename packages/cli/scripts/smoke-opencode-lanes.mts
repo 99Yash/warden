@@ -26,9 +26,11 @@ import {
   buildMcpConfigContent,
   buildOpencodeCommand,
   buildOpencodeServeCommand,
+  driveOpencodeLane,
   evaluateLane,
   parseLaneEvents,
   parseMcpServers,
+  parseSessionUsage,
   resolveLoaderFlags,
   resolveWardenMcpCommand,
   waitForWardenMcp,
@@ -868,10 +870,32 @@ if (argv[0] === "serve") {
   const mode = process.env.WARDEN_SMOKE_SERVE_MODE ?? "connected";
   const server = createServer((req, res) => {
     const u = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (u.pathname !== "/api/mcp") { res.writeHead(404); res.end(); return; }
-    if (req.headers.authorization !== ("Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_PASSWORD ?? ""), "utf8").toString("base64"))) {
-      res.writeHead(401); res.end(JSON.stringify({ message: "Authentication required" })); return;
+    const checkAuth = () => {
+      if (req.headers.authorization !== ("Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_PASSWORD ?? ""), "utf8").toString("base64"))) {
+        res.writeHead(401); res.end(JSON.stringify({ message: "Authentication required" })); return false;
+      }
+      return true;
+    };
+    const sessMatch = u.pathname.match(/^\\/api\\/session\\/(.+)$/);
+    if (sessMatch) {
+      if (!checkAuth()) return;
+      const dir = u.searchParams.get("location[directory]");
+      if (!dir) fail("session poll must send location[directory]");
+      if (process.env.WARDEN_SMOKE_SESSION_MODE === "404") {
+        res.writeHead(404); res.end(); return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: {
+        id: decodeURIComponent(sessMatch[1] ?? ""),
+        model: { id: "fake-model", providerID: "fake-provider", variant: "high" },
+        cost: 0.0123,
+        tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 30 } },
+        outcome: "succeeded",
+      } }));
+      return;
     }
+    if (u.pathname !== "/api/mcp") { res.writeHead(404); res.end(); return; }
+    if (!checkAuth()) return;
     const dir = u.searchParams.get("location[directory]");
     if (!dir) fail("poll must send location[directory]");
     const data =
@@ -1045,6 +1069,93 @@ if (mode === "runfail") {
       lanesOut.lanes[0]?.status === "ok",
     "--lanes-out carries the down/ok envelope for replay",
   );
+  // The fake serve answers the session route with a fixed usage; the
+  // lane-trace entry carries it as a cost suffix.
+  assert(
+    okSet?.metadata.degradedWorkers.some(
+      (d) =>
+        d.topic === "lane-trace" &&
+        d.message.includes("cost $0.0123") &&
+        d.message.includes("tokens 150/50"),
+    ) === true,
+    "lane-trace entry carries the session cost (150 in / 50 out)",
+  );
+  // parseSessionUsage validates the same shape the fake serve sends.
+  const smokeUsage = parseSessionUsage({
+    data: {
+      id: "s",
+      model: { id: "fake-model", providerID: "fake-provider", variant: "high" },
+      cost: 0.0123,
+      tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 30 } },
+      outcome: "succeeded",
+    },
+  });
+  assert(
+    smokeUsage !== undefined &&
+      smokeUsage.costUsd === 0.0123 &&
+      smokeUsage.model === "fake-provider/fake-model",
+    "parseSessionUsage reads the fake serve shape",
+  );
+
+  // (a2) the returning core publishes the same CommentSet the wrapper
+  // prints (minus wall-clock duration), plus the session usage.
+  process.env.WARDEN_SMOKE_FINDING = JSON.stringify(inScopeFinding);
+  process.env.WARDEN_SMOKE_SERVE_PORT = resolve(TMP_ROOT, "fake-serve-port-core");
+  delete process.env.WARDEN_SMOKE_MODE;
+  delete process.env.WARDEN_SMOKE_SESSION_MODE;
+  const driven = await driveOpencodeLane({
+    repoRoot: REPO,
+    baseRef: "HEAD~1",
+    opencodeBin: fakePath,
+  });
+  delete process.env.WARDEN_SMOKE_FINDING;
+  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  // Key order differs across the CLI JSON round-trip, so canonicalize
+  // (sorted keys) before comparing.
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (typeof value === "object" && value !== null) {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+      );
+    }
+    return value;
+  };
+  const normalize = (set: CommentSet): string =>
+    JSON.stringify(canonical({ ...set, metadata: { ...set.metadata, durationMs: 0 } }));
+  assert(
+    okSet !== undefined && normalize(driven.result) === normalize(okSet),
+    "driveOpencodeLane returns the CommentSet the wrapper prints",
+  );
+  assert(driven.usage?.costUsd === 0.0123, "driveOpencodeLane returns the session usage");
+  assert(
+    driven.lanes[0]?.status === "ok" &&
+      driven.result.metadata.degradedWorkers.some(
+        (d) => d.topic === "lane-trace" && d.message.includes("cost $0.0123"),
+      ),
+    "core result carries the cost-suffixed lane-trace entry",
+  );
+
+  // (a3) the session route 404s: the lane still publishes, trace has no cost.
+  const noUsage = runDriver(["--base", "HEAD~1", "--json"], { WARDEN_SMOKE_SESSION_MODE: "404" });
+  const noUsageSet = parseOut(noUsage.out);
+  assert(noUsage.exit === 0, `session 404 still exits 0 (got ${noUsage.exit})`);
+  assert(
+    noUsageSet?.comments.some((c) => c.claim === inScopeFinding.claim) === true,
+    "session 404 still publishes the comment",
+  );
+  assert(
+    noUsageSet?.metadata.degradedWorkers.some(
+      (d) =>
+        d.topic === "lane-trace" &&
+        d.message.includes("warden_run_det_priors") &&
+        !d.message.includes("cost $"),
+    ) === true,
+    "session 404 leaves the lane-trace entry without a cost suffix",
+  );
+  await assertServeDead("session 404");
 
   // (b) warden never connects: lane failed, run never spawned, serve killed.
   const runMarkerB = resolve(TMP_ROOT, "run-invoked-b");

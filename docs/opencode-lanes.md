@@ -228,3 +228,10 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   `isNotClean(result)` (actionable `lane-health` / `diff-source`).
 - An extra `info` entry, topic `lane-trace`, records the tool-call counts
   (e.g. `warden_run_det_priors×2, warden_lookup_type_def×0, read×7`).
+  After the run resolves and before the serve child is killed, the driver
+  reads the session total (`GET /api/session/<id>`, same auth and
+  `location[directory]` query as the MCP poll); when known, the
+  `lane-trace` entry gains a `· cost $<4dp> · tokens <in>/<out>` suffix
+  (`in` = input + cache reads + cache writes). A failed read leaves the
+  entry as it was — usage is telemetry and never fails the lane. The
+  MCP-warmup failure path has no run and no usage.
