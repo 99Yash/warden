@@ -189,14 +189,26 @@ export function resolveWardenMcpCommand(): string[] {
  * committed `mcp` object and drop `type`/`codemode`, and the server entry
  * would fail validation and never register. Values mirror the committed
  * `opencode.json`; only command/cwd vary per install.
+ *
+ * `anthropicBaseUrl` forwards `ANTHROPIC_BASE_URL`. The AI SDK in warden's
+ * own harness reads that env var, but the v2.0.25 binary ignores it and
+ * needs `provider.anthropic.options.baseURL`. Without the forward, a
+ * gateway run sends the reference and the lane to different hosts.
  */
-export function buildMcpConfigContent(opts: { command: string[]; cwd: string }): string {
+export function buildMcpConfigContent(opts: {
+  command: string[];
+  cwd: string;
+  anthropicBaseUrl?: string;
+}): string {
   return JSON.stringify({
     mcp: {
       servers: {
         warden: { type: "local", command: opts.command, cwd: opts.cwd, codemode: false },
       },
     },
+    ...(opts.anthropicBaseUrl
+      ? { provider: { anthropic: { options: { baseURL: opts.anthropicBaseUrl } } } }
+      : {}),
   });
 }
 
@@ -735,6 +747,9 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
     [OPENCODE_CONTENT_ENV]: buildMcpConfigContent({
       command: resolveWardenMcpCommand(),
       cwd: opts.repoRoot,
+      ...(process.env["ANTHROPIC_BASE_URL"]
+        ? { anthropicBaseUrl: process.env["ANTHROPIC_BASE_URL"] }
+        : {}),
     }),
     [OPENCODE_PASSWORD_ENV]: password,
     // opencode resolves its location from PWD, not the process cwd. Under

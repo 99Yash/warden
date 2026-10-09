@@ -725,6 +725,19 @@ try {
       (wardenServer as Record<string, unknown>)["cwd"] === "/tmp/r",
     "config content carries the full server object (host replaces the whole mcp key)",
   );
+  assert(!("provider" in content), "config content has no provider key without a base URL");
+  const gatewayContent = JSON.parse(
+    buildMcpConfigContent({
+      command: ["node", "x", "mcp"],
+      cwd: "/tmp/r",
+      anthropicBaseUrl: "https://gw.example/anthropic/v1",
+    }),
+  ) as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
+  assert(
+    gatewayContent["provider"]?.["anthropic"]?.["options"]?.["baseURL"] ===
+      "https://gw.example/anthropic/v1" && gatewayContent["mcp"] !== undefined,
+    "config content forwards ANTHROPIC_BASE_URL as provider.anthropic.options.baseURL",
+  );
   const mcpCommand = resolveWardenMcpCommand();
   assert(mcpCommand[mcpCommand.length - 1] === "mcp", "warden MCP command ends with the mcp verb");
   assert(mcpCommand[0] === process.execPath, "warden MCP command launches this exact node");
