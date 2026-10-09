@@ -208,7 +208,7 @@ export interface ToolCallCount {
 }
 
 export interface ParsedLane {
-  /** Assistant `text` parts in stream order. */
+  /** Assistant `text` parts of the last assistant message only, in stream order. */
   texts: string[];
   toolCalls: ToolCallCount[];
   errors: string[];
@@ -216,7 +216,11 @@ export interface ParsedLane {
 
 /** Parses `opencode run --format json` JSONL. Unknown lines are skipped — the stream is host-owned, not schema-bound. */
 export function parseLaneEvents(stdout: string): ParsedLane {
-  const texts: string[] = [];
+  // Text parts are grouped by `part.messageID` (the wire shape carries it:
+  // `cli/src/run/noninteractive.ts` emits `messageID` on every text and
+  // tool part). Only the last assistant message is the submission — an
+  // earlier draft block, or a quoted example block, must never become it.
+  const groups: Array<{ id: string; texts: string[] }> = [];
   const completedByTool = new Map<string, number>();
   const seenByTool = new Map<string, number>();
   const errors: string[] = [];
@@ -232,8 +236,13 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     if (typeof event !== "object" || event === null) continue;
     const record = event as Record<string, unknown>;
     if (record["type"] === "text") {
-      const text = (record["part"] as Record<string, unknown> | undefined)?.["text"];
-      if (typeof text === "string" && text.trim() !== "") texts.push(text);
+      const part = record["part"] as Record<string, unknown> | undefined;
+      const text = part?.["text"];
+      if (typeof text !== "string" || text.trim() === "") continue;
+      const id = typeof part?.["messageID"] === "string" ? (part?.["messageID"] as string) : "";
+      const last = groups[groups.length - 1];
+      if (last !== undefined && last.id === id) last.texts.push(text);
+      else groups.push({ id, texts: [text] });
     } else if (record["type"] === "tool_use") {
       const part = record["part"] as Record<string, unknown> | undefined;
       // Wire shape is `part.tool` (verified against a live `--format json`
@@ -255,7 +264,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     completed: completedByTool.get(name) ?? 0,
   }));
   toolCalls.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  return { texts, toolCalls, errors };
+  return { texts: groups[groups.length - 1]?.texts ?? [], toolCalls, errors };
 }
 
 export interface LaneVerdict {
@@ -266,7 +275,7 @@ export interface LaneVerdict {
   toolCalls: ToolCallCount[];
 }
 
-/** Last ` ```json ` fenced block wins. Anything unparseable fails with a distinct reason. */
+/** The submission is the last assistant message's single ` ```json ` block. Anything else fails with a distinct reason. */
 export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): LaneVerdict {
   const toolCalls = parsed.toolCalls;
   const detPriorsCompleted =
@@ -283,8 +292,12 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
   if (parsed.errors.length > 0)
     return fail(withTail(`opencode run error event: ${parsed.errors[0]}`, process.stderrTail));
   const text = parsed.texts.join("\n");
-  const block = lastJsonBlock(text);
-  if (block === undefined) return fail("no fenced json submission in the final message");
+  const blocks = [...text.matchAll(/```json[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm)];
+  if (blocks.length === 0) return fail("no fenced json submission in the final message");
+  if (blocks.length > 1) return fail("multiple fenced json submissions in the final message");
+  const block = blocks[0]?.[1]?.trim();
+  if (block === undefined || block === "")
+    return fail("no fenced json submission in the final message");
   let submission: unknown;
   try {
     submission = JSON.parse(block);
@@ -311,12 +324,6 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
     };
   }
   return { status: "ok", findings, toolCalls };
-}
-
-function lastJsonBlock(text: string): string | undefined {
-  const matches = [...text.matchAll(/```json\s*\n([\s\S]*?)```/g)];
-  if (matches.length === 0) return undefined;
-  return matches[matches.length - 1]?.[1]?.trim();
 }
 
 function withTail(reason: string, tail: string | undefined): string {

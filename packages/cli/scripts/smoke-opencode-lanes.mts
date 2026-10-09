@@ -82,12 +82,16 @@ function stripKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return next;
 }
 
-function textEvent(text: string): string {
+function textEvent(text: string, messageID?: string): string {
   return JSON.stringify({
     type: "text",
     timestamp: 2,
     sessionID: "s",
-    part: { type: "text", text },
+    part: {
+      type: "text",
+      text,
+      ...(messageID !== undefined ? { messageID } : {}),
+    },
   });
 }
 
@@ -278,19 +282,82 @@ try {
     "tool-call counts record completed det-priors calls",
   );
 
+  // Two blocks in the final message fail: the submission must end with
+  // exactly one fenced block, so a quoted example can never win over (or
+  // merge with) the real submission.
   const twoBlocks = parseLaneEvents(
     [
       toolEvent("warden_run_det_priors"),
       textEvent(
         `${submissionText([{ ...goodFinding, claim: "first" }])}\nAfterthought:\n${submissionText([{ ...goodFinding, claim: "last" }])}`,
+        "m-final",
       ),
     ].join("\n"),
   );
   const twoVerdict = evaluateLane(twoBlocks, { exitCode: 0, stdout: "", timedOut: false });
   assert(
-    twoVerdict.status === "ok" &&
-      (twoVerdict.findings[0] as Record<string, unknown>)["claim"] === "last",
-    "two fenced blocks → the last wins",
+    twoVerdict.status === "failed" &&
+      (twoVerdict.reason ?? "").includes("multiple fenced json submissions"),
+    `two blocks in the final message → failed (${twoVerdict.reason ?? "no reason"})`,
+  );
+
+  // A draft block in an earlier message is not the submission: the final
+  // message is prose (the step-cap shape), so the lane fails instead of
+  // publishing the draft as clean.
+  const draftThenSummary = parseLaneEvents(
+    [
+      textEvent(submissionText([]), "m-draft"),
+      toolEvent("warden_run_det_priors"),
+      textEvent("Work done so far: traced the callers, no block here.", "m-summary"),
+    ].join("\n"),
+  );
+  const draftVerdict = evaluateLane(draftThenSummary, {
+    exitCode: 0,
+    stdout: "",
+    timedOut: false,
+  });
+  assert(
+    draftVerdict.status === "failed" &&
+      (draftVerdict.reason ?? "").includes("no fenced json submission in the final message"),
+    `draft-then-summary → failed, not clean (${draftVerdict.reason ?? "no reason"})`,
+  );
+
+  // A quoted example block after the real submission, in the same final
+  // message, fails instead of flipping the result to clean.
+  const quotedExample = parseLaneEvents(
+    [
+      toolEvent("warden_run_det_priors"),
+      textEvent(
+        `${submissionText([goodFinding])}\nFor example, a clean lane looks like:\n${submissionText([])}`,
+        "m-final",
+      ),
+    ].join("\n"),
+  );
+  const quotedVerdict = evaluateLane(quotedExample, {
+    exitCode: 0,
+    stdout: "",
+    timedOut: false,
+  });
+  assert(
+    quotedVerdict.status === "failed" &&
+      (quotedVerdict.reason ?? "").includes("multiple fenced json submissions"),
+    `quoted example after the submission → failed (${quotedVerdict.reason ?? "no reason"})`,
+  );
+
+  // A triple backtick inside a JSON string (inline, not at a line start)
+  // does not end the block: the closing fence is anchored to a line start.
+  const inlineTicks = parseLaneEvents(
+    [
+      toolEvent("warden_run_det_priors"),
+      textEvent(submissionText([{ ...goodFinding, explanation: "wrap it in ``` fences" }]), "m"),
+    ].join("\n"),
+  );
+  const inlineVerdict = evaluateLane(inlineTicks, { exitCode: 0, stdout: "", timedOut: false });
+  assert(
+    inlineVerdict.status === "ok" &&
+      (inlineVerdict.findings[0] as Record<string, unknown>)["explanation"] ===
+        "wrap it in ``` fences",
+    "inline triple backticks inside JSON do not end the block",
   );
 
   const cases: Array<{
