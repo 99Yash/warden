@@ -111,8 +111,8 @@ async function recordSecurityRun(input: {
       .insert(securityRuns)
       .values({
         mode: input.mode,
-        modelBoss: "claude-opus-4-8",
-        modelWorkerStrong: "claude-sonnet-4-6",
+        modelBoss: "claude-opus-5-5",
+        modelWorkerStrong: "claude-sonnet-5-5",
         modelWorkerCheap: "claude-haiku-4-5-20251001",
         inputTokens: 0,
         outputTokens: 0,

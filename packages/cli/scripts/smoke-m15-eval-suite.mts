@@ -235,6 +235,7 @@ function makeSample(
     costUsd: cost,
     durationMs: 1000,
     error: null,
+    costMeasured: true,
   };
 }
 

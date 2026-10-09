@@ -21,6 +21,14 @@ export interface EvalConfig {
   name: string;
   description: string;
   bossLoop?: BossLoopConfig;
+  /**
+   * Eval runtime: absent means the in-process boss-loop harness.
+   * `claude-code` runs the OpenCode down lane's prompt and tools in
+   * `claude -p` on the operator's subscription login (eval-only).
+   */
+  runtime?: "harness" | "opencode" | "claude-code";
+  /** OpenCode lane model override; absent means the driver default. */
+  opencodeModel?: string;
 }
 
 /**
@@ -69,8 +77,16 @@ export interface Fixture {
    * harness `repoRoot`, so worker tools (`readFile`/`grepRepo`) read the full
    * post-PR tree instead of the sparse diff-only reconstruction. The fixture's
    * `commit` is the PR's head, so its tree IS the post-image ground truth.
+   * `repo` is the logical name from `meta.json`; scorecards record it, not
+   * the local `repoPath`.
    */
-  realRepo?: { repoPath: string; commit: string };
+  realRepo?: { repo: string; repoPath: string; commit: string };
+  /**
+   * Why a fixture that has a `meta.json` fell back to sparse (repo not
+   * found, commit unreachable, malformed meta). Absent when the real repo
+   * resolved or the fixture has no `meta.json`.
+   */
+  sparseReason?: string;
 }
 
 /** Shape of a real-PR fixture's optional `meta.json`. */
@@ -103,6 +119,33 @@ export interface FixtureSample {
   durationMs: number;
   /** Any error during the run; null when clean. */
   error: string | null;
+  /**
+   * Whether the sample's spend was measured. Harness samples report
+   * `metadata.costUsd` (the catalog prices them); a harness throw after
+   * spend reports $0, so this does not fail closed for the reference.
+   * OpenCode samples: when no `opencode run` was spawned (fixture build
+   * failure, empty scope, MCP warmup failure) the spend is a known $0.
+   * Otherwise measured only when the session usage was read AND
+   * (`costUsd > 0` or all token counts are 0 — no model work, so no
+   * spend). A free or unpriced model that did work is unmeasured and
+   * fails closed.
+   */
+  costMeasured: boolean;
+  /** Binary sections excluded from the fixture repo (`git apply` cannot reverse them). */
+  excludedBinary?: number;
+  /**
+   * The tree the sample reviewed: `archive <repo>@<commit>` (OpenCode),
+   * `worktree <repo>@<commit>` (harness), or `sparse (<reason>)`. `<repo>`
+   * is the logical name from `meta.json`, never a local path.
+   */
+  treeSource?: string;
+  /**
+   * OpenCode samples that reached the driver: the requested model
+   * (`<providerID>/<id>#<variant>`).
+   */
+  requestedModel?: string;
+  /** OpenCode samples: the model the session reports (`usage.model`, same form). */
+  sessionModel?: string;
 }
 
 export interface EvalCommentSummary {
@@ -182,3 +225,15 @@ export interface ThresholdVerdict {
   /** Human-readable summary of every criterion's pass/fail with the numbers. */
   details: string[];
 }
+
+/**
+ * Why an eval run stopped before every sample ran: the `--max-cost`
+ * ceiling, or a sample whose spend was not measured (fail closed).
+ */
+export type StopReason = "cost-ceiling" | "unmeasured-spend";
+
+/**
+ * Verdict from `checkParity()`. Same shape as `ThresholdVerdict` plus the
+ * compared config names.
+ */
+export type ParityVerdict = ThresholdVerdict & { reference: string; candidate: string };

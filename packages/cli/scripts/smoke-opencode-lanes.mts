@@ -26,14 +26,17 @@ import {
   buildMcpConfigContent,
   buildOpencodeCommand,
   buildOpencodeServeCommand,
+  driveOpencodeLane,
   evaluateLane,
   parseLaneEvents,
   parseMcpServers,
+  parseSessionUsage,
   resolveLoaderFlags,
   resolveWardenMcpCommand,
   waitForWardenMcp,
   wardenMcpReadiness,
 } from "../src/opencode/drive.js";
+import { isOpencodeCostMeasured } from "./eval/score.mjs";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TMP_ROOT = mkdtempSync(resolve(tmpdir(), "warden-opencode-lanes-"));
@@ -722,6 +725,19 @@ try {
       (wardenServer as Record<string, unknown>)["cwd"] === "/tmp/r",
     "config content carries the full server object (host replaces the whole mcp key)",
   );
+  assert(!("provider" in content), "config content has no provider key without a base URL");
+  const gatewayContent = JSON.parse(
+    buildMcpConfigContent({
+      command: ["node", "x", "mcp"],
+      cwd: "/tmp/r",
+      anthropicBaseUrl: "https://gw.example/anthropic/v1",
+    }),
+  ) as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
+  assert(
+    gatewayContent["provider"]?.["anthropic"]?.["options"]?.["baseURL"] ===
+      "https://gw.example/anthropic/v1" && gatewayContent["mcp"] !== undefined,
+    "config content forwards ANTHROPIC_BASE_URL as provider.anthropic.options.baseURL",
+  );
   const mcpCommand = resolveWardenMcpCommand();
   assert(mcpCommand[mcpCommand.length - 1] === "mcp", "warden MCP command ends with the mcp verb");
   assert(mcpCommand[0] === process.execPath, "warden MCP command launches this exact node");
@@ -868,10 +884,32 @@ if (argv[0] === "serve") {
   const mode = process.env.WARDEN_SMOKE_SERVE_MODE ?? "connected";
   const server = createServer((req, res) => {
     const u = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (u.pathname !== "/api/mcp") { res.writeHead(404); res.end(); return; }
-    if (req.headers.authorization !== ("Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_PASSWORD ?? ""), "utf8").toString("base64"))) {
-      res.writeHead(401); res.end(JSON.stringify({ message: "Authentication required" })); return;
+    const checkAuth = () => {
+      if (req.headers.authorization !== ("Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_PASSWORD ?? ""), "utf8").toString("base64"))) {
+        res.writeHead(401); res.end(JSON.stringify({ message: "Authentication required" })); return false;
+      }
+      return true;
+    };
+    const sessMatch = u.pathname.match(/^\\/api\\/session\\/(.+)$/);
+    if (sessMatch) {
+      if (!checkAuth()) return;
+      const dir = u.searchParams.get("location[directory]");
+      if (!dir) fail("session poll must send location[directory]");
+      if (process.env.WARDEN_SMOKE_SESSION_MODE === "404") {
+        res.writeHead(404); res.end(); return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: {
+        id: decodeURIComponent(sessMatch[1] ?? ""),
+        model: { id: "fake-model", providerID: "fake-provider", variant: "high" },
+        cost: 0.0123,
+        tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 30 } },
+        outcome: "succeeded",
+      } }));
+      return;
     }
+    if (u.pathname !== "/api/mcp") { res.writeHead(404); res.end(); return; }
+    if (!checkAuth()) return;
     const dir = u.searchParams.get("location[directory]");
     if (!dir) fail("poll must send location[directory]");
     const data =
@@ -1045,6 +1083,93 @@ if (mode === "runfail") {
       lanesOut.lanes[0]?.status === "ok",
     "--lanes-out carries the down/ok envelope for replay",
   );
+  // The fake serve answers the session route with a fixed usage; the
+  // lane-trace entry carries it as a cost suffix.
+  assert(
+    okSet?.metadata.degradedWorkers.some(
+      (d) =>
+        d.topic === "lane-trace" &&
+        d.message.includes("cost $0.0123") &&
+        d.message.includes("tokens 150/50"),
+    ) === true,
+    "lane-trace entry carries the session cost (150 in / 50 out)",
+  );
+  // parseSessionUsage validates the same shape the fake serve sends.
+  const smokeUsage = parseSessionUsage({
+    data: {
+      id: "s",
+      model: { id: "fake-model", providerID: "fake-provider", variant: "high" },
+      cost: 0.0123,
+      tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 30 } },
+      outcome: "succeeded",
+    },
+  });
+  assert(
+    smokeUsage !== undefined &&
+      smokeUsage.costUsd === 0.0123 &&
+      smokeUsage.model === "fake-provider/fake-model#high",
+    "parseSessionUsage reads the fake serve shape",
+  );
+
+  // (a2) the returning core publishes the same CommentSet the wrapper
+  // prints (minus wall-clock duration), plus the session usage.
+  process.env.WARDEN_SMOKE_FINDING = JSON.stringify(inScopeFinding);
+  process.env.WARDEN_SMOKE_SERVE_PORT = resolve(TMP_ROOT, "fake-serve-port-core");
+  delete process.env.WARDEN_SMOKE_MODE;
+  delete process.env.WARDEN_SMOKE_SESSION_MODE;
+  const driven = await driveOpencodeLane({
+    repoRoot: REPO,
+    baseRef: "HEAD~1",
+    opencodeBin: fakePath,
+  });
+  delete process.env.WARDEN_SMOKE_FINDING;
+  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  // Key order differs across the CLI JSON round-trip, so canonicalize
+  // (sorted keys) before comparing.
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (typeof value === "object" && value !== null) {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+      );
+    }
+    return value;
+  };
+  const normalize = (set: CommentSet): string =>
+    JSON.stringify(canonical({ ...set, metadata: { ...set.metadata, durationMs: 0 } }));
+  assert(
+    okSet !== undefined && normalize(driven.result) === normalize(okSet),
+    "driveOpencodeLane returns the CommentSet the wrapper prints",
+  );
+  assert(driven.usage?.costUsd === 0.0123, "driveOpencodeLane returns the session usage");
+  assert(
+    driven.lanes[0]?.status === "ok" &&
+      driven.result.metadata.degradedWorkers.some(
+        (d) => d.topic === "lane-trace" && d.message.includes("cost $0.0123"),
+      ),
+    "core result carries the cost-suffixed lane-trace entry",
+  );
+
+  // (a3) the session route 404s: the lane still publishes, trace has no cost.
+  const noUsage = runDriver(["--base", "HEAD~1", "--json"], { WARDEN_SMOKE_SESSION_MODE: "404" });
+  const noUsageSet = parseOut(noUsage.out);
+  assert(noUsage.exit === 0, `session 404 still exits 0 (got ${noUsage.exit})`);
+  assert(
+    noUsageSet?.comments.some((c) => c.claim === inScopeFinding.claim) === true,
+    "session 404 still publishes the comment",
+  );
+  assert(
+    noUsageSet?.metadata.degradedWorkers.some(
+      (d) =>
+        d.topic === "lane-trace" &&
+        d.message.includes("warden_run_det_priors") &&
+        !d.message.includes("cost $"),
+    ) === true,
+    "session 404 leaves the lane-trace entry without a cost suffix",
+  );
+  await assertServeDead("session 404");
 
   // (b) warden never connects: lane failed, run never spawned, serve killed.
   const runMarkerB = resolve(TMP_ROOT, "run-invoked-b");
@@ -1072,6 +1197,43 @@ if (mode === "runfail") {
   }
   assert(!runHitB, "unconnected MCP never spawns run");
   await assertServeDead("unconnected MCP");
+
+  // (b2) MCP warmup failure through the returning core: no run spawned,
+  // so the eval scores a known $0 measured sample and the run continues.
+  process.env.WARDEN_SMOKE_SERVE_MODE = "failed";
+  process.env.WARDEN_SMOKE_SERVE_PORT = resolve(TMP_ROOT, "fake-serve-port");
+  const warmupFailed = await driveOpencodeLane({
+    repoRoot: REPO,
+    baseRef: "HEAD~1",
+    opencodeBin: fakePath,
+    mcpTimeoutSecs: 2,
+  });
+  delete process.env.WARDEN_SMOKE_SERVE_MODE;
+  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  assert(
+    warmupFailed.runSpawned === false &&
+      warmupFailed.usage === undefined &&
+      warmupFailed.lanes[0]?.status === "failed",
+    "MCP warmup failure → failed lane, runSpawned false, no usage",
+  );
+  assert(
+    isOpencodeCostMeasured(warmupFailed.runSpawned, warmupFailed.usage),
+    "MCP warmup failure → measured $0 (the eval run continues)",
+  );
+  assert(
+    driven.runSpawned === true && isOpencodeCostMeasured(driven.runSpawned, driven.usage),
+    "spawned run with a priced session usage → measured",
+  );
+  assert(
+    driven.model === DOWN_LANE_SPEC.defaultModel &&
+      warmupFailed.model === DOWN_LANE_SPEC.defaultModel,
+    "the returning core reports the resolved requested model (the driver default) on every path",
+  );
+  assert(
+    !isOpencodeCostMeasured(true, undefined),
+    "spawned run with no session usage → unmeasured (stops the run)",
+  );
+  await assertServeDead("MCP warmup failure (core)");
 
   // (c) warden failed status: lane failed with the server error in the reason.
   const failedMcp = runDriver(["--base", "HEAD~1", "--json", "--mcp-timeout", "2"], {

@@ -170,3 +170,29 @@ export const ALL_CONFIGS: EvalConfig[] = [
   reasonedAssertions,
   diligent,
 ];
+
+/**
+ * Slice #43: the OpenCode down lane as an eval candidate. Kept out of
+ * `ALL_CONFIGS` on purpose — a bare `pnpm eval` must not start paying
+ * for OpenCode runs. Reach it via `--parity <reference> opencode-down`
+ * (or `--config opencode-down`).
+ */
+export const opencodeDown: EvalConfig = {
+  name: "opencode-down",
+  description: "OpenCode down lane via driveOpencodeLane (same path as warden opencode-review).",
+  runtime: "opencode",
+};
+
+/**
+ * The same down lane (prompt, warden MCP tools, post-pass) run by
+ * `claude -p` on the operator's Claude subscription, so a tracer costs no
+ * API spend. Measures the method on another MCP client; it does not stand
+ * in for the OpenCode go/no-go.
+ */
+export const claudeCodeDown: EvalConfig = {
+  name: "claude-code-down",
+  description: "Down lane via claude -p (subscription login), same prompt, tools, and post-pass.",
+  runtime: "claude-code",
+};
+
+export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown];
