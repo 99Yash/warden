@@ -29,16 +29,30 @@ Gate decision (three samples, the only run that can grant a GO):
 pnpm --filter @warden/cli eval:parity --samples 3 --max-cost <usd>
 ```
 
-Usage errors exit 2 before any preflight or spend: an unknown config name
-in `--config`, `--compare`, or `--parity`; the same name twice in
-`--parity`; `--parity` with `--config`; and a `--max-cost` value that is
-missing, negative, or not a number.
+Usage errors exit 2 before any preflight or spend: an unknown flag or a
+stray argument (`--maxcost 0`); a flag whose value is missing or starts
+with `--` (`--samples --max-cost 0`); an unknown config name in
+`--config`, `--compare`, or `--parity`; the same name twice in
+`--parity`; `--parity` with `--config` or `--compare`; a `--parity`
+reference that is an OpenCode config or a candidate that is not one (the
+roles reversed); a `--max-cost` value that is negative or not a number;
+and a `--samples` value that is not an integer ≥ 1. A typo therefore
+cannot silently restore the default ceiling.
 
 `eval:parity` is `eval --parity programmatic-dispatch-multi opencode-down`:
 the reference is the production default harness config, the candidate is
 the driven lane. A bare `pnpm eval` never touches the OpenCode runtime —
 `opencode-down` lives in `OPENCODE_CONFIGS`, not `ALL_CONFIGS`, so a bare
 run cannot start paying for OpenCode sessions.
+
+### Operator notes
+
+- No zero-cost live tracer exists. OpenCode v2.0.25 rejects the free
+  model `opencode/muse-spark-1.3-contributor-free` on the driven
+  `run --server` path with "OpenCode's free tier can only be used from
+  within OpenCode". Each such sample is a measured $0 failed lane, so P6
+  fails on every sample. Do not plan a free-model tracer; budget a paid
+  one.
 
 ## How a fixture becomes a two-commit repo
 
@@ -61,28 +75,38 @@ line moves.
 
 The scorecard records the tree each sample reviewed, per fixture and per
 config: `archive <repo>@<commit>` (candidate), `worktree <repo>@<commit>`
-(reference), or `sparse (<reason>)`. It also records the requested
-candidate model and the model the OpenCode session reports.
+(reference), or `sparse (<reason>)`. `<repo>` is the logical name from
+the fixture's `meta.json` (for example `alfred@<sha>`), never a local
+path, so a committed scorecard holds no machine paths. It also records
+the requested candidate model and the model the OpenCode session
+reports, both as `<providerID>/<id>#<variant>`.
 
 ## The parity table
 
 | Criterion | Rule | Why |
 | --- | --- | --- |
-| P0 same fixtures | both aggregates cover the same fixture-name set, and every row of both has the requested sample count | otherwise the comparison is meaningless; a stopped run leaves a short row |
-| P1 real-PR recall | `candidate.realCaught ≥ reference.realCaught` | the lane must not lose real bugs |
-| P2 synthetic recall | `candidate.syntheticCaught ≥ reference.syntheticCaught` | the lane must not lose plants |
+| P0 same fixtures | a reference ran; both aggregates cover the same fixture-name set; every row of both has the requested sample count; and each fixture has the same tree kind in both configs (`archive X@c` and `worktree X@c` are the same real tree, else `sparse`) | otherwise the comparison is meaningless; a stopped run leaves a short row, and a reference `worktree add` failure reviews a sparse tree against the candidate's real tree |
+| P1 real-PR recall | `candidate.realCaught ≥ reference.realCaught`; prints "no reference" (not a PASS) when the reference never ran | the lane must not lose real bugs |
+| P2 synthetic recall | `candidate.syntheticCaught ≥ reference.syntheticCaught`; prints "no reference" (not a PASS) when the reference never ran | the lane must not lose plants |
 | P3 precision traps | `candidate.falsePositiveTrapHits === 0` | known traps must not reappear |
 | P4 clean zero-hit | every sample of every clean candidate row has `unlabeledComments === 0` | clean fixtures stay clean in every sample, not only in the median |
 | P5 cost | criterion (d) passes AND every candidate sample has `costMeasured: true` | the ceiling cannot bound unmeasured spend |
-| P6 lane health | every sample of every candidate row (clean rows included) has `dispatchCount ≥ 1` and `error === null` | the lane ran on every sample; a failed lane on a clean fixture publishes `comments: []` and must not score as clean |
-| P7 reference health | no reference sample has an `error`, and every substantive reference row has `medianDispatches ≥ 1` | a failed reference makes P1/P2 vacuous |
-| P8 gate run | `samples ≥ 3`, no `--fixture`/`--fixture-regex`, and not `stoppedAtCostCeiling` | a tracer (N<3, filtered, or stopped) is evidence, not a gate |
+| P6 lane health | at least one candidate sample ran, and every sample of every candidate row (clean rows included) has `dispatchCount ≥ 1`, `error === null`, and a session model equal to the requested model when the session reports one (exact string, both `<providerID>/<id>#<variant>`) | the lane ran on every sample with the requested model and variant; a failed lane on a clean fixture publishes `comments: []` and must not score as clean; an absent session model is P5's concern |
+| P7 reference health | a reference ran, no reference sample has an `error`, and every substantive reference row has `medianDispatches ≥ 1` | a failed or absent reference makes P1/P2 vacuous |
+| P8 gate run | `samples ≥ 3`, no `--fixture`/`--fixture-regex`, and `stopReason` is `null`; the detail line names the stop reason (`cost-ceiling` or `unmeasured-spend`) | a tracer (N<3, filtered, or stopped) is evidence, not a gate |
 
 Ties pass (parity, not superiority). P3, P4, and P6 use any-sample
 semantics: one bad sample in three fails. A tracer always reads
 `NOT MET (… P8-gate-run)`, while P0–P7 still report their own PASS/FAIL —
-that is the tracer evidence. The `PARITY:` line, the `.md`, and the
-`.json` all come from one verdict. `checkThreshold` criteria (a)–(f)
+that is the tracer evidence. This is also true for a stopped run. The
+candidate runs first, so when the run stops in the candidate (the
+ceiling, or unmeasured spend), the reference never runs: P0 and P7
+fail, P1 and P2 print "no reference", P3–P6 report on the candidate
+samples that ran, and P8 names the stop reason. A run that stops before
+the first candidate sample also fails P6 (no lane ran). To get P1/P2
+evidence, the tracer's `--max-cost` must cover both configs.
+`checkParity` is the one verdict owner: the `PARITY:` line, the `.md`,
+and the `.json` all come from its verdict. `checkThreshold` criteria (a)–(f)
 are unchanged. For the candidate, `dispatchCount` is 1 when the lane
 envelope's status is `ok`, else 0 — criterion (e) reads "the lane ran".
 
@@ -98,10 +122,12 @@ after the list):
   unknown, the harness cost is known. The ceiling is checked before each
   sample, so a run can exceed it by at most one sample's cost. When it is
   reached, the run stops launching samples, still scores and writes what
-  ran, marks the scorecard `stoppedAtCostCeiling: true`, and exits 1.
+  ran, marks the scorecard `stopReason: "cost-ceiling"`, and exits 1.
 - Unmeasured spend stops the run at once: a sample with
   `costMeasured: false` names the sample and stops, because the ceiling
-  cannot bound spend it never saw. A candidate sample is measured when no
+  cannot bound spend it never saw. The scorecard then reads
+  `stopReason: "unmeasured-spend"`: the remedy is to fix the usage read,
+  not to raise `--max-cost`. A candidate sample is measured when no
   `opencode run` was spawned (a fixture build failure, an empty scope, or
   an MCP warmup failure: a known $0 — the sample keeps its error, P6 fails
   on it, and the run continues), or when the session usage was read and
