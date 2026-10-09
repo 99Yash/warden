@@ -61,7 +61,7 @@ agent rules are appended after global rules so they win:
 | --- | --- |
 | deny `*` / `*` | Closed by default; a `deny *` also removes the tool from the model's view. |
 | allow `read` | Read changed files and their context. |
-| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — an ask interrupts the run. Residuals: the guard covers `read` only — `grep` with an explicit `.env` path is not guarded (the host permission resource is the pattern); `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
+| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the guard covers `read` only — `grep` with an explicit `.env` path is not guarded (the host permission resource is the pattern); `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
 | allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
 | allow `grep` | Trace symbols to callers (the `grepRepo` role in method docs). |
 | allow `glob` | Locate files by pattern. |
@@ -72,9 +72,11 @@ No `shell` (`git diff --output=` can write, so shell stays denied — the
 diff arrives through `warden_run_det_priors`), no `edit` (the lane never
 writes), no `webfetch`/`websearch` (claims must be repo- or `.d.ts`
 grounded), no `subagent` (one agent-sized unit of work), no `*` allow.
-Without `--auto`, any `ask` (no matching rule) is rejected and the session
-is interrupted — so the driver never passes `--auto`: the run then exits
-0, but the interrupted final message has no submission, so the lane fails.
+Without `--auto`, the run client rejects an ask and tells the model to
+continue without the action — the action does not run, and the lane
+continues (verified against the shipped binary v2.0.25; the `v2` source
+checkout interrupts the session instead — trust the binary). So the
+driver never passes `--auto`: `--auto` replies `once` (allow).
 
 ## Model tier and `--model`
 
@@ -177,7 +179,12 @@ acceptable for a correctness lane, which needs the code, not the customs.
 ## Submission contract
 
 The final assistant message ends with exactly one fenced ` ```json `
-block holding `{"findings":[...]}`; `[]` is a clean lane result. Each
+block holding `{"findings":[...]}`; `[]` is a clean lane result. The
+driver takes the final message to be the `messageID` of the last
+`step_start` event, and a stream with no trustworthy identity (a `text`
+part without a `messageID`, a `step_start` without one, a `text` part no
+`step_start` announced, or no `step_start` at all) fails the lane closed.
+Each
 finding validates against the schema in the prompt (no `id` — the
 post-pass mints it), needs ≥1 source whose `path` is a changed file with
 verbatim `path`/`line`/`snippet`, pairs any `node_modules/` authority
@@ -209,7 +216,10 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   killed on every path.
 - Lane `failed` reasons are specific: MCP not ready (never connects,
   failed status, poll rejected), non-zero exit (with the stderr tail),
-  timeout (default 900 s, child killed), error event, no fenced block,
+  timeout (default 900 s, child killed), error event, `text` part without
+  a `messageID`, `step_start` without a `messageID`, `text` from a message
+  with no `step_start` (final message identity unknown), no `step_start`
+  in the event stream, no fenced block, multiple fenced json submissions,
   invalid JSON, no `findings` array, or zero completed
   `warden_run_det_priors` calls. Only the zero-det-priors failure forwards
   parsed findings — the timeout, non-zero exit, and error-event paths fail
