@@ -28,6 +28,21 @@
           "effect": "allow"
         },
         {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
           "action": "warden_run_det_priors",
           "resource": "*",
           "effect": "allow"
