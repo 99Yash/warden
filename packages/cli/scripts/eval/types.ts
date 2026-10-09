@@ -21,8 +21,12 @@ export interface EvalConfig {
   name: string;
   description: string;
   bossLoop?: BossLoopConfig;
-  /** Eval runtime: absent means the in-process boss-loop harness. */
-  runtime?: "harness" | "opencode";
+  /**
+   * Eval runtime: absent means the in-process boss-loop harness.
+   * `claude-code` runs the OpenCode down lane's prompt and tools in
+   * `claude -p` on the operator's subscription login (eval-only).
+   */
+  runtime?: "harness" | "opencode" | "claude-code";
   /** OpenCode lane model override; absent means the driver default. */
   opencodeModel?: string;
 }

@@ -46,8 +46,13 @@ import {
   type ReviewHarnessInput,
 } from "@warden/core";
 import { configuredReviewLlmProviders, loadWardenRuntime, providerApiKey } from "@warden/env";
-import { driveOpencodeLane, type SessionUsage } from "../../src/opencode/drive.js";
-import { ALL_CONFIGS, OPENCODE_CONFIGS } from "./configs/index.js";
+import {
+  driveOpencodeLane,
+  type DriveLaneResult,
+  type SessionUsage,
+} from "../../src/opencode/drive.js";
+import { driveClaudeCodeLane } from "./claude-code-lane.mjs";
+import { ALL_CONFIGS, LANE_CONFIGS } from "./configs/index.js";
 import {
   buildFixtureRepo,
   cleanupMaterialized,
@@ -182,11 +187,11 @@ function resolveRepoPath(repo: string): string | null {
 
 /**
  * The one name resolver for `--config`, `--compare`, and `--parity`: each
- * name must resolve across `ALL_CONFIGS` and `OPENCODE_CONFIGS`, else a
+ * name must resolve across `ALL_CONFIGS` and `LANE_CONFIGS`, else a
  * usage error. A bare run (no names) still means `ALL_CONFIGS` only.
  */
 function resolveConfigNames(names: string[]): EvalConfig[] {
-  const catalog = [...ALL_CONFIGS, ...OPENCODE_CONFIGS];
+  const catalog = [...ALL_CONFIGS, ...LANE_CONFIGS];
   return names.map((name) => {
     const config = catalog.find((c) => c.name === name);
     if (!config)
@@ -206,17 +211,22 @@ function selectConfigs(args: Args): EvalConfig[] {
   if (args.parity) {
     const [reference, candidate] = resolveConfigNames(args.parity);
     if (!reference || !candidate) usageError("--parity needs two config names");
-    if (reference.runtime === "opencode") {
+    if (isLaneRuntime(reference)) {
       usageError(`--parity reference "${reference.name}" must be a harness config`);
     }
-    if (candidate.runtime !== "opencode") {
-      usageError(`--parity candidate "${candidate.name}" must be an OpenCode config`);
+    if (!isLaneRuntime(candidate)) {
+      usageError(`--parity candidate "${candidate.name}" must be a lane config`);
     }
     return [candidate, reference];
   }
   const compared = args.compare ? resolveConfigNames(args.compare) : undefined;
   if (args.configFilter !== undefined) return resolveConfigNames([args.configFilter]);
   return compared ?? ALL_CONFIGS;
+}
+
+/** A driven down-lane runtime (OpenCode or Claude Code), not the in-process harness. */
+function isLaneRuntime(config: EvalConfig): boolean {
+  return config.runtime === "opencode" || config.runtime === "claude-code";
 }
 
 function loadFixtures(filter: string | undefined, regex: RegExp | undefined): Fixture[] {
@@ -426,16 +436,32 @@ async function runOnce(
   config: EvalConfig,
   repoRoot: string,
 ): Promise<OnceResult> {
-  if (config.runtime === "opencode") return await runOnceOpencode(fixture, config);
+  if (config.runtime === "opencode") {
+    return await runOnceLane(fixture, (root, baseSha) =>
+      driveOpencodeLane({
+        repoRoot: root,
+        baseRef: baseSha,
+        ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
+      }),
+    );
+  }
+  if (config.runtime === "claude-code") {
+    return await runOnceLane(fixture, (root, baseSha) =>
+      driveClaudeCodeLane({ repoRoot: root, baseRef: baseSha }),
+    );
+  }
   return await runOnceHarness(fixture, config, repoRoot);
 }
 
 /**
- * Run the OpenCode down lane on a two-commit fixture repo through the
- * same driver code as `warden opencode-review`: the scored output is the
- * published `CommentSet` from `runPostPass`, not eval-only logic.
+ * Run a down-lane driver on a two-commit fixture repo. For OpenCode this
+ * is the same driver code as `warden opencode-review`: the scored output
+ * is the published `CommentSet` from `runPostPass`, not eval-only logic.
  */
-async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<OnceResult> {
+async function runOnceLane(
+  fixture: Fixture,
+  drive: (repoRoot: string, baseSha: string) => Promise<DriveLaneResult>,
+): Promise<OnceResult> {
   const startedAt = Date.now();
   const treeSource = fixture.realRepo
     ? `archive ${fixture.realRepo.repo}@${fixture.realRepo.commit}`
@@ -454,11 +480,7 @@ async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<On
     };
   }
   try {
-    const driven = await driveOpencodeLane({
-      repoRoot: repo.root,
-      baseRef: repo.baseSha,
-      ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
-    });
+    const driven = await drive(repo.root, repo.baseSha);
     // The empty-scope and warmup-failure paths publish a failed lane but
     // a `CommentSet`, so the sample error names the lane failure for P6.
     const failedLane = driven.lanes.find((l) => l.status !== "ok");
@@ -756,8 +778,9 @@ async function main(): Promise<void> {
 
   // Provider-key preflight runs only when a selected config is a harness
   // config. The OpenCode runtime needs no warden provider key.
-  const needsHarness = configs.some((c) => c.runtime !== "opencode");
+  const needsHarness = configs.some((c) => !isLaneRuntime(c));
   const needsOpencode = configs.some((c) => c.runtime === "opencode");
+  const needsClaude = configs.some((c) => c.runtime === "claude-code");
   if (needsHarness && configuredProviders.length === 0) {
     process.stdout.write(
       "[eval] no review LLM provider key set — skipping (set ANTHROPIC_API_KEY or OPENAI_API_KEY).\n",
@@ -771,6 +794,14 @@ async function main(): Promise<void> {
       execFileSync("opencode", ["--version"], { stdio: "ignore" });
     } catch {
       process.stdout.write("[eval] opencode binary not found — skipping (install opencode).\n");
+      process.exit(0);
+    }
+  }
+  if (needsClaude) {
+    try {
+      execFileSync("claude", ["--version"], { stdio: "ignore" });
+    } catch {
+      process.stdout.write("[eval] claude binary not found — skipping (install Claude Code).\n");
       process.exit(0);
     }
   }

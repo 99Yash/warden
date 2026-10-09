@@ -183,4 +183,16 @@ export const opencodeDown: EvalConfig = {
   runtime: "opencode",
 };
 
-export const OPENCODE_CONFIGS: EvalConfig[] = [opencodeDown];
+/**
+ * The same down lane (prompt, warden MCP tools, post-pass) run by
+ * `claude -p` on the operator's Claude subscription, so a tracer costs no
+ * API spend. Measures the method on another MCP client; it does not stand
+ * in for the OpenCode go/no-go.
+ */
+export const claudeCodeDown: EvalConfig = {
+  name: "claude-code-down",
+  description: "Down lane via claude -p (subscription login), same prompt, tools, and post-pass.",
+  runtime: "claude-code",
+};
+
+export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown];
