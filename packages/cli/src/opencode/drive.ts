@@ -49,6 +49,8 @@ export const MCP_SETTLE_MS = 1000;
 export const STDERR_TAIL_BYTES = 2048;
 /** Grace between SIGTERM and SIGKILL when stopping the serve child. */
 const SERVE_KILL_GRACE_MS = 2000;
+/** Rejection reason when the MCP wait stops because the serve child failed to start. */
+const MCP_WAIT_ABORTED = "MCP wait aborted: opencode serve failed to start";
 
 export interface OpencodeCommand {
   /** Binary to spawn (`opencode` on PATH, or a fake in the smoke). */
@@ -221,8 +223,10 @@ export interface ParsedLane {
   errors: string[];
   /**
    * Fail-closed stream defect, reported by `evaluateLane` before any
-   * submission parsing: a `text` part without a `messageID`, or no
-   * `step_start` at all (so the final message has no identity).
+   * submission parsing: a `text` part without a `messageID`, a `text`
+   * part whose ID no `step_start` announced (so the final message has no
+   * trustworthy identity), a `step_start` without a `messageID`, or no
+   * `step_start` at all.
    */
   parseError?: string;
 }
@@ -233,12 +237,18 @@ export function parseLaneEvents(stdout: string): ParsedLane {
   // `messageID` of the last `step_start` event (each step gets a new
   // assistant message ID — `core/src/session/runner/llm.ts` — and the wire
   // shape carries it on every part: `cli/src/run/noninteractive.ts`).
-  // Only `text` parts with that ID are kept, in any stream position, so an
-  // earlier draft block — or a late `reconcile()` re-emission of one — can
-  // never become the submission. A `text` part without an ID, or a stream
-  // with no `step_start`, fails closed via `parseError` instead of falling
-  // back to the whole stream.
+  // Only `text` parts with that ID are kept, in any stream position, so a
+  // late `reconcile()` re-emission of an earlier draft is ignored. But the
+  // recovery channel (`reconcile()`) re-emits missed `text` parts with
+  // their `messageID` and never emits `step_start` — after `session.wait`
+  // resolves the client drops every non-`session.execution.*` event, which
+  // includes the final step's `step_start`. So a `text` part whose ID no
+  // `step_start` announced fails closed via `parseError` instead of letting
+  // the previous step's draft become the submission. A `text` part without
+  // an ID, a `step_start` without an ID, or a stream with no `step_start`
+  // fails closed the same way.
   const textsById = new Map<string, string[]>();
+  const announcedStepIds = new Set<string>();
   let lastStepId: string | undefined;
   let parseError: string | undefined;
   const completedByTool = new Map<string, number>();
@@ -258,7 +268,12 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     if (record["type"] === "step_start") {
       const part = record["part"] as Record<string, unknown> | undefined;
       const id = part?.["messageID"];
-      if (typeof id === "string" && id !== "") lastStepId = id;
+      if (typeof id !== "string" || id === "") {
+        parseError ??= "step_start without messageID in the event stream";
+        continue;
+      }
+      announcedStepIds.add(id);
+      lastStepId = id;
     } else if (record["type"] === "text") {
       const part = record["part"] as Record<string, unknown> | undefined;
       const id = part?.["messageID"];
@@ -292,6 +307,14 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     completed: completedByTool.get(name) ?? 0,
   }));
   toolCalls.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  if (parseError === undefined) {
+    for (const id of textsById.keys()) {
+      if (!announcedStepIds.has(id)) {
+        parseError = "text from a message with no step_start (final message identity unknown)";
+        break;
+      }
+    }
+  }
   if (parseError === undefined && lastStepId === undefined) {
     parseError = "no step_start in the event stream";
   }
@@ -451,7 +474,7 @@ export async function waitForWardenMcp(opts: {
     // The serve child failed to start (the spawn-error race below): stop
     // the loop and its timers at once instead of waiting out the timeout.
     if (opts.signal?.aborted === true) {
-      throw new Error("MCP wait aborted: opencode serve failed to start");
+      throw new Error(MCP_WAIT_ABORTED);
     }
     let readiness: WardenMcpReadiness;
     try {
@@ -487,7 +510,7 @@ export async function waitForWardenMcp(opts: {
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolveP, rejectP) => {
     if (signal?.aborted === true) {
-      rejectP(new Error("MCP wait aborted: opencode serve failed to start"));
+      rejectP(new Error(MCP_WAIT_ABORTED));
       return;
     }
     const timer = setTimeout(() => {
@@ -496,7 +519,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }, ms);
     const onAbort = (): void => {
       clearTimeout(timer);
-      rejectP(new Error("MCP wait aborted: opencode serve failed to start"));
+      rejectP(new Error(MCP_WAIT_ABORTED));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });

@@ -216,7 +216,9 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
     // Secret guard (mirrors the built-in `explore` agent): agent rules are
     // appended after global rules and the last match wins, so a bare
     // `allow read *` would re-open `.env` files the host default and the
-    // user's global config deny. Deny (not ask) — an ask interrupts the run.
+    // user's global config deny. Deny (not ask): the host enforces a deny
+    // before any client reply, while an ask depends on the run client's
+    // reply, which is version-dependent.
     { action: "read", resource: "*.env", effect: "deny" },
     { action: "read", resource: "*.env.*", effect: "deny" },
     { action: "read", resource: "*.env.example", effect: "allow" },

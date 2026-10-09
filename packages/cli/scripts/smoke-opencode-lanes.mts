@@ -614,6 +614,73 @@ try {
     noStep.status === "failed" && (noStep.reason ?? "").includes("no step_start"),
     `stream with no step_start → failed (${noStep.reason ?? "no reason"})`,
   );
+  // The `finalizing` race (Q1/L1/N1): the final step's `step_start` is
+  // dropped and its text arrives via `reconcile()` with an unannounced ID.
+  // The previous step's draft must not become the submission — the lane
+  // fails closed instead of publishing a false clean.
+  const droppedFinalStepStart = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m-early"),
+        toolEvent("warden_run_det_priors", "completed", "m-early"),
+        stepEvent("m-draft"),
+        textEvent(submissionText([]), "m-draft"),
+        toolEvent("read", "completed", "m-draft"),
+        textEvent(submissionText([goodFinding]), "m-final"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    droppedFinalStepStart.status === "failed" &&
+      (droppedFinalStepStart.reason ?? "").includes("no step_start"),
+    `final step_start dropped → failed (${droppedFinalStepStart.reason ?? "no reason"})`,
+  );
+  // A `step_start` without a `messageID` cannot anchor an identity either.
+  const noIdStepStart = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m-draft"),
+        textEvent(submissionText([]), "m-draft"),
+        toolEvent("warden_run_det_priors", "completed", "m-draft"),
+        JSON.stringify({
+          type: "step_start",
+          timestamp: 1,
+          sessionID: "s",
+          part: { type: "step-start" },
+        }),
+        textEvent(submissionText([goodFinding]), "m-final"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    noIdStepStart.status === "failed" &&
+      ((noIdStepStart.reason ?? "").includes("no step_start") ||
+        (noIdStepStart.reason ?? "").includes("without messageID")),
+    `step_start without messageID → failed (${noIdStepStart.reason ?? "no reason"})`,
+  );
+  // P3 `ok` shape (locks the r2 deviation ruling): the real block is in
+  // the final message and the late reconciled draft carries an announced
+  // earlier ID, so the real finding is preserved, not lost.
+  const reconciledOk = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m-early"),
+        toolEvent("warden_run_det_priors", "completed", "m-early"),
+        textEvent(submissionText([]), "m-early"),
+        stepEvent("m-final"),
+        textEvent(submissionText([goodFinding]), "m-final"),
+        textEvent(submissionText([]), "m-early"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    reconciledOk.status === "ok" &&
+      JSON.stringify(reconciledOk.findings).includes('"claim":"smoke claim"'),
+    `real final block plus late reconciled earlier draft → ok with the real finding (${reconciledOk.reason ?? "no reason"})`,
+  );
 
   // ---------------------------------------------------------------------------
   // [6] command builder + MCP command — argv shape, loader resolution.
