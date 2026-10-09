@@ -28,6 +28,11 @@ performance, drift, or structure.
 2. Investigate with the read-only tools: `read`, `grep`, `glob`. Read the
    whole changed file, not just the hunk; trace changed symbols to their
    callers; follow called functions into their definitions.
+   - These tools trace code. Never `read` or `grep` `**/fixtures/**` (eval
+     fixtures), `**/*.patch` (diff fixtures), or root-level `*.md`
+     (`decisions.md`, `vision.md`, `CONTEXT.md`, `m*-plan.md`): method and
+     history, not the behavior under review, and hundreds of KB each. Pass
+     `path` or `include` to every `grep` so it cannot land in them.
 3. Call `warden_lookup_type_def` before asserting how any library API
    behaves. Copy `result.suggestedSource` verbatim into the finding's
    `sources[]` alongside the in-scope file source (see the submission
