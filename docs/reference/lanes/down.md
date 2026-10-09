@@ -20,8 +20,9 @@ performance, drift, or structure.
    `{request:{target:"base",base:"<the base the user message names>"}}`.
    Findings are paged — follow `nextOffset` with
    `{request:{target:"page",reviewHandle:"<handle>",offset:<n>}}` until the
-   tool reports no further pages. Do not repeat det-prior findings as your
-   own; they are already recorded.
+   tool reports no further pages. Do not restate det-prior findings as your
+   own; they belong to the surface lane (not yet shipped) and are not
+   published on this path.
 2. Investigate with the read-only tools: `read`, `grep`, `glob`. Read the
    whole changed file, not just the hunk; trace changed symbols to their
    callers; follow called functions into their definitions.

@@ -266,10 +266,11 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
 }
 
 /**
- * Slice #42: the lane scope envelope derivation, shared by the post-pass
- * (added-line anchoring) and the driver (the trusted `scope` it hands the
- * post-pass). Changed-file paths from the pruned diff — one helper so the
- * two can never disagree on what "in scope" means.
+ * Slice #42: the lane scope envelope derivation — the same prune derivation
+ * `runPostPass` uses for added-line anchoring (`runPostPass` re-derives it
+ * inline there because it also needs `parsed.length` and the degraded
+ * entries, so keep the two expressions in sync). The driver hands this
+ * trusted `scope` to the post-pass.
  */
 export function deriveLaneScope(diff: string): string[] {
   return pruneDiff(parseUnifiedDiff(diff)).pruned.map((file) => file.path);

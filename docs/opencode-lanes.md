@@ -61,6 +61,8 @@ agent rules are appended after global rules so they win:
 | --- | --- |
 | deny `*` / `*` | Closed by default; a `deny *` also removes the tool from the model's view. |
 | allow `read` | Read changed files and their context. |
+| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — an ask interrupts the run. |
+| allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
 | allow `grep` | Trace symbols to callers (the `grepRepo` role in method docs). |
 | allow `glob` | Locate files by pattern. |
 | allow `warden_run_det_priors` | Phase-1 ground truth; the driver fails the lane on zero completed calls. |
@@ -97,10 +99,11 @@ the driver's zero-call gate both depend on those exact names
 The shipped binaries (v2.0.24, v2.0.25) do not wait for MCP servers
 before the session tool snapshot: `SessionContext.select` awaits only the
 plugin flush, not the MCP flush, and `MCP.tools()` returns connected tools
-at once without a readiness wait (binary evidence: `"SessionContext.select"`
-in `/tmp/slice42-probe/oc25.strings` line ~183319; the `v2` source checkout
-still has both waits, so the source does not match the binary here — trust
-the binary). A server that connects late fires `mcp.tools.changed` and its
+at once without a readiness wait (OpenCode source: the `mcp.tools.changed`
+debounces in `state.ts:42`, the per-step tool snapshot in
+`session/runner/llm.ts:164`; verified against the shipped binary v2.0.25 —
+the `v2` source checkout still has both waits, so the source does not
+match the binary here — trust the binary). A server that connects late fires `mcp.tools.changed` and its
 tools register after short debounces, so only a later step or a later run
 on a warm server sees them. Warden's MCP server (tsx) connects ~2.7–3 s
 after the server starts, after the first snapshot — so a cold
@@ -160,10 +163,9 @@ model reviews the wrong directory. The operator found this on 2026-10-08:
 the same tracer passed by hand from the repo root and failed through
 `pnpm warden`. `smoke:opencode-lanes` asserts that `PWD` matches the cwd.
 
-## `--standalone` + project config (superseded)
+## Project config lockout
 
-The `--standalone` paragraph below describes the pre-amendment driver and
-is kept for history only. The current driver spawns `opencode serve` with
+The driver spawns `opencode serve` with
 `OPENCODE_CONFIG=<absolute opencode.json>` and
 `OPENCODE_DISABLE_PROJECT_CONFIG=1`: a private server that inherits the
 driver's env, and the reviewed tree cannot re-grant permissions, add
@@ -182,6 +184,10 @@ verbatim `path`/`line`/`snippet`, pairs any `node_modules/` authority
 source with an in-scope companion, uses `kind: "question"` below 0.7
 confidence, and reports only **broken** and high-risk **unproven** down
 conclusions.
+
+Residual: det-prior findings are not published on the driven path — they
+belong to the surface lane, which is not shipped yet, and the charter
+tells the down lane not to restate them.
 
 ## Driver flags and exit codes
 
@@ -205,9 +211,10 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   failed status, poll rejected), non-zero exit (with the stderr tail),
   timeout (default 900 s, child killed), error event, no fenced block,
   invalid JSON, no `findings` array, or zero completed
-  `warden_run_det_priors` calls. A failed lane still forwards parsed
-  findings; `--lanes-out` writes the envelope for audit / replay through
-  `warden post-pass`.
+  `warden_run_det_priors` calls. Only the zero-det-priors failure forwards
+  parsed findings — the timeout, non-zero exit, and error-event paths fail
+  before parsing and forward `findings: []`. `--lanes-out` writes the
+  envelope for audit / replay through `warden post-pass`.
 - Output matches `warden post-pass` exactly; exit 1 when
   `isNotClean(result)` (actionable `lane-health` / `diff-source`).
 - An extra `info` entry, topic `lane-trace`, records the tool-call counts

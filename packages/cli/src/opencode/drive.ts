@@ -37,9 +37,12 @@ export const DEFAULT_MCP_TIMEOUT_SECS = 30;
 export const MCP_POLL_INTERVAL_MS = 500;
 /**
  * Settle delay after `connected` before spawning `run`: a late server fires
- * `mcp.tools.changed` and the tools register after short debounces, so the
- * session snapshot of an immediate run still misses them (operator
- * amendment 2026-10-08; `mcp.tools.changed` is visible in oc25.strings).
+ * `mcp.tools.changed` and the tools register after short debounces
+ * (`state.ts:42`), while each step re-runs the tool snapshot
+ * (`session/runner/llm.ts:164`) — so the snapshot of an immediate run
+ * still misses them (verified against the shipped binary v2.0.25; the
+ * `v2` source checkout still waits, so the source does not match the
+ * binary here — trust the binary).
  */
 export const MCP_SETTLE_MS = 1000;
 /** Bounded stderr tail kept for failed-lane diagnostics. */
