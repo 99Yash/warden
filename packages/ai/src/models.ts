@@ -38,20 +38,29 @@ export interface ResolvedLlmModel {
   providerOptions?: LlmProviderOptions;
 }
 
-const ANTHROPIC_OPUS_4_8 = {
+// Model choice is a cost decision: re-check models.dev prices when a new
+// model ships. 2026-10-09: Opus 5.5 ($4/$20) and Sonnet 5.5 ($2/$10) are
+// cheaper than Opus 4.8 ($5/$25) and Sonnet 4.6 ($3/$15). `high` effort
+// matches the OpenCode lane's `anthropic/claude-opus-5-5#high`.
+const ANTHROPIC_OPUS_5_5 = {
   provider: "anthropic",
-  modelId: "claude-opus-4-8",
-  label: "claude-opus-4-8",
-  fallbackPricePerMillionTokens: { input: 5, output: 25, cachedInput: 0.5 },
+  modelId: "claude-opus-5-5",
+  label: "claude-opus-5-5 high",
+  fallbackPricePerMillionTokens: { input: 4, output: 20, cachedInput: 0.2 },
+  providerOptions: { anthropic: { effort: "high" } },
 } satisfies ResolvedLlmModel;
 
-const ANTHROPIC_SONNET_4_6 = {
+const ANTHROPIC_SONNET_5_5 = {
   provider: "anthropic",
-  modelId: "claude-sonnet-4-6",
-  label: "claude-sonnet-4-6",
-  fallbackPricePerMillionTokens: { input: 3, output: 15, cachedInput: 0.3 },
+  modelId: "claude-sonnet-5-5",
+  label: "claude-sonnet-5-5 high",
+  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1 },
+  providerOptions: { anthropic: { effort: "high" } },
 } satisfies ResolvedLlmModel;
 
+// Haiku 5.5 ($0.1/$0.5) is cheaper, but Cloudflare AI Gateway Unified
+// Billing does not serve it yet (2026-10-09: the gateway forwards the call
+// with no key). Keep Haiku 4.5 until it does.
 const ANTHROPIC_HAIKU_4_5 = {
   provider: "anthropic",
   modelId: "claude-haiku-4-5-20251001",
@@ -74,27 +83,30 @@ const ANTHROPIC_HAIKU_4_5 = {
 // `project_warden_boss_structured_output`; the `z.url()` → `format:"uri"`
 // fix lives in `SourceSchema` itself. Anthropic ignores `openai` provider
 // options, so this is a no-op on that path.
-const OPENAI_GPT_5_5 = {
+//
+// 2026-10-09 prices: GPT-6.1 Sol ($2/$10) replaces GPT-5.5 ($5/$30), and
+// GPT-6 Luna ($0.1/$0.5) replaces GPT-5.4 mini ($0.75/$4.5).
+const OPENAI_GPT_6_1_SOL = {
   provider: "openai",
-  modelId: "gpt-5.5",
-  label: "gpt-5.5 xhigh",
-  fallbackPricePerMillionTokens: { input: 5, output: 30, cachedInput: 0.5 },
-  providerOptions: { openai: { reasoningEffort: "xhigh", strictJsonSchema: false } },
+  modelId: "gpt-6.1-sol",
+  label: "gpt-6.1-sol high",
+  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1 },
+  providerOptions: { openai: { reasoningEffort: "high", strictJsonSchema: false } },
 } satisfies ResolvedLlmModel;
 
-const OPENAI_GPT_5_4_MINI = {
+const OPENAI_GPT_6_LUNA = {
   provider: "openai",
-  modelId: "gpt-5.4-mini",
-  label: "gpt-5.4-mini xhigh",
-  fallbackPricePerMillionTokens: { input: 0.75, output: 4.5, cachedInput: 0.075 },
-  providerOptions: { openai: { reasoningEffort: "xhigh", strictJsonSchema: false } },
+  modelId: "gpt-6-luna",
+  label: "gpt-6-luna high",
+  fallbackPricePerMillionTokens: { input: 0.1, output: 0.5, cachedInput: 0.01 },
+  providerOptions: { openai: { reasoningEffort: "high", strictJsonSchema: false } },
 } satisfies ResolvedLlmModel;
 
 /**
  * Boss model. Used by the M14 review harness as the single planning brain
  * across the `dispatch_worker` tool-use loop. Default role policy:
- * Anthropic key present -> Claude Opus 4.8 boss; otherwise OpenAI key
- * present -> GPT-5.5 boss. An explicit `routing.llm.primary` overrides this
+ * Anthropic key present -> Claude Opus 5.5 boss; otherwise OpenAI key
+ * present -> GPT-6.1 Sol boss. An explicit `routing.llm.primary` overrides this
  * (the pinned provider wins for every role when its key is configured).
  */
 export function getBossModel(): LanguageModel {
@@ -112,7 +124,7 @@ export function getApexModel(): LanguageModel {
 
 /**
  * Strong-tier worker model. By default OpenAI is preferred when configured
- * because GPT-5.4 mini is the intended cost/performance worker default, with
+ * because GPT-6 Luna is the intended cost/performance worker default, with
  * Anthropic Sonnet as the no-OpenAI fallback. An explicit `routing.llm.primary`
  * overrides this and pins workers to the chosen provider.
  */
@@ -122,7 +134,7 @@ export function getWorkerStrongModel(): LanguageModel {
 
 /**
  * Cheap-tier worker model for pattern-matching tasks. For now the OpenAI
- * default deliberately collapses strong/cheap workers onto GPT-5.4 mini;
+ * default deliberately collapses strong/cheap workers onto GPT-6 Luna;
  * a future CLI model policy can split this further once there are evals.
  */
 export function getWorkerCheapModel(): LanguageModel {
@@ -135,25 +147,25 @@ type ReviewLlmProvider = Extract<LlmProviderId, "anthropic" | "openai">;
 /** Per-provider model for each review role. */
 const PROVIDER_ROLE_MODELS: Record<ReviewLlmProvider, Record<ReviewRole, ResolvedLlmModel>> = {
   anthropic: {
-    boss: ANTHROPIC_OPUS_4_8,
-    apex: ANTHROPIC_OPUS_4_8,
-    workerStrong: ANTHROPIC_SONNET_4_6,
+    boss: ANTHROPIC_OPUS_5_5,
+    apex: ANTHROPIC_OPUS_5_5,
+    workerStrong: ANTHROPIC_SONNET_5_5,
     workerCheap: ANTHROPIC_HAIKU_4_5,
   },
   openai: {
-    boss: OPENAI_GPT_5_5,
-    apex: OPENAI_GPT_5_5,
-    // OpenAI deliberately collapses strong/cheap workers onto GPT-5.4 mini for
+    boss: OPENAI_GPT_6_1_SOL,
+    apex: OPENAI_GPT_6_1_SOL,
+    // OpenAI deliberately collapses strong/cheap workers onto GPT-6 Luna for
     // now; a future model policy can split this once there are evals.
-    workerStrong: OPENAI_GPT_5_4_MINI,
-    workerCheap: OPENAI_GPT_5_4_MINI,
+    workerStrong: OPENAI_GPT_6_LUNA,
+    workerCheap: OPENAI_GPT_6_LUNA,
   },
 };
 
 /**
  * Default provider preference per role when the user has not pinned
  * `routing.llm.primary`. Boss/apex favor Anthropic Opus for planning; workers
- * favor OpenAI GPT-5.4 mini for cost/performance. An explicit primary overrides
+ * favor OpenAI GPT-6 Luna for cost/performance. An explicit primary overrides
  * this for every role (see {@link roleProviderOrder}).
  */
 const ROLE_DEFAULT_PROVIDER_ORDER: Record<ReviewRole, readonly ReviewLlmProvider[]> = {
