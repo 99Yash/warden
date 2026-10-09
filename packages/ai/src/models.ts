@@ -86,12 +86,17 @@ const ANTHROPIC_HAIKU_4_5 = {
 //
 // 2026-10-09 prices: GPT-6.1 Sol ($2/$10) replaces GPT-5.5 ($5/$30), and
 // GPT-6 Luna ($0.1/$0.5) replaces GPT-5.4 mini ($0.75/$4.5).
+// `forceReasoning`: @ai-sdk/openai 3.0.72 knows reasoning models only by
+// the `o1`/`o3`/`o4-mini`/`gpt-5` prefixes, so without it the SDK drops
+// `reasoningEffort` for `gpt-6*` ("not supported for non-reasoning models").
 const OPENAI_GPT_6_1_SOL = {
   provider: "openai",
   modelId: "gpt-6.1-sol",
   label: "gpt-6.1-sol high",
   fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1 },
-  providerOptions: { openai: { reasoningEffort: "high", strictJsonSchema: false } },
+  providerOptions: {
+    openai: { reasoningEffort: "high", strictJsonSchema: false, forceReasoning: true },
+  },
 } satisfies ResolvedLlmModel;
 
 const OPENAI_GPT_6_LUNA = {
@@ -99,7 +104,9 @@ const OPENAI_GPT_6_LUNA = {
   modelId: "gpt-6-luna",
   label: "gpt-6-luna high",
   fallbackPricePerMillionTokens: { input: 0.1, output: 0.5, cachedInput: 0.01 },
-  providerOptions: { openai: { reasoningEffort: "high", strictJsonSchema: false } },
+  providerOptions: {
+    openai: { reasoningEffort: "high", strictJsonSchema: false, forceReasoning: true },
+  },
 } satisfies ResolvedLlmModel;
 
 /**
