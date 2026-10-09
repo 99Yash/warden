@@ -184,8 +184,7 @@ driver takes the final message to be the `messageID` of the last
 `step_start` event, and a stream with no trustworthy identity (a `text`
 part without a `messageID`, a `step_start` without one, a `text` part no
 `step_start` announced, or no `step_start` at all) fails the lane closed.
-Each
-finding validates against the schema in the prompt (no `id` — the
+Each finding validates against the schema in the prompt (no `id` — the
 post-pass mints it), needs ≥1 source whose `path` is a changed file with
 verbatim `path`/`line`/`snippet`, pairs any `node_modules/` authority
 source with an in-scope companion, uses `kind: "question"` below 0.7
