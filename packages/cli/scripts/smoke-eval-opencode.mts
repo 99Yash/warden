@@ -20,7 +20,8 @@
  *       each fail. P0/P7/P8 cover a short row, a failed reference, a
  *       filtered run, a stopped run, and N=1.
  *   (e) `parseSessionUsage`: the verified shape; missing `data`;
- *       non-number `cost`; missing `tokens.cache` → `undefined`.
+ *       non-number `cost`; negative `cost`; a `data.id` that is not the
+ *       requested ID; missing `tokens.cache` → `undefined`.
  *
  * Usage:
  *   pnpm --filter @warden/cli smoke:eval-opencode
@@ -526,6 +527,20 @@ process.stdout.write("\n(e) parseSessionUsage\n");
       },
     }) === undefined,
     `non-number cost → undefined`,
+  );
+  const okData = {
+    id: "ses_1",
+    cost: 0.5,
+    tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
+  assert(parseSessionUsage({ data: okData }, "ses_1") !== undefined, `matching data.id parses`);
+  assert(
+    parseSessionUsage({ data: okData }, "ses_2") === undefined,
+    `data.id not the requested ID → undefined`,
+  );
+  assert(
+    parseSessionUsage({ data: { ...okData, cost: -0.1 } }) === undefined,
+    `negative cost → undefined`,
   );
   assert(
     parseSessionUsage({ data: { cost: 0, tokens: { input: 0, output: 0, reasoning: 0 } } }) ===

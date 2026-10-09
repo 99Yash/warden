@@ -478,14 +478,17 @@ export function wardenMcpReadiness(servers: McpServerState[] | undefined): Warde
  * boundary. Shape (verified live against v2.0.25):
  * `{data:{id, model:{id,providerID,variant}, cost, tokens:{input, output,
  * reasoning, cache:{read,write}}, outcome}}`. Returns `undefined` when the
- * shape is wrong. `model` is `<providerID>/<id>` when present.
+ * shape is wrong, the cost is negative, or (when `expectedId` is given)
+ * `data.id` is not the requested session. `model` is `<providerID>/<id>`
+ * when present.
  */
-export function parseSessionUsage(body: unknown): SessionUsage | undefined {
+export function parseSessionUsage(body: unknown, expectedId?: string): SessionUsage | undefined {
   if (typeof body !== "object" || body === null) return undefined;
   const data = (body as Record<string, unknown>)["data"];
   if (typeof data !== "object" || data === null) return undefined;
   const d = data as Record<string, unknown>;
-  if (typeof d["cost"] !== "number") return undefined;
+  if (expectedId !== undefined && d["id"] !== expectedId) return undefined;
+  if (typeof d["cost"] !== "number" || d["cost"] < 0) return undefined;
   const tokens = d["tokens"];
   if (typeof tokens !== "object" || tokens === null) return undefined;
   const t = tokens as Record<string, unknown>;
@@ -541,7 +544,7 @@ export async function fetchSessionUsage(opts: {
       signal: AbortSignal.timeout(opts.timeoutMs),
     });
     if (!res.ok) return undefined;
-    return parseSessionUsage(await res.json());
+    return parseSessionUsage(await res.json(), opts.sessionId);
   } catch {
     return undefined;
   }
