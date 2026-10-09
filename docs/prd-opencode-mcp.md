@@ -224,7 +224,9 @@ not assert internal function calls or prompt text.
 - **Eval harness (reused).** Score the new runtime path through the existing
   review-eval suites: the `*-misses-*` fixtures for recall, the
   `*-falsepos-*` and clean fixtures for precision, with the config-comparison
-  and threshold-scorer machinery already present. This is the parity gate.
+  and threshold-scorer machinery already present. This is the parity gate —
+  see `docs/opencode-parity.md`, with scorecards under
+  `packages/cli/scripts/eval/results/opencode-parity/`.
 - **Smoke scripts (reused).** Add `smoke-*.mts` coverage for index
   export/import round-trip (including locked-model mismatch), det-priors bundle
   serialization and size bounding, and post-pass independence from the
