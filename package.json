@@ -13,7 +13,9 @@
     "db:migrate": "turbo run db:migrate --filter=@warden/db",
     "db:studio": "turbo run db:studio --filter=@warden/db",
     "gen-fixtures": "pnpm --filter @warden/web gen-fixtures",
-    "warden": "pnpm --filter @warden/cli warden"
+    "warden": "pnpm --filter @warden/cli warden",
+    "lanes:materialize": "pnpm --filter @warden/cli lanes:materialize",
+    "lanes:check": "pnpm --filter @warden/cli lanes:check"
   },
   "devDependencies": {
     "@types/node": "^22.13.11",

@@ -265,6 +265,29 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   };
 }
 
+/**
+ * Slice #42: the lane scope envelope derivation — the same prune derivation
+ * `runPostPass` uses for added-line anchoring (`runPostPass` re-derives it
+ * inline there because it also needs `parsed.length` and the degraded
+ * entries, so keep the two expressions in sync). The driver hands this
+ * trusted `scope` to the post-pass.
+ */
+export function deriveLaneScope(diff: string): string[] {
+  return pruneDiff(parseUnifiedDiff(diff)).pruned.map((file) => file.path);
+}
+
+/**
+ * Slice #42: the core-owned verdict predicate. True iff any `actionable`
+ * entry carries topic `lane-health` or `diff-source` — the no-findings
+ * contract: no lanes, every lane failed/unhealthy, or an empty diff is
+ * not a clean result.
+ */
+export function isNotClean(result: CommentSet): boolean {
+  return result.metadata.degradedWorkers.some(
+    (e) => e.kind === "actionable" && (e.topic === "lane-health" || e.topic === "diff-source"),
+  );
+}
+
 function resolveVolumeCap(volumeCap: number | undefined): number {
   const cap = volumeCap ?? DEFAULT_VOLUME_CAP;
   if (cap === Infinity) return cap;

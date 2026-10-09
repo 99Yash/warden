@@ -11,4 +11,9 @@ export default defineConfig({
   // `bin` is self-contained. Without this, dist/index.js imports from
   // ./src/index.ts of sibling packages at runtime, which Node can't load.
   noExternal: [/^@warden\//],
+  // The down-lane agent config ships as files, not strings: the driver
+  // resolves `opencode.json` relative to its own module (`src/opencode/`
+  // in dev, `dist/opencode/` here) and hands the absolute path to the
+  // OpenCode child via `OPENCODE_CONFIG`.
+  copy: [{ from: "opencode", to: "dist/opencode" }],
 });

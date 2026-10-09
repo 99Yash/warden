@@ -1,3 +1,3 @@
 {
-  "ignorePatterns": ["dist/**", "**/migrations/**"]
+  "ignorePatterns": ["dist/**", "**/migrations/**", "packages/cli/opencode/**"]
 }
