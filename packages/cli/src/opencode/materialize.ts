@@ -117,13 +117,22 @@ export function parseCharterIncludes(charter: string): LaneInclude[] {
 function parseCharterIncludesLined(
   charter: string,
 ): Array<{ include: LaneInclude; lineNo: number }> {
-  const fence = /```includes[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/m.exec(charter);
-  if (fence === null) {
+  const fences = [...charter.matchAll(/```includes[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm)];
+  if (fences.length === 0) {
     throw new Error(`materialize: no fenced includes list in ${CHARTER_PATH}`);
   }
+  const second = fences[1];
+  if (second !== undefined) {
+    const lineNo = charter.slice(0, second.index).split("\n").length;
+    throw new Error(
+      `materialize: ${CHARTER_PATH} line ${lineNo}: second includes fence (only one includes list is allowed)`,
+    );
+  }
+  const fence = fences[0] as RegExpMatchArray;
   const fenceLine = charter.slice(0, fence.index).split("\n").length;
-  const body = (fence[1] as string).split("\n");
+  const body = (fence[1] ?? "").split("\n");
   const includes: Array<{ include: LaneInclude; lineNo: number }> = [];
+  const seen = new Set<string>();
   body.forEach((line, index) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
@@ -136,6 +145,13 @@ function parseCharterIncludesLined(
         `materialize: ${CHARTER_PATH} line ${lineNo}: malformed includes entry "${trimmed}" (want "<path> :: <heading>")`,
       );
     }
+    const key = `${file} :: ${heading}`;
+    if (seen.has(key)) {
+      throw new Error(
+        `materialize: ${CHARTER_PATH} line ${lineNo}: duplicate includes entry "${trimmed}"`,
+      );
+    }
+    seen.add(key);
     includes.push({ include: { file, heading }, lineNo });
   });
   if (includes.length === 0) {
@@ -171,7 +187,10 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
       );
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      throw new Error(`materialize: ${CHARTER_PATH} line ${lineNo}: ${detail}`);
+      const succinct = detail.startsWith("materialize: ")
+        ? detail.slice("materialize: ".length)
+        : detail;
+      throw new Error(`materialize: ${CHARTER_PATH} line ${lineNo}: ${succinct}`);
     }
   });
   const schemaJson = JSON.stringify(z.toJSONSchema(LaneFindingSchema), null, 2);

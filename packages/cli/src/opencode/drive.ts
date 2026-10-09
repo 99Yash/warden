@@ -38,11 +38,11 @@ export const MCP_POLL_INTERVAL_MS = 500;
 /**
  * Settle delay after `connected` before spawning `run`: a late server fires
  * `mcp.tools.changed` and the tools register after short debounces
- * (`state.ts:42`), while each step re-runs the tool snapshot
- * (`session/runner/llm.ts:164`) — so the snapshot of an immediate run
- * still misses them (verified against the shipped binary v2.0.25; the
- * `v2` source checkout still waits, so the source does not match the
- * binary here — trust the binary).
+ * (`state.ts:42`) — so the first step's snapshot is taken before the
+ * registration lands, while each later step re-runs the tool snapshot
+ * (`session/runner/llm.ts:164`) and sees them (verified against the
+ * shipped binary v2.0.25; the `v2` source checkout still waits, so the
+ * source does not match the binary here — trust the binary).
  */
 export const MCP_SETTLE_MS = 1000;
 /** Bounded stderr tail kept for failed-lane diagnostics. */
@@ -211,19 +211,36 @@ export interface ToolCallCount {
 }
 
 export interface ParsedLane {
-  /** Assistant `text` parts of the last assistant message only, in stream order. */
+  /**
+   * Assistant `text` parts of the last assistant message only — the
+   * `messageID` of the last `step_start` event — in stream order. Empty
+   * when the stream is unusable; see `parseError`.
+   */
   texts: string[];
   toolCalls: ToolCallCount[];
   errors: string[];
+  /**
+   * Fail-closed stream defect, reported by `evaluateLane` before any
+   * submission parsing: a `text` part without a `messageID`, or no
+   * `step_start` at all (so the final message has no identity).
+   */
+  parseError?: string;
 }
 
 /** Parses `opencode run --format json` JSONL. Unknown lines are skipped — the stream is host-owned, not schema-bound. */
 export function parseLaneEvents(stdout: string): ParsedLane {
-  // Text parts are grouped by `part.messageID` (the wire shape carries it:
-  // `cli/src/run/noninteractive.ts` emits `messageID` on every text and
-  // tool part). Only the last assistant message is the submission — an
-  // earlier draft block, or a quoted example block, must never become it.
-  const groups: Array<{ id: string; texts: string[] }> = [];
+  // The submission is the last assistant message *by identity*: the
+  // `messageID` of the last `step_start` event (each step gets a new
+  // assistant message ID — `core/src/session/runner/llm.ts` — and the wire
+  // shape carries it on every part: `cli/src/run/noninteractive.ts`).
+  // Only `text` parts with that ID are kept, in any stream position, so an
+  // earlier draft block — or a late `reconcile()` re-emission of one — can
+  // never become the submission. A `text` part without an ID, or a stream
+  // with no `step_start`, fails closed via `parseError` instead of falling
+  // back to the whole stream.
+  const textsById = new Map<string, string[]>();
+  let lastStepId: string | undefined;
+  let parseError: string | undefined;
   const completedByTool = new Map<string, number>();
   const seenByTool = new Map<string, number>();
   const errors: string[] = [];
@@ -238,14 +255,22 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     }
     if (typeof event !== "object" || event === null) continue;
     const record = event as Record<string, unknown>;
-    if (record["type"] === "text") {
+    if (record["type"] === "step_start") {
       const part = record["part"] as Record<string, unknown> | undefined;
+      const id = part?.["messageID"];
+      if (typeof id === "string" && id !== "") lastStepId = id;
+    } else if (record["type"] === "text") {
+      const part = record["part"] as Record<string, unknown> | undefined;
+      const id = part?.["messageID"];
+      if (typeof id !== "string" || id === "") {
+        parseError ??= "text part without messageID in the event stream";
+        continue;
+      }
       const text = part?.["text"];
       if (typeof text !== "string" || text.trim() === "") continue;
-      const id = typeof part?.["messageID"] === "string" ? (part?.["messageID"] as string) : "";
-      const last = groups[groups.length - 1];
-      if (last !== undefined && last.id === id) last.texts.push(text);
-      else groups.push({ id, texts: [text] });
+      const list = textsById.get(id);
+      if (list !== undefined) list.push(text);
+      else textsById.set(id, [text]);
     } else if (record["type"] === "tool_use") {
       const part = record["part"] as Record<string, unknown> | undefined;
       // Wire shape is `part.tool` (verified against a live `--format json`
@@ -267,7 +292,12 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     completed: completedByTool.get(name) ?? 0,
   }));
   toolCalls.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  return { texts: groups[groups.length - 1]?.texts ?? [], toolCalls, errors };
+  if (parseError === undefined && lastStepId === undefined) {
+    parseError = "no step_start in the event stream";
+  }
+  const texts =
+    parseError !== undefined || lastStepId === undefined ? [] : (textsById.get(lastStepId) ?? []);
+  return { texts, toolCalls, errors, ...(parseError !== undefined ? { parseError } : {}) };
 }
 
 export interface LaneVerdict {
@@ -294,6 +324,7 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
     return fail(withTail(`opencode run exited ${process.exitCode}`, process.stderrTail));
   if (parsed.errors.length > 0)
     return fail(withTail(`opencode run error event: ${parsed.errors[0]}`, process.stderrTail));
+  if (parsed.parseError !== undefined) return fail(parsed.parseError);
   const text = parsed.texts.join("\n");
   const blocks = [...text.matchAll(/```json[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm)];
   if (blocks.length === 0) return fail("no fenced json submission in the final message");
@@ -406,6 +437,8 @@ export async function waitForWardenMcp(opts: {
   directory: string;
   timeoutMs: number;
   pollMs?: number;
+  /** Aborts the wait at once (the serve child failed to start). */
+  signal?: AbortSignal;
 }): Promise<void> {
   const pollMs = opts.pollMs ?? MCP_POLL_INTERVAL_MS;
   const deadline = Date.now() + opts.timeoutMs;
@@ -415,6 +448,11 @@ export async function waitForWardenMcp(opts: {
   const auth = `Basic ${Buffer.from(`opencode:${opts.password}`, "utf8").toString("base64")}`;
   let lastDetail = "no poll completed yet";
   for (;;) {
+    // The serve child failed to start (the spawn-error race below): stop
+    // the loop and its timers at once instead of waiting out the timeout.
+    if (opts.signal?.aborted === true) {
+      throw new Error("MCP wait aborted: opencode serve failed to start");
+    }
     let readiness: WardenMcpReadiness;
     try {
       // Bounded per request, so a hung response cannot outlive the wait.
@@ -442,12 +480,26 @@ export async function waitForWardenMcp(opts: {
       const secs = Math.round(opts.timeoutMs / 1000);
       throw new Error(`warden MCP server not connected within ${secs}s (last: ${lastDetail})`);
     }
-    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())), opts.signal);
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolveP) => setTimeout(resolveP, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolveP, rejectP) => {
+    if (signal?.aborted === true) {
+      rejectP(new Error("MCP wait aborted: opencode serve failed to start"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolveP();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      rejectP(new Error("MCP wait aborted: opencode serve failed to start"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export interface DriveOptions {
@@ -582,6 +634,9 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
     });
   });
   // A leaked `opencode serve` is a bug: the child dies on every path below.
+  // The abort stops a still-pending MCP wait at once (a spawn error would
+  // otherwise leave its loop and timers alive for the full MCP timeout).
+  const mcpAbort = new AbortController();
   try {
     try {
       await Promise.race([
@@ -590,6 +645,7 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
           password,
           directory: opts.repoRoot,
           timeoutMs: mcpTimeoutMs,
+          signal: mcpAbort.signal,
         }),
         serveSpawnFailed,
       ]);
@@ -614,6 +670,7 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
     const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
     await publishVerdict(processResult, opts, resolved, scope, verbose);
   } finally {
+    mcpAbort.abort();
     await killServe(serve);
   }
 }

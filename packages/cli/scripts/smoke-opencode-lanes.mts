@@ -7,7 +7,7 @@
  * Usage: pnpm --filter @warden/cli smoke:opencode-lanes
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,6 @@ import {
   parseMcpServers,
   resolveLoaderFlags,
   resolveWardenMcpCommand,
-  runOpencodeReview,
   waitForWardenMcp,
   wardenMcpReadiness,
 } from "../src/opencode/drive.js";
@@ -96,14 +95,27 @@ function textEvent(text: string, messageID?: string): string {
   });
 }
 
-function toolEvent(name: string, status = "completed"): string {
+function stepEvent(messageID: string): string {
+  return JSON.stringify({
+    type: "step_start",
+    timestamp: 1,
+    sessionID: "s",
+    part: {
+      type: "step-start",
+      messageID,
+    },
+  });
+}
+
+function toolEvent(name: string, status = "completed", messageID = "m"): string {
   // Real wire shape is `part.tool` (verified against a live `--format json`
-  // stream); the driver also tolerates `part.name`.
+  // stream); the driver also tolerates `part.name`. Every part carries the
+  // step's `messageID`.
   return JSON.stringify({
     type: "tool_use",
     timestamp: 1,
     sessionID: "s",
-    part: { type: "tool", id: "t1", tool: name, state: { status }, time: {} },
+    part: { type: "tool", id: "t1", tool: name, messageID, state: { status }, time: {} },
   });
 }
 
@@ -211,6 +223,36 @@ try {
     charterErr.includes("down.md") && charterErr.includes("## No such section"),
     `charter include of a missing section fails naming file + heading (${charterErr})`,
   );
+  // A second `includes` fence is rejected: two lists would be two homes for
+  // the same fact, and only the first would take effect.
+  let secondFenceErr = "";
+  try {
+    materializeLane(DOWN_LANE_SPEC, {
+      charter: `${input.charter}\n\`\`\`includes\n${firstFile} :: ${firstHeading}\n\`\`\`\n`,
+      sources: input.sources,
+    });
+  } catch (err) {
+    secondFenceErr = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    secondFenceErr.includes("second includes fence"),
+    `a second includes fence fails closed (${secondFenceErr})`,
+  );
+  // A duplicate entry ships the section twice, so it is rejected too.
+  const firstEntry = `${firstFile} :: ${firstHeading}`;
+  let duplicateErr = "";
+  try {
+    materializeLane(DOWN_LANE_SPEC, {
+      charter: input.charter.replace(firstEntry, `${firstEntry}\n${firstEntry}`),
+      sources: input.sources,
+    });
+  } catch (err) {
+    duplicateErr = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    duplicateErr.includes("duplicate includes entry"),
+    `a duplicate includes entry fails closed (${duplicateErr})`,
+  );
 
   // ---------------------------------------------------------------------------
   // [4] generated config — deny-first, read-only, codemode off, schema in prompt.
@@ -284,9 +326,10 @@ try {
   };
   const okEvents = parseLaneEvents(
     [
-      toolEvent("warden_run_det_priors"),
-      toolEvent("read"),
-      textEvent(submissionText([goodFinding])),
+      stepEvent("m-ok"),
+      toolEvent("warden_run_det_priors", "completed", "m-ok"),
+      toolEvent("read", "completed", "m-ok"),
+      textEvent(submissionText([goodFinding]), "m-ok"),
     ].join("\n"),
   );
   const okVerdict = evaluateLane(okEvents, { exitCode: 0, stdout: "", timedOut: false });
@@ -301,7 +344,8 @@ try {
   // merge with) the real submission.
   const twoBlocks = parseLaneEvents(
     [
-      toolEvent("warden_run_det_priors"),
+      stepEvent("m-final"),
+      toolEvent("warden_run_det_priors", "completed", "m-final"),
       textEvent(
         `${submissionText([{ ...goodFinding, claim: "first" }])}\nAfterthought:\n${submissionText([{ ...goodFinding, claim: "last" }])}`,
         "m-final",
@@ -320,8 +364,10 @@ try {
   // publishing the draft as clean.
   const draftThenSummary = parseLaneEvents(
     [
+      stepEvent("m-draft"),
       textEvent(submissionText([]), "m-draft"),
-      toolEvent("warden_run_det_priors"),
+      toolEvent("warden_run_det_priors", "completed", "m-draft"),
+      stepEvent("m-summary"),
       textEvent("Work done so far: traced the callers, no block here.", "m-summary"),
     ].join("\n"),
   );
@@ -340,7 +386,8 @@ try {
   // message, fails instead of flipping the result to clean.
   const quotedExample = parseLaneEvents(
     [
-      toolEvent("warden_run_det_priors"),
+      stepEvent("m-final"),
+      toolEvent("warden_run_det_priors", "completed", "m-final"),
       textEvent(
         `${submissionText([goodFinding])}\nFor example, a clean lane looks like:\n${submissionText([])}`,
         "m-final",
@@ -362,7 +409,8 @@ try {
   // does not end the block: the closing fence is anchored to a line start.
   const inlineTicks = parseLaneEvents(
     [
-      toolEvent("warden_run_det_priors"),
+      stepEvent("m"),
+      toolEvent("warden_run_det_priors", "completed", "m"),
       textEvent(submissionText([{ ...goodFinding, explanation: "wrap it in ``` fences" }]), "m"),
     ].join("\n"),
   );
@@ -382,26 +430,30 @@ try {
   }> = [
     {
       name: "no block",
-      stdout: textEvent("looks clean to me"),
+      stdout: [stepEvent("m"), textEvent("looks clean to me", "m")].join("\n"),
       process: { exitCode: 0, timedOut: false },
       reason: "no fenced json submission",
     },
     {
       name: "bad JSON",
-      stdout: textEvent("```json\n{not json\n```"),
+      stdout: [stepEvent("m"), textEvent("```json\n{not json\n```", "m")].join("\n"),
       process: { exitCode: 0, timedOut: false },
       reason: "not valid JSON",
     },
     {
       name: "no findings array",
-      stdout: textEvent(submissionText([]).replace('"findings"', '"comments"')),
+      stdout: [
+        stepEvent("m"),
+        textEvent(submissionText([]).replace('"findings"', '"comments"'), "m"),
+      ].join("\n"),
       process: { exitCode: 0, timedOut: false },
       reason: 'no "findings" array',
     },
     {
       name: "error event",
       stdout: [
-        toolEvent("warden_run_det_priors"),
+        stepEvent("m"),
+        toolEvent("warden_run_det_priors", "completed", "m"),
         '{"type":"error","error":{"message":"boom"}}',
       ].join("\n"),
       process: { exitCode: 0, timedOut: false },
@@ -409,19 +461,23 @@ try {
     },
     {
       name: "non-zero exit",
-      stdout: textEvent(submissionText([goodFinding])),
+      stdout: [stepEvent("m"), textEvent(submissionText([goodFinding]), "m")].join("\n"),
       process: { exitCode: 1, timedOut: false },
       reason: "exited 1",
     },
     {
       name: "timeout",
-      stdout: textEvent(submissionText([goodFinding])),
+      stdout: [stepEvent("m"), textEvent(submissionText([goodFinding]), "m")].join("\n"),
       process: { exitCode: -1, timedOut: true },
       reason: "timed out",
     },
     {
       name: "no det-priors call",
-      stdout: [toolEvent("read"), textEvent(submissionText([goodFinding]))].join("\n"),
+      stdout: [
+        stepEvent("m"),
+        toolEvent("read", "completed", "m"),
+        textEvent(submissionText([goodFinding]), "m"),
+      ].join("\n"),
       process: { exitCode: 0, timedOut: false },
       reason: "no completed warden_run_det_priors call",
     },
@@ -438,26 +494,125 @@ try {
   const runningOnly = evaluateLane(
     parseLaneEvents(
       [
-        toolEvent("warden_run_det_priors", "running"),
-        textEvent(submissionText([goodFinding])),
+        stepEvent("m"),
+        toolEvent("warden_run_det_priors", "running", "m"),
+        textEvent(submissionText([goodFinding]), "m"),
       ].join("\n"),
     ),
     { exitCode: 0, stdout: "", timedOut: false },
   );
   assert(runningOnly.status === "failed", "non-completed det-priors call still fails the lane");
   // Forward tolerance: a `part.name` shape (no `part.tool`) still counts.
+  // (`tool_use` parts need no `messageID` — only the final message's
+  // identity comes from `step_start`, and only `text` parts select it.)
   const legacyName = parseLaneEvents(
     [
+      stepEvent("m"),
       JSON.stringify({
         type: "tool_use",
         part: { type: "tool", name: "warden_run_det_priors", state: { status: "completed" } },
       }),
-      textEvent(submissionText([goodFinding])),
+      textEvent(submissionText([goodFinding]), "m"),
     ].join("\n"),
   );
   assert(
     evaluateLane(legacyName, { exitCode: 0, stdout: "", timedOut: false }).status === "ok",
     "legacy part.name tool shape still satisfies the gate",
+  );
+
+  // The submission is the last assistant message by identity, not the last
+  // message that has text. Each case below must fail, never publish a draft
+  // as clean.
+  // P1: the final step has no text — the earlier draft is not the submission.
+  const textlessFinal = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m-draft"),
+        textEvent(submissionText([]), "m-draft"),
+        toolEvent("warden_run_det_priors", "completed", "m-draft"),
+        stepEvent("m-final"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    textlessFinal.status === "failed" &&
+      (textlessFinal.reason ?? "").includes("no fenced json submission in the final message"),
+    `final step with no text → failed, not clean (${textlessFinal.reason ?? "no reason"})`,
+  );
+  // P2: the final step has whitespace-only text.
+  const blankFinal = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m-draft"),
+        textEvent(submissionText([]), "m-draft"),
+        toolEvent("warden_run_det_priors", "completed", "m-draft"),
+        stepEvent("m-final"),
+        textEvent("   \n", "m-final"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    blankFinal.status === "failed" &&
+      (blankFinal.reason ?? "").includes("no fenced json submission in the final message"),
+    `final step with whitespace-only text → failed (${blankFinal.reason ?? "no reason"})`,
+  );
+  // P3: `reconcile()` re-emits an earlier step's text after the final block
+  // — only the final message counts, and it holds no block.
+  const reconciled = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m-draft"),
+        toolEvent("warden_run_det_priors", "completed", "m-draft"),
+        textEvent(submissionText([]), "m-draft"),
+        stepEvent("m-final"),
+        textEvent("Final: still checking, no submission yet.", "m-final"),
+        textEvent(" (late tail of the draft)", "m-draft"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    reconciled.status === "failed" &&
+      (reconciled.reason ?? "").includes("no fenced json submission in the final message"),
+    `reconciled earlier text after the final block → failed (${reconciled.reason ?? "no reason"})`,
+  );
+  // A `text` part with no `messageID` fails closed with a distinct reason —
+  // without an ID the whole-stream fallback would let a draft win.
+  const noId = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m"),
+        toolEvent("warden_run_det_priors", "completed", "m"),
+        JSON.stringify({
+          type: "text",
+          timestamp: 2,
+          sessionID: "s",
+          part: { type: "text", text: submissionText([]) },
+        }),
+        textEvent("Summary: done.", "m"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    noId.status === "failed" && (noId.reason ?? "").includes("without messageID"),
+    `text part with no messageID → failed (${noId.reason ?? "no reason"})`,
+  );
+  // Text with IDs but no `step_start` has no final-message identity either.
+  const noStep = evaluateLane(
+    parseLaneEvents(
+      [
+        toolEvent("warden_run_det_priors", "completed", "m"),
+        textEvent(submissionText([goodFinding]), "m"),
+      ].join("\n"),
+    ),
+    { exitCode: 0, stdout: "", timedOut: false },
+  );
+  assert(
+    noStep.status === "failed" && (noStep.reason ?? "").includes("no step_start"),
+    `stream with no step_start → failed (${noStep.reason ?? "no reason"})`,
   );
 
   // ---------------------------------------------------------------------------
@@ -676,9 +831,11 @@ checkSharedEnv();
 if (!process.env.OPENCODE_PASSWORD) fail("run needs OPENCODE_PASSWORD for --server auth");
 if (process.env.WARDEN_SMOKE_RUN_MARKER !== undefined) writeFileSync(process.env.WARDEN_SMOKE_RUN_MARKER, "invoked\\n");
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + "\\n");
-const text = (t) => emit({ type: "text", timestamp: 2, sessionID: "s", part: { type: "text", text: t } });
+const MID = "m-lane";
+emit({ type: "step_start", timestamp: 1, sessionID: "s", part: { type: "step-start", messageID: MID } });
+const text = (t) => emit({ type: "text", timestamp: 2, sessionID: "s", part: { type: "text", text: t, messageID: MID } });
 const tool = (name, status = "completed") =>
-  emit({ type: "tool_use", timestamp: 1, sessionID: "s", part: { type: "tool", id: "t", tool: name, state: { status }, time: {} } });
+  emit({ type: "tool_use", timestamp: 1, sessionID: "s", part: { type: "tool", id: "t", tool: name, messageID: MID, state: { status }, time: {} } });
 const mode = process.env.WARDEN_SMOKE_MODE ?? "ok";
 const finding = JSON.parse(process.env.WARDEN_SMOKE_FINDING ?? "null");
 const fence = String.fromCharCode(96).repeat(3);
@@ -928,30 +1085,48 @@ if (mode === "runfail") {
     "empty diff fails the lane with empty review target",
   );
 
-  // (X1) a bin path that does not exist: exit 1 with an actionable
-  // lane-health entry and JSON output, at once (no MCP-timeout wait).
-  const savedWrite = process.stdout.write.bind(process.stdout);
-  let nobinOut = "";
-  process.stdout.write = ((chunk: unknown): boolean => {
-    nobinOut += String(chunk);
-    return true;
-  }) as typeof process.stdout.write;
+  // (X1) no `opencode` on PATH: exit 1 with an actionable lane-health
+  // entry and JSON output, at once (no MCP-timeout wait). Timed as a CLI
+  // subprocess: the in-process return settles at once, but only the
+  // process exit proves the orphan MCP poll and its timers are stopped.
+  const NOBIN = mkdtempSync(resolve(tmpdir(), "warden-lanes-nobin-"));
+  const gitPath = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  symlinkSync(gitPath, resolve(NOBIN, "git"));
   const nobinStart = Date.now();
-  process.exitCode = 0;
-  await runOpencodeReview({
-    repoRoot: REPO,
-    baseRef: "HEAD~1",
-    json: true,
-    opencodeBin: "/nonexistent/opencode",
-  });
-  process.stdout.write = savedWrite;
-  const nobinExit = process.exitCode ?? 0;
-  process.exitCode = 0;
+  let nobinExit = -1;
+  let nobinOut = "";
+  try {
+    nobinOut = execFileSync(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx/esm"),
+        resolve(CLI_ROOT, "src/index.ts"),
+        "opencode-review",
+        "--base",
+        "HEAD~1",
+        "--json",
+      ],
+      {
+        cwd: REPO,
+        env: { ...stripKeys(process.env), PATH: NOBIN },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 90000,
+      },
+    ) as string;
+    nobinExit = 0;
+  } catch (err) {
+    const e = err as { status?: number; stdout?: unknown };
+    nobinExit = e.status ?? -1;
+    nobinOut = typeof e.stdout === "string" ? e.stdout : "";
+  }
+  const nobinSecs = Math.round((Date.now() - nobinStart) / 1000);
   const nobinSet = parseOut(nobinOut);
   assert(nobinExit === 1, `missing opencode binary exits 1 (got ${nobinExit})`);
   assert(
     Date.now() - nobinStart < 15000,
-    "missing binary fails at once, without waiting out the MCP timeout",
+    `missing binary fails at once, without waiting out the 30 s MCP timeout (took ${nobinSecs} s)`,
   );
   assert(nobinSet !== undefined, "missing binary still prints a JSON CommentSet");
   assert(
@@ -960,6 +1135,7 @@ if (mode === "runfail") {
     ) === true,
     "missing binary carries an actionable lane-health entry",
   );
+  rmSync(NOBIN, { recursive: true, force: true });
   rmSync(REPO, { recursive: true, force: true });
   rmSync(FAKE_BIN, { recursive: true, force: true });
 
