@@ -78,6 +78,27 @@ continues (verified against the shipped binary v2.0.25; the `v2` source
 checkout interrupts the session instead — trust the binary). So the
 driver never passes `--auto`: `--auto` replies `once` (allow).
 
+## Read/grep output bounds (issue #57)
+
+The host bounds each call but no config tightens it, so the charter's
+read/grep scope rule (`down.md` protocol step 2) is the only lever.
+Verified at commit `b1e3a7b222` and in the shipped binary v2.0.25:
+
+- `read` pages at 2,000 lines / 50 KiB, lines cut at 2,000 chars —
+  hard-coded (`packages/core/src/tool/read-filesystem.ts:14-18`, `:283-305`).
+- `grep` returns 100 matching lines by default, each cut at 2,000 chars
+  (`packages/core/src/filesystem.ts:34`, `packages/core/src/ripgrep.ts:255`);
+  the model-supplied `limit` has no upper bound (`filesystem.ts:47`).
+- The configurable `tool_output.max_lines` / `max_bytes` truncation skips
+  any result that already sets `metadata.truncated`
+  (`packages/core/src/tool-output.ts:66`), and `read` and `grep` always set
+  it (`tool/plugin/read.ts:117`, `tool/plugin/grep.ts:152`). Setting
+  `tool_output` in `opencode.json` does not bound either tool.
+
+Context is re-sent every turn, so even bounded calls compound: a 50 KiB
+page of `decisions.md` or a fixture `diff.patch` costs its tokens on every
+later turn.
+
 ## Model tier and `--model`
 
 The lane is strong-tier; the default is `anthropic/claude-opus-5-5#high`
