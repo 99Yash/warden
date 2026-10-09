@@ -63,7 +63,7 @@ agent rules are appended after global rules so they win:
 | allow `read` | Read changed files and their context. |
 | deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
 | allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
-| allow `grep` | Trace symbols to callers (the `grepRepo` role in method docs). |
+| allow `grep` | Find the one-hop caller or definition site of a changed symbol (the `grepRepo` role in method docs). A grep hit does not count against the per-claim file bound (see the submission contract). |
 | allow `glob` | Locate files by pattern. |
 | allow `warden_run_det_priors` | Phase-1 ground truth; the driver fails the lane on zero completed calls. |
 | allow `warden_lookup_type_def` | Verify library-API claims before asserting them. |
@@ -211,6 +211,16 @@ verbatim `path`/`line`/`snippet`, pairs any `node_modules/` authority
 source with an in-scope companion, uses `kind: "question"` below 0.7
 confidence, and reports only **broken** and high-risk **unproven** down
 conclusions.
+
+Investigation is bounded (issue #57). The lane reads each changed file
+whole, then traces each claim one hop from a changed symbol and opens at
+most 3 files for it: the changed file, one caller-side file, and one
+definition-side file. A claim that reaches the bound concludes
+**unproven**, with the next unopened file as its missing evidence. The
+included method sections ask the model to trace every symbol and to spend
+the whole step cap; the charter states that the bound wins over them.
+`smoke:opencode-lanes` fails if the charter or the materialized prompt
+loses the bound.
 
 Residual: det-prior findings are not published on the driven path — they
 belong to the surface lane, which is not shipped yet, and the charter
