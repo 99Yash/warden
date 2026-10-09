@@ -650,6 +650,12 @@ export interface DriveLaneResult {
   result: CommentSet;
   lanes: LaneOutput[];
   usage?: SessionUsage;
+  /**
+   * Whether `opencode run` was spawned. False on the empty-scope and
+   * MCP-warmup-failure paths: no model call happened, so the spend is a
+   * known $0 (the eval does not infer this from `usage`).
+   */
+  runSpawned: boolean;
 }
 
 /**
@@ -855,7 +861,7 @@ async function buildLaneResult(
     },
     ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
   });
-  return { result, lanes };
+  return { result, lanes, runSpawned: false };
 }
 
 /** MCP-warmup failure: no run happened, so there are no tool calls to trace. */
@@ -898,6 +904,7 @@ async function buildVerdict(
     ...(resolved.degraded ?? []),
     laneTraceEntry(verdict.status, verdict.reason, traceCounts, usage),
   ]);
+  built.runSpawned = true;
   if (usage !== undefined) built.usage = usage;
   return built;
 }

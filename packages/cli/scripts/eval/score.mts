@@ -20,6 +20,7 @@
  * sample fails the precision gate.
  */
 
+import type { SessionUsage } from "../../src/opencode/drive.js";
 import type {
   AggregateScore,
   Fixture,
@@ -218,20 +219,71 @@ export function checkThreshold(agg: AggregateScore, rows: FixtureScore[]): Thres
 // ---------------------------------------------------------------------------
 
 /**
+ * Whether an OpenCode sample's spend is measured. No spawned `opencode run`
+ * (fixture build failure, empty scope, MCP warmup failure) is a known $0.
+ * A spawned run is measured only when the session usage was read AND
+ * (`costUsd > 0` or all token counts are 0 — no model work, so no spend).
+ * A free or unpriced model that did work reports `cost 0` with tokens > 0:
+ * unmeasured, so the run fails closed (a free-model tracer stops after one
+ * sample).
+ */
+export function isOpencodeCostMeasured(
+  runSpawned: boolean,
+  usage: SessionUsage | undefined,
+): boolean {
+  if (!runSpawned) return true;
+  if (usage === undefined) return false;
+  if (usage.costUsd > 0) return true;
+  const t = usage.tokens;
+  return (
+    t.input === 0 && t.output === 0 && t.reasoning === 0 && t.cacheRead === 0 && t.cacheWrite === 0
+  );
+}
+
+/** The run facts the parity verdict needs beyond the two aggregates. */
+export interface ParityRun {
+  /** Requested sample count per (fixture × config). */
+  samples: number;
+  /** True when `--fixture` or `--fixture-regex` narrowed the fixture set. */
+  fixtureFilter: boolean;
+  stoppedAtCostCeiling: boolean;
+}
+
+/** A gate decision needs N ≥ 3; an N=1 tracer is evidence, not a gate. */
+const PARITY_MIN_SAMPLES = 3;
+const PARITY_MAX_TRAP_HITS = 0;
+const PARITY_MAX_CLEAN_UNLABELED = 0;
+
+/**
  * Compare an OpenCode candidate against a harness reference on the same
  * fixture set in the same invocation. Ties pass (parity, not superiority).
+ * P4 and P6 read every raw sample (any-sample semantics, like P3), not the
+ * medians. P8 makes a tracer (N<3, filtered, or stopped) always NOT MET,
+ * while P0–P7 still report their own PASS/FAIL as evidence.
  * `checkThreshold` is unchanged.
  */
-export function checkParity(reference: AggregateScore, candidate: AggregateScore): ParityVerdict {
+export function checkParity(
+  reference: AggregateScore,
+  candidate: AggregateScore,
+  run: ParityRun,
+): ParityVerdict {
   const failed: string[] = [];
   const details: string[] = [];
 
-  // P0 same fixtures — the row fixture-name sets must be equal.
+  // P0 same fixtures — equal row fixture-name sets, and every row of both
+  // aggregates holds the requested sample count (a stopped run leaves a
+  // short row).
   const refNames = new Set(reference.rows.map((r) => r.fixture));
   const candNames = new Set(candidate.rows.map((r) => r.fixture));
-  const passP0 = refNames.size === candNames.size && [...refNames].every((n) => candNames.has(n));
+  const sameNames =
+    refNames.size === candNames.size && [...refNames].every((n) => candNames.has(n));
+  const shortRows = [...reference.rows, ...candidate.rows].filter(
+    (r) => r.rawSamples.length !== run.samples,
+  ).length;
+  const passP0 = sameNames && shortRows === 0;
   details.push(
-    `(P0) Same fixtures: reference ${refNames.size}, candidate ${candNames.size} — ${passP0 ? "PASS" : "FAIL"}`,
+    `(P0) Same fixtures: reference ${refNames.size}, candidate ${candNames.size}, ` +
+      `${shortRows} row(s) without ${run.samples} sample(s) — ${passP0 ? "PASS" : "FAIL"}`,
   );
   if (!passP0) failed.push("P0-same-fixtures");
 
@@ -252,18 +304,22 @@ export function checkParity(reference: AggregateScore, candidate: AggregateScore
   if (!passP2) failed.push("P2-synthetic-recall");
 
   // P3 precision traps.
-  const passP3 = candidate.falsePositiveTrapHits === 0;
+  const passP3 = candidate.falsePositiveTrapHits <= PARITY_MAX_TRAP_HITS;
   details.push(
     `(P3) Precision traps: ${candidate.falsePositiveTrapHits}/${candidate.falsePositiveTraps} ` +
-      `(threshold 0) — ${passP3 ? "PASS" : "FAIL"}`,
+      `(threshold ${PARITY_MAX_TRAP_HITS}) — ${passP3 ? "PASS" : "FAIL"}`,
   );
   if (!passP3) failed.push("P3-precision-traps");
 
-  // P4 clean zero-hit.
-  const passP4 = candidate.cleanFixtureUnlabeled === 0;
+  // P4 clean zero-hit — every sample of every clean candidate row.
+  const cleanSamples = candidate.rows.filter((r) => r.expectsEmpty).flatMap((r) => r.rawSamples);
+  const cleanHits = cleanSamples.filter(
+    (s) => s.unlabeledComments > PARITY_MAX_CLEAN_UNLABELED,
+  ).length;
+  const passP4 = cleanHits === 0;
   details.push(
-    `(P4) Clean zero-hit: ${candidate.cleanFixtureUnlabeled} ` +
-      `(threshold 0) — ${passP4 ? "PASS" : "FAIL"}`,
+    `(P4) Clean zero-hit: ${cleanHits}/${cleanSamples.length} clean sample(s) with comments ` +
+      `(threshold ${PARITY_MAX_CLEAN_UNLABELED}) — ${passP4 ? "PASS" : "FAIL"}`,
   );
   if (!passP4) failed.push("P4-clean-zero-hit");
 
@@ -279,15 +335,44 @@ export function checkParity(reference: AggregateScore, candidate: AggregateScore
   );
   if (!passP5) failed.push("P5-cost");
 
-  // P6 lane health — every substantive candidate row ran and stayed clean.
-  const substantive = candidate.rows.filter((r) => !r.expectsEmpty);
-  const unhealthy = substantive.filter((r) => r.medianDispatches < 1 || r.hadError);
-  const passP6 = unhealthy.length === 0;
+  // P6 lane health — every sample of every candidate row (clean rows
+  // included: a failed lane on a clean fixture publishes `comments: []`)
+  // ran the lane and has no error.
+  const candSamples = candidate.rows.flatMap((r) => r.rawSamples);
+  const unhealthy = candSamples.filter(
+    (s) => s.dispatchCount < DISPATCH_MIN_ON_SUBSTANTIVE || s.error !== null,
+  ).length;
+  const passP6 = unhealthy === 0;
   details.push(
-    `(P6) Lane health: ${substantive.length - unhealthy.length}/${substantive.length} ` +
-      `substantive rows with ≥1 dispatch and no error — ${passP6 ? "PASS" : "FAIL"}`,
+    `(P6) Lane health: ${candSamples.length - unhealthy}/${candSamples.length} ` +
+      `candidate sample(s) with the lane run and no error — ${passP6 ? "PASS" : "FAIL"}`,
   );
   if (!passP6) failed.push("P6-lane-health");
+
+  // P7 reference health — a failed reference makes P1/P2 vacuous.
+  const refErrors = reference.rows
+    .flatMap((r) => r.rawSamples)
+    .filter((s) => s.error !== null).length;
+  const refSubstantive = reference.rows.filter((r) => !r.expectsEmpty);
+  const refNoDispatch = refSubstantive.filter(
+    (r) => r.medianDispatches < DISPATCH_MIN_ON_SUBSTANTIVE,
+  ).length;
+  const passP7 = refErrors === 0 && refNoDispatch === 0;
+  details.push(
+    `(P7) Reference health: ${refErrors} reference sample error(s), ` +
+      `${refNoDispatch}/${refSubstantive.length} substantive row(s) without a dispatch — ${passP7 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP7) failed.push("P7-reference-health");
+
+  // P8 gate run — N ≥ 3, the full fixture set, and a complete run.
+  const passP8 =
+    run.samples >= PARITY_MIN_SAMPLES && !run.fixtureFilter && !run.stoppedAtCostCeiling;
+  details.push(
+    `(P8) Gate run: samples ${run.samples} (threshold ≥${PARITY_MIN_SAMPLES}), ` +
+      `fixture filter ${run.fixtureFilter ? "set" : "none"}, ` +
+      `stopped at cost ceiling ${run.stoppedAtCostCeiling} — ${passP8 ? "PASS" : "FAIL"}`,
+  );
+  if (!passP8) failed.push("P8-gate-run");
 
   return {
     cleared: failed.length === 0,

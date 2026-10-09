@@ -75,6 +75,12 @@ export interface Fixture {
    * `commit` is the PR's head, so its tree IS the post-image ground truth.
    */
   realRepo?: { repoPath: string; commit: string };
+  /**
+   * Why a fixture that has a `meta.json` fell back to sparse (repo not
+   * found, commit unreachable, malformed meta). Absent when the real repo
+   * resolved or the fixture has no `meta.json`.
+   */
+  sparseReason?: string;
 }
 
 /** Shape of a real-PR fixture's optional `meta.json`. */
@@ -108,14 +114,28 @@ export interface FixtureSample {
   /** Any error during the run; null when clean. */
   error: string | null;
   /**
-   * Whether the sample's spend was measured. Harness samples are always
-   * measured (the catalog prices them). OpenCode samples are measured only
-   * when the session usage was read AND (`costUsd > 0` or all token counts
-   * are 0 — a free or unpriced model that did work).
+   * Whether the sample's spend was measured. Harness samples report
+   * `metadata.costUsd` (the catalog prices them); a harness throw after
+   * spend reports $0, so this does not fail closed for the reference.
+   * OpenCode samples: when no `opencode run` was spawned (fixture build
+   * failure, empty scope, MCP warmup failure) the spend is a known $0.
+   * Otherwise measured only when the session usage was read AND
+   * (`costUsd > 0` or all token counts are 0 — no model work, so no
+   * spend). A free or unpriced model that did work is unmeasured and
+   * fails closed.
    */
   costMeasured: boolean;
   /** Binary sections excluded from the fixture repo (`git apply` cannot reverse them). */
   excludedBinary?: number;
+  /**
+   * The tree the sample reviewed: `archive <repo>@<commit>` (OpenCode),
+   * `worktree <repo>@<commit>` (harness), or `sparse (<reason>)`.
+   */
+  treeSource?: string;
+  /** OpenCode samples: the model the driver requested. */
+  requestedModel?: string;
+  /** OpenCode samples: the model the session reports (`usage.model`). */
+  sessionModel?: string;
 }
 
 export interface EvalCommentSummary {

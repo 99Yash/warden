@@ -17,12 +17,19 @@
  *   pnpm eval --samples <n>              # override sample count
  *   pnpm eval --compare <cfgA> <cfgB>    # side-by-side scorecard diff
  *   pnpm eval --parity <ref> <cand>      # parity gate + opencode-parity scorecard
- *   pnpm eval --max-cost <usd>            # cumulative spend ceiling (default 4)
+ *   pnpm eval --max-cost <usd>           # cumulative spend ceiling (default 4)
  *
  * Requires at least one configured review LLM provider key; emits a skip
  * notice and exits 0 when unset. Each run takes ~$0.20–$1.00 per fixture per sample per
  * `feedback_milestone_closeout.md`; full-suite cycle (~10 fixtures × 3
- * configs × 3 samples) ≈ $20–90.
+ * configs × 3 samples) ≈ $20–90 — more than the default `--max-cost` of $4,
+ * which stops the run (exit 1) once the measured spend reaches it. The
+ * ceiling is one budget across every config, checked before each sample,
+ * so a run can exceed it by at most one sample's cost. Raise it for a
+ * full-suite run.
+ *
+ * Usage errors (unknown config name, bad `--max-cost`, `--parity` with
+ * `--config`) print one line and exit 2 before any preflight or spend.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -50,6 +57,7 @@ import {
   aggregateScores,
   checkParity,
   checkThreshold,
+  isOpencodeCostMeasured,
   renderMarkdownTable,
   scoreFixtureRun,
 } from "./score.mjs";
@@ -61,6 +69,7 @@ import type {
   FixtureMeta,
   FixtureSample,
   FixtureScore,
+  ParityVerdict,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -79,6 +88,12 @@ interface Args {
 
 const DEFAULT_MAX_COST_USD = 4;
 
+/** Print one usage line and exit 2 — before any preflight or spend. */
+function usageError(message: string): never {
+  process.stdout.write(`[eval] usage error: ${message}\n`);
+  process.exit(2);
+}
+
 function parseArgs(argv: string[]): Args {
   const args: Args = { samples: 3, maxCost: DEFAULT_MAX_COST_USD };
   for (let i = 0; i < argv.length; i++) {
@@ -93,18 +108,25 @@ function parseArgs(argv: string[]): Args {
     } else if (arg === "--samples" && argv[i + 1]) {
       const n = Number(argv[++i]);
       if (Number.isFinite(n) && n > 0) args.samples = Math.trunc(n);
-    } else if (arg === "--compare" && argv[i + 1] && argv[i + 2]) {
+    } else if (arg === "--compare" || arg === "--parity") {
       const a = argv[++i];
       const b = argv[++i];
-      if (a && b) args.compare = [a, b];
-    } else if (arg === "--parity" && argv[i + 1] && argv[i + 2]) {
-      const a = argv[++i];
-      const b = argv[++i];
-      if (a && b) args.parity = [a, b];
-    } else if (arg === "--max-cost" && argv[i + 1]) {
-      const n = Number(argv[++i]);
-      if (Number.isFinite(n) && n >= 0) args.maxCost = n;
+      if (!a || !b) usageError(`${arg} needs two config names`);
+      if (arg === "--compare") args.compare = [a, b];
+      else args.parity = [a, b];
+    } else if (arg === "--max-cost") {
+      const raw = argv[++i];
+      // `Number("")` is 0, so an empty value is rejected explicitly.
+      const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        usageError(`--max-cost needs a finite number ≥ 0 (got ${raw ?? "no value"})`);
+      }
+      args.maxCost = n;
     }
+  }
+  if (args.parity) {
+    if (args.configFilter !== undefined) usageError("--parity cannot be combined with --config");
+    if (args.parity[0] === args.parity[1]) usageError("--parity needs two distinct configs");
   }
   return args;
 }
@@ -135,9 +157,35 @@ function resolveRepoPath(repo: string): string | null {
   return defaults[repo] ?? null;
 }
 
-function loadConfigs(filter: string | undefined): EvalConfig[] {
-  if (!filter) return ALL_CONFIGS;
-  return [...ALL_CONFIGS, ...OPENCODE_CONFIGS].filter((c) => c.name === filter);
+/**
+ * The one name resolver for `--config`, `--compare`, and `--parity`: each
+ * name must resolve across `ALL_CONFIGS` and `OPENCODE_CONFIGS`, else a
+ * usage error. A bare run (no names) still means `ALL_CONFIGS` only.
+ */
+function resolveConfigNames(names: string[]): EvalConfig[] {
+  const catalog = [...ALL_CONFIGS, ...OPENCODE_CONFIGS];
+  return names.map((name) => {
+    const config = catalog.find((c) => c.name === name);
+    if (!config)
+      usageError(`unknown config "${name}" (known: ${catalog.map((c) => c.name).join(", ")})`);
+    return config;
+  });
+}
+
+/**
+ * Select the configs to run. `--compare a b` without `--config` runs just
+ * that pair. `--parity <ref> <cand>` runs the candidate first: its cost
+ * is the unknown, while the harness reference cost is known.
+ */
+function selectConfigs(args: Args): EvalConfig[] {
+  if (args.parity) {
+    const [reference, candidate] = resolveConfigNames(args.parity);
+    if (!reference || !candidate) usageError("--parity needs two config names");
+    return [candidate, reference];
+  }
+  const compared = args.compare ? resolveConfigNames(args.compare) : undefined;
+  if (args.configFilter !== undefined) return resolveConfigNames([args.configFilter]);
+  return compared ?? ALL_CONFIGS;
 }
 
 function loadFixtures(filter: string | undefined, regex: RegExp | undefined): Fixture[] {
@@ -164,10 +212,11 @@ function loadFixtures(filter: string | undefined, regex: RegExp | undefined): Fi
 /**
  * Read a real-PR fixture's optional `meta.json` and resolve its logical repo
  * name to a local checkout. Returns `{}` (no real-repo backing) when the file
- * is absent, malformed, the repo is unknown, the checkout is missing, or the
- * commit is unreachable — the fixture then falls back to sparse materialization.
+ * is absent, and `{ sparseReason }` when it is malformed, the repo is unknown,
+ * the checkout is missing, or the commit is unreachable — the fixture then
+ * falls back to sparse materialization.
  */
-function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo"> {
+function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo" | "sparseReason"> {
   const metaPath = resolve(fixtureDir, "meta.json");
   if (!existsSync(metaPath)) return {};
   let meta: FixtureMeta;
@@ -175,14 +224,14 @@ function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo"> {
     meta = JSON.parse(readFileSync(metaPath, "utf8")) as FixtureMeta;
   } catch {
     process.stdout.write(`[eval] ${fixtureDir}: malformed meta.json — sparse fallback.\n`);
-    return {};
+    return { sparseReason: "malformed meta.json" };
   }
   const repoPath = resolveRepoPath(meta.repo);
   if (!repoPath || !existsSync(resolve(repoPath, ".git"))) {
     process.stdout.write(
       `[eval] ${meta.repo} repo not found (set WARDEN_EVAL_${meta.repo.toUpperCase()}_REPO) — sparse fallback.\n`,
     );
-    return {};
+    return { sparseReason: `${meta.repo} repo not found` };
   }
   try {
     execFileSync("git", ["-C", repoPath, "cat-file", "-e", `${meta.commit}^{commit}`], {
@@ -192,9 +241,14 @@ function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo"> {
     process.stdout.write(
       `[eval] commit ${meta.commit} unreachable in ${meta.repo} — sparse fallback.\n`,
     );
-    return {};
+    return { sparseReason: `commit ${meta.commit} unreachable in ${meta.repo}` };
   }
   return { realRepo: { repoPath, commit: meta.commit } };
+}
+
+/** The sparse tree-source note for a fixture without a resolved real repo. */
+function sparseTreeSource(fixture: Fixture): string {
+  return `sparse (${fixture.sparseReason ?? "no meta.json"})`;
 }
 
 let worktreeSeq = 0;
@@ -315,9 +369,17 @@ interface OnceResult {
   result: CommentSet | null;
   error: string | null;
   wallMs: number;
+  /** The tree the sample reviewed (see `FixtureSample.treeSource`). */
+  treeSource: string;
   usage?: SessionUsage;
   lanes?: LaneOutput[];
   excludedBinary?: number;
+  /**
+   * OpenCode only: whether `opencode run` may have been spawned. False on
+   * a fixture build failure and when the driver reports no spawn (empty
+   * scope, MCP warmup failure); a driver throw counts as spawned.
+   */
+  runSpawned?: boolean;
 }
 
 /** Extra scoring inputs for the OpenCode runtime (absent = harness). */
@@ -325,19 +387,8 @@ interface OpencodeScoreExtra {
   usage?: SessionUsage;
   lanes?: LaneOutput[];
   excludedBinary: number;
-}
-
-/**
- * Measured only when the session usage was read AND (`costUsd > 0` or all
- * token counts are 0 — a free or unpriced model that did work).
- */
-function isUsageMeasured(usage: SessionUsage | undefined): boolean {
-  if (usage === undefined) return false;
-  if (usage.costUsd > 0) return true;
-  const t = usage.tokens;
-  return (
-    t.input === 0 && t.output === 0 && t.reasoning === 0 && t.cacheRead === 0 && t.cacheWrite === 0
-  );
+  runSpawned: boolean;
+  requestedModel: string;
 }
 
 async function runOnce(
@@ -356,15 +407,21 @@ async function runOnce(
  */
 async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<OnceResult> {
   const startedAt = Date.now();
+  const treeSource = fixture.realRepo
+    ? `archive ${fixture.realRepo.repoPath}@${fixture.realRepo.commit}`
+    : sparseTreeSource(fixture);
   let repo;
   try {
     repo = buildFixtureRepo(fixture);
   } catch (err) {
+    // No `opencode run` was spawned: a known $0 sample with its error.
     return {
       result: null,
       error: err instanceof Error ? err.message : String(err),
       wallMs: Date.now() - startedAt,
+      treeSource,
       excludedBinary: 0,
+      runSpawned: false,
     };
   }
   try {
@@ -373,20 +430,29 @@ async function runOnceOpencode(fixture: Fixture, config: EvalConfig): Promise<On
       baseRef: repo.baseSha,
       ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
     });
+    // The empty-scope and warmup-failure paths publish a failed lane but
+    // a `CommentSet`, so the sample error names the lane failure for P6.
+    const failedLane = driven.lanes.find((l) => l.status !== "ok");
     return {
       result: driven.result,
-      error: null,
+      error: failedLane
+        ? `lane ${failedLane.lane} ${failedLane.status}${failedLane.reason !== undefined ? ` (${failedLane.reason})` : ""}`
+        : null,
       wallMs: Date.now() - startedAt,
+      treeSource,
       ...(driven.usage !== undefined ? { usage: driven.usage } : {}),
       lanes: driven.lanes,
       excludedBinary: repo.excludedBinary,
+      runSpawned: driven.runSpawned,
     };
   } catch (err) {
     return {
       result: null,
       error: err instanceof Error ? err.message : String(err),
       wallMs: Date.now() - startedAt,
+      treeSource,
       excludedBinary: repo.excludedBinary,
+      runSpawned: true,
     };
   } finally {
     removeFixtureRepo(repo);
@@ -427,16 +493,19 @@ async function runOnceHarness(
   // failed `git worktree add` degrades to sparse materialization rather than
   // aborting the whole suite (consistent with resolveRealRepo's fallbacks).
   let worktree: string | null = null;
+  let treeSource = sparseTreeSource(fixture);
   try {
     if (fixture.realRepo) {
       try {
         worktree = addWorktree(fixture.realRepo.repoPath, fixture.realRepo.commit);
+        treeSource = `worktree ${fixture.realRepo.repoPath}@${fixture.realRepo.commit}`;
       } catch (err) {
         process.stdout.write(
           `[eval] ${fixture.name}: worktree add failed ` +
             `(${err instanceof Error ? err.message : String(err)}) — sparse fallback.\n`,
         );
         worktree = null;
+        treeSource = "sparse (worktree add failed)";
       }
     }
     const effectiveRoot = worktree ?? repoRoot;
@@ -455,12 +524,13 @@ async function runOnceHarness(
       selector: null,
     };
     const result = await runReviewHarness(input);
-    return { result, error: null, wallMs: Date.now() - startedAt };
+    return { result, error: null, wallMs: Date.now() - startedAt, treeSource };
   } catch (err) {
     return {
       result: null,
       error: err instanceof Error ? err.message : String(err),
       wallMs: Date.now() - startedAt,
+      treeSource,
     };
   } finally {
     cleanupMaterialized(materializedPaths);
@@ -483,8 +553,12 @@ function scoreOne(
   result: CommentSet | null,
   sample: number,
   configName: string,
+  treeSource: string,
   opencodeExtra?: OpencodeScoreExtra,
 ): FixtureSample {
+  const costMeasured =
+    opencodeExtra === undefined ||
+    isOpencodeCostMeasured(opencodeExtra.runSpawned, opencodeExtra.usage);
   const base: FixtureSample = {
     fixture: fixture.name,
     config: configName,
@@ -499,8 +573,17 @@ function scoreOne(
     costUsd: 0,
     durationMs: 0,
     error: null,
-    costMeasured: opencodeExtra === undefined ? true : isUsageMeasured(opencodeExtra.usage),
-    ...(opencodeExtra !== undefined ? { excludedBinary: opencodeExtra.excludedBinary } : {}),
+    costMeasured,
+    treeSource,
+    ...(opencodeExtra !== undefined
+      ? {
+          excludedBinary: opencodeExtra.excludedBinary,
+          requestedModel: opencodeExtra.requestedModel,
+          ...(opencodeExtra.usage?.model !== undefined
+            ? { sessionModel: opencodeExtra.usage.model }
+            : {}),
+        }
+      : {}),
   };
   if (!result) {
     base.error = "harness threw";
@@ -615,7 +698,10 @@ function approximateDispatchCount(set: CommentSet): number {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  // Arguments and config names are validated first: a usage error exits 2
+  // before the runtime load, the preflights, or any sample.
   const args = parseArgs(process.argv.slice(2));
+  const configs = selectConfigs(args);
 
   // Bootstrap the Warden runtime the same way the CLI does (index.ts:66) so the
   // repo-root `.env` is loaded into process.env — the eval runs from
@@ -627,29 +713,13 @@ async function main(): Promise<void> {
     (providerId) => providerApiKey(providerId) !== undefined,
   );
 
-  // `--compare a b` without an explicit `--config` runs just those two
-  // configs (not all of ALL_CONFIGS) — the comparison table only needs the
-  // named pair, so running the rest just burns tokens. `--parity` resolves
-  // against both lists so the opencode candidate is reachable.
-  let configs = loadConfigs(args.configFilter);
-  if (!args.configFilter && args.compare) {
-    const [a, b] = args.compare;
-    configs = configs.filter((c) => c.name === a || c.name === b);
-  }
-  if (!args.configFilter && args.parity) {
-    const [a, b] = args.parity;
-    configs = [...ALL_CONFIGS, ...OPENCODE_CONFIGS].filter((c) => c.name === a || c.name === b);
-  }
   const fixtures = loadFixtures(args.fixtureFilter, args.fixtureRegex);
-
-  if (configs.length === 0) {
-    process.stdout.write("[eval] no configs matched.\n");
-    process.exit(1);
-  }
   if (fixtures.length === 0) {
     process.stdout.write("[eval] no fixtures found — add fixtures under scripts/eval/fixtures/.\n");
     process.exit(1);
   }
+  const sparseFallbacks = sparseFallbackWarning(fixtures);
+  if (sparseFallbacks !== null) process.stdout.write(`${sparseFallbacks}\n`);
 
   // Provider-key preflight runs only when a selected config is a harness
   // config. The OpenCode runtime needs no warden provider key.
@@ -676,8 +746,9 @@ async function main(): Promise<void> {
   // detector doesn't short-circuit. Reuses the same temp dir across runs.
   const repoRoot = await ensureRepoRoot();
 
-  // Cumulative measured spend across every sample of every config. Checked
-  // before each sample; the run stops before it spends past the ceiling.
+  // Cumulative measured spend across every sample of every config: one
+  // budget. Checked before each sample, so the last sample can exceed the
+  // ceiling by at most its own cost.
   let spentUsd = 0;
   let stoppedAtCostCeiling = false;
   const aggregates: AggregateScore[] = [];
@@ -697,21 +768,21 @@ async function main(): Promise<void> {
           configStopped = true;
           break;
         }
-        const { result, error, usage, lanes, excludedBinary } = await runOnce(
-          fixture,
-          config,
-          repoRoot,
-        );
+        const { result, error, usage, lanes, excludedBinary, runSpawned, treeSource } =
+          await runOnce(fixture, config, repoRoot);
         const score = scoreOne(
           fixture,
           result,
           i + 1,
           config.name,
+          treeSource,
           config.runtime === "opencode"
             ? {
                 ...(usage !== undefined ? { usage } : {}),
                 ...(lanes !== undefined ? { lanes } : {}),
                 excludedBinary: excludedBinary ?? 0,
+                runSpawned: runSpawned ?? true,
+                requestedModel: config.opencodeModel ?? DOWN_LANE_SPEC.defaultModel,
               }
             : undefined,
         );
@@ -760,23 +831,37 @@ async function main(): Promise<void> {
   }
 
   if (args.parity) {
-    await writeParityScorecard(args, configs, aggregates, stoppedAtCostCeiling);
+    // One verdict feeds the `PARITY:` line, the `.md`, and the `.json`.
     const [refName, candName] = args.parity;
     const reference = aggregates.find((x) => x.config === refName);
     const candidate = aggregates.find((x) => x.config === candName);
+    const parity: ParityVerdict =
+      reference && candidate
+        ? checkParity(reference, candidate, {
+            samples: args.samples,
+            fixtureFilter: args.fixtureFilter !== undefined || args.fixtureRegex !== undefined,
+            stoppedAtCostCeiling,
+          })
+        : {
+            cleared: false,
+            failed: ["missing-config"],
+            details: [
+              stoppedAtCostCeiling
+                ? `(missing-config) the run stopped before both configs ran — FAIL`
+                : `(missing-config) a config produced no rows — FAIL`,
+            ],
+            reference: refName,
+            candidate: candName,
+          };
+    await writeParityScorecard(args, configs, aggregates, stoppedAtCostCeiling, parity);
     if (reference && candidate) {
       process.stdout.write(`\n## Compare: ${reference.config} vs ${candidate.config}\n\n`);
       process.stdout.write(renderCompareTable(reference, candidate) + "\n");
-      const parity = checkParity(reference, candidate);
-      process.stdout.write(`\nParity details:\n`);
-      for (const d of parity.details) process.stdout.write(`  ${d}\n`);
-      process.stdout.write(
-        `\nPARITY: ${parity.cleared ? "MET" : `NOT MET (criteria failed: ${parity.failed.join(", ")})`}\n`,
-      );
-      process.exit(parity.cleared && !stoppedAtCostCeiling ? 0 : 1);
     }
-    process.stdout.write(`[eval] --parity needs both configs in the run.\n`);
-    process.exit(1);
+    process.stdout.write(`\nParity details:\n`);
+    for (const d of parity.details) process.stdout.write(`  ${d}\n`);
+    process.stdout.write(`\n${parityLine(parity)}\n`);
+    process.exit(parity.cleared ? 0 : 1);
   }
 
   // Write the JSON scorecard
@@ -825,33 +910,63 @@ function wardenHead(): string {
   }
 }
 
+/** The final verdict line, shared by stdout and the `.md` scorecard. */
+function parityLine(parity: ParityVerdict): string {
+  return `PARITY: ${parity.cleared ? "MET" : `NOT MET (criteria failed: ${parity.failed.join(", ")})`}`;
+}
+
+/**
+ * Warn when a real-PR fixture that has a `meta.json` falls back to sparse:
+ * the comparison then reviews diff hunks, not the full post-PR tree. From
+ * a worktree the default `../<repo>` does not resolve; set
+ * `WARDEN_EVAL_<REPO>_REPO`.
+ */
+function sparseFallbackWarning(fixtures: Fixture[]): string | null {
+  const fallbacks = fixtures.filter((f) => f.sparseReason !== undefined);
+  if (fallbacks.length === 0) return null;
+  return (
+    `[eval] WARNING: ${fallbacks.length} real-PR fixture(s) with meta.json fall back to sparse: ` +
+    fallbacks.map((f) => `${f.name} (${f.sparseReason})`).join(", ")
+  );
+}
+
 /**
  * Parity scorecard: JSON + rendered markdown under
  * `results/opencode-parity/<ts>.(json|md)` — the rendered tables plus
- * threshold details plus parity details plus run metadata.
+ * threshold details plus parity details plus run metadata, including the
+ * tree source per fixture and config and the session-reported models.
  */
 async function writeParityScorecard(
   args: Args,
   configs: EvalConfig[],
   aggregates: AggregateScore[],
   stoppedAtCostCeiling: boolean,
+  parity: ParityVerdict,
 ): Promise<void> {
-  const [refName, candName] = args.parity ?? ["", ""];
-  const reference = aggregates.find((x) => x.config === refName);
-  const candidate = aggregates.find((x) => x.config === candName);
-  const parity =
-    reference && candidate
-      ? checkParity(reference, candidate)
-      : { cleared: false, failed: ["missing-config"], details: [] as string[] };
-  const candidateConfig = configs.find((c) => c.name === candName);
+  const candidateConfig = configs.find((c) => c.name === parity.candidate);
+  const samples = aggregates.flatMap((agg) => agg.rows.flatMap((r) => r.rawSamples));
+  const sessionModels = [
+    ...new Set(samples.flatMap((s) => (s.sessionModel !== undefined ? [s.sessionModel] : []))),
+  ];
+  // fixture → config → distinct tree sources across its samples.
+  const treeSources: Record<string, Record<string, string>> = {};
+  for (const s of samples) {
+    if (s.treeSource === undefined) continue;
+    const byConfig = (treeSources[s.fixture] ??= {});
+    const prior = byConfig[s.config];
+    byConfig[s.config] =
+      prior === undefined || prior === s.treeSource ? s.treeSource : `${prior}; ${s.treeSource}`;
+  }
   const meta = {
     samples: args.samples,
     fixtureFilter: args.fixtureFilter ?? args.fixtureRegex?.source ?? null,
     maxCost: args.maxCost,
     candidateModel: candidateConfig?.opencodeModel ?? DOWN_LANE_SPEC.defaultModel,
+    sessionModels,
     opencodeVersion: opencodeVersion(),
     wardenHead: wardenHead(),
     stoppedAtCostCeiling,
+    treeSources,
   };
   const dir = resolve(RESULTS_DIR, "opencode-parity");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -866,29 +981,39 @@ async function writeParityScorecard(
     `- samples: ${meta.samples}`,
     `- fixture filter: ${meta.fixtureFilter ?? "(all)"}`,
     `- --max-cost: $${meta.maxCost}`,
-    `- candidate model: ${meta.candidateModel}`,
+    `- candidate model (requested): ${meta.candidateModel}`,
+    `- candidate model (session): ${sessionModels.length > 0 ? sessionModels.join(", ") : "(none reported)"}`,
     `- opencode --version: ${meta.opencodeVersion}`,
     `- warden HEAD: ${meta.wardenHead}`,
     `- stoppedAtCostCeiling: ${meta.stoppedAtCostCeiling}`,
     ``,
   ];
+  const fixtures = Object.keys(treeSources);
+  if (fixtures.length > 0) {
+    lines.push(`## Tree sources`, ``, `| fixture | config | tree |`, `|---------|--------|------|`);
+    for (const fixture of fixtures) {
+      for (const [config, source] of Object.entries(treeSources[fixture] ?? {})) {
+        lines.push(`| \`${fixture}\` | ${config} | ${source} |`);
+      }
+    }
+    lines.push(``);
+  }
   for (const agg of aggregates) {
     lines.push(`## Config: ${agg.config}`, ``, renderMarkdownTable(agg), ``);
     const verdict = checkThreshold(agg, agg.rows);
     lines.push(`Threshold details:`, ...verdict.details.map((d) => `- ${d}`), ``);
   }
+  const reference = aggregates.find((x) => x.config === parity.reference);
+  const candidate = aggregates.find((x) => x.config === parity.candidate);
   if (reference && candidate) {
     lines.push(
       `## Compare: ${reference.config} vs ${candidate.config}`,
       ``,
       renderCompareTable(reference, candidate),
       ``,
-      `Parity details:`,
-      ...parity.details.map((d) => `- ${d}`),
-      ``,
-      `PARITY: ${parity.cleared ? "MET" : `NOT MET (criteria failed: ${parity.failed.join(", ")})`}`,
     );
   }
+  lines.push(`Parity details:`, ...parity.details.map((d) => `- ${d}`), ``, parityLine(parity));
   const mdPath = resolve(dir, `${ts}.md`);
   writeFileSync(mdPath, lines.join("\n") + "\n");
   process.stdout.write(`\nWrote ${mdPath}\n`);

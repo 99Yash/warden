@@ -36,6 +36,7 @@ import {
   waitForWardenMcp,
   wardenMcpReadiness,
 } from "../src/opencode/drive.js";
+import { isOpencodeCostMeasured } from "./eval/score.mjs";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TMP_ROOT = mkdtempSync(resolve(tmpdir(), "warden-opencode-lanes-"));
@@ -1183,6 +1184,38 @@ if (mode === "runfail") {
   }
   assert(!runHitB, "unconnected MCP never spawns run");
   await assertServeDead("unconnected MCP");
+
+  // (b2) MCP warmup failure through the returning core: no run spawned,
+  // so the eval scores a known $0 measured sample and the run continues.
+  process.env.WARDEN_SMOKE_SERVE_MODE = "failed";
+  process.env.WARDEN_SMOKE_SERVE_PORT = resolve(TMP_ROOT, "fake-serve-port");
+  const warmupFailed = await driveOpencodeLane({
+    repoRoot: REPO,
+    baseRef: "HEAD~1",
+    opencodeBin: fakePath,
+    mcpTimeoutSecs: 2,
+  });
+  delete process.env.WARDEN_SMOKE_SERVE_MODE;
+  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  assert(
+    warmupFailed.runSpawned === false &&
+      warmupFailed.usage === undefined &&
+      warmupFailed.lanes[0]?.status === "failed",
+    "MCP warmup failure → failed lane, runSpawned false, no usage",
+  );
+  assert(
+    isOpencodeCostMeasured(warmupFailed.runSpawned, warmupFailed.usage),
+    "MCP warmup failure → measured $0 (the eval run continues)",
+  );
+  assert(
+    driven.runSpawned === true && isOpencodeCostMeasured(driven.runSpawned, driven.usage),
+    "spawned run with a priced session usage → measured",
+  );
+  assert(
+    !isOpencodeCostMeasured(true, undefined),
+    "spawned run with no session usage → unmeasured (stops the run)",
+  );
+  await assertServeDead("MCP warmup failure (core)");
 
   // (c) warden failed status: lane failed with the server error in the reason.
   const failedMcp = runDriver(["--base", "HEAD~1", "--json", "--mcp-timeout", "2"], {

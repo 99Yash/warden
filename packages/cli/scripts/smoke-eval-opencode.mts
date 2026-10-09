@@ -14,8 +14,11 @@
  *       to exactly 2 lines.
  *   (c) `binaryPatchPaths` on a crafted patch.
  *   (d) `checkParity`: an all-pass pair, then one failing pair per
- *       criterion P0–P6 (the failed list names exactly that criterion),
- *       and a tie that passes.
+ *       criterion P0–P8 (the failed list names exactly that criterion),
+ *       and a tie that passes. P4/P6 read every raw sample: a failed lane
+ *       on a clean fixture, a 1-of-3 clean hit, and a 1-of-3 failed lane
+ *       each fail. P0/P7/P8 cover a short row, a failed reference, a
+ *       filtered run, a stopped run, and N=1.
  *   (e) `parseSessionUsage`: the verified shape; missing `data`;
  *       non-number `cost`; missing `tokens.cache` → `undefined`.
  *
@@ -312,7 +315,7 @@ function passRows(suffix = ""): FixtureScore[] {
     ),
     scoreFixtureRun(
       { name: `clean${suffix}`, category: "synthetic", diff: "", labels: [], expectsEmpty: true },
-      [makeSample(0, 0, 0.01, 0), makeSample(0, 0, 0.01, 0), makeSample(0, 0, 0.01, 0)],
+      [makeSample(0, 0, 0.01, 1), makeSample(0, 0, 0.01, 1), makeSample(0, 0, 0.01, 1)],
       "c",
     ),
     scoreFixtureRun(
@@ -340,9 +343,10 @@ function passRows(suffix = ""): FixtureScore[] {
   ];
 }
 
+const GATE_RUN = { samples: 3, fixtureFilter: false, stoppedAtCostCeiling: false };
 const refAgg = aggregateScores(passRows(), "ref");
 const candAgg = aggregateScores(passRows(), "cand");
-const passVerdict = checkParity(refAgg, candAgg);
+const passVerdict = checkParity(refAgg, candAgg, GATE_RUN);
 assert(passVerdict.cleared, `all-pass pair clears`);
 assert(
   passVerdict.reference === "ref" && passVerdict.candidate === "cand",
@@ -355,7 +359,7 @@ function expectSingleFail(
   want: string,
 ): void {
   const mutated = mutate(passRows());
-  const verdict = checkParity(refAgg, aggregateScores(mutated, "cand"));
+  const verdict = checkParity(refAgg, aggregateScores(mutated, "cand"), GATE_RUN);
   assert(
     !verdict.cleared && verdict.failed.length === 1 && verdict.failed[0] === want,
     `${label} → failed is exactly [${want}] (got [${verdict.failed.join(",")}])`,
@@ -370,8 +374,34 @@ function recatch(rows: FixtureScore[], name: string, caughtCount: number): Fixtu
   return rows.map((r) => (r.fixture === name ? { ...r, caughtCount } : r));
 }
 
+/** Map the raw samples of one row through `change`. */
+function resample(
+  rows: FixtureScore[],
+  name: string,
+  change: (s: FixtureSample, i: number) => FixtureSample,
+): FixtureScore[] {
+  return rows.map((r) =>
+    r.fixture === name ? { ...r, rawSamples: r.rawSamples.map((s, i) => change(s, i)) } : r,
+  );
+}
+
+const failedLane = (s: FixtureSample): FixtureSample => ({
+  ...s,
+  dispatchCount: 0,
+  error: "lane down failed (no submission)",
+});
+
 // P0: different fixture-name set.
 expectSingleFail("P0", (rows) => rename(rows, "plant", "plant-other"), "P0-same-fixtures");
+// P0: a short row (the run stopped inside the candidate's last fixture).
+expectSingleFail(
+  "P0-short-row",
+  (rows) =>
+    rows.map((r) =>
+      r.fixture === "falsepos" ? { ...r, rawSamples: r.rawSamples.slice(0, 1) } : r,
+    ),
+  "P0-same-fixtures",
+);
 // P1: real-PR recall below reference.
 expectSingleFail("P1", (rows) => recatch(rows, "m14-closeout", 2), "P1-real-recall");
 // P2: synthetic recall below reference.
@@ -382,39 +412,83 @@ expectSingleFail(
   (rows) => rows.map((r) => (r.fixture === "falsepos" ? { ...r, maxForbidden: 1 } : r)),
   "P3-precision-traps",
 );
-// P4: clean-fixture comments.
+// P4: a 1-of-3 clean hit (the median is still 0).
 expectSingleFail(
-  "P4",
-  (rows) => rows.map((r) => (r.fixture === "clean" ? { ...r, medianUnlabeled: 2 } : r)),
+  "P4-one-of-three",
+  (rows) => resample(rows, "clean", (s, i) => (i === 0 ? { ...s, unlabeledComments: 4 } : s)),
   "P4-clean-zero-hit",
 );
 // P5a: over budget (criterion (d)).
 expectSingleFail("P5-cost", (rows) => rows.map((r) => ({ ...r, medianCost: 1 })), "P5-cost");
 // P5b: unmeasured spend also fails P5.
 {
-  const rows = passRows().map((r) =>
-    r.fixture === "plant"
-      ? {
-          ...r,
-          rawSamples: r.rawSamples.map((s, i) => (i === 0 ? { ...s, costMeasured: false } : s)),
-        }
-      : r,
+  const rows = resample(passRows(), "plant", (s, i) =>
+    i === 0 ? { ...s, costMeasured: false } : s,
   );
-  const verdict = checkParity(refAgg, aggregateScores(rows, "cand"));
+  const verdict = checkParity(refAgg, aggregateScores(rows, "cand"), GATE_RUN);
   assert(
     !verdict.cleared && verdict.failed.includes("P5-cost"),
     `P5-unmeasured → P5-cost fails (got [${verdict.failed.join(",")}])`,
   );
 }
-// P6: a substantive row with no dispatch.
+// P6: the lane failed on every sample of a clean fixture (`comments: []`).
 expectSingleFail(
-  "P6",
-  (rows) => rows.map((r) => (r.fixture === "plant" ? { ...r, medianDispatches: 0 } : r)),
+  "P6-clean-lane-failed",
+  (rows) => resample(rows, "clean", failedLane),
   "P6-lane-health",
 );
+// P6: a 1-of-3 failed lane on a substantive fixture (the median hides it).
+expectSingleFail(
+  "P6-one-of-three",
+  (rows) => resample(rows, "plant", (s, i) => (i === 0 ? failedLane(s) : s)),
+  "P6-lane-health",
+);
+// P7: the reference failed on every sample (P1/P2 vacuous).
+{
+  const brokenRef = aggregateScores(
+    passRows().map((r) => ({
+      ...r,
+      caughtCount: 0,
+      medianDispatches: 0,
+      hadError: true,
+      rawSamples: r.rawSamples.map((s) => ({ ...s, dispatchCount: 0, error: "harness threw" })),
+    })),
+    "ref-broken",
+  );
+  const verdict = checkParity(brokenRef, candAgg, GATE_RUN);
+  assert(
+    !verdict.cleared && verdict.failed.length === 1 && verdict.failed[0] === "P7-reference-health",
+    `P7 failed reference → failed is exactly [P7-reference-health] (got [${verdict.failed.join(",")}])`,
+  );
+}
+// P8: a tracer is never a gate — filtered, stopped, N=1.
+for (const [label, run] of [
+  ["P8-filtered", { ...GATE_RUN, fixtureFilter: true }],
+  ["P8-stopped", { ...GATE_RUN, stoppedAtCostCeiling: true }],
+] as const) {
+  const verdict = checkParity(refAgg, candAgg, run);
+  assert(
+    !verdict.cleared && verdict.failed.length === 1 && verdict.failed[0] === "P8-gate-run",
+    `${label} → failed is exactly [P8-gate-run] (got [${verdict.failed.join(",")}])`,
+  );
+}
+{
+  // N=1: the rows hold 1 sample each, so P0 passes and only P8 fails.
+  const one = (rows: FixtureScore[]): FixtureScore[] =>
+    rows.map((r) => ({ ...r, rawSamples: r.rawSamples.slice(0, 1) }));
+  const verdict = checkParity(
+    aggregateScores(one(passRows()), "ref"),
+    aggregateScores(one(passRows()), "cand"),
+    { ...GATE_RUN, samples: 1 },
+  );
+  assert(
+    !verdict.cleared && verdict.failed.length === 1 && verdict.failed[0] === "P8-gate-run",
+    `P8-N=1 → failed is exactly [P8-gate-run] (got [${verdict.failed.join(",")}])`,
+  );
+}
 // A tie passes (parity, not superiority).
 {
-  const tie = checkParity(refAgg, aggregateScores(passRows(), "cand-tie"));
+  const tie = checkParity(refAgg, aggregateScores(passRows(), "cand-tie"), GATE_RUN);
   assert(tie.cleared, `identical tie passes`);
 }
 
