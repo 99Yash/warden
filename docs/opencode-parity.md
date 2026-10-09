@@ -42,8 +42,10 @@ cannot silently restore the default ceiling.
 `eval:parity` is `eval --parity programmatic-dispatch-multi opencode-down`:
 the reference is the production default harness config, the candidate is
 the driven lane. A bare `pnpm eval` never touches the OpenCode runtime —
-`opencode-down` lives in `OPENCODE_CONFIGS`, not `ALL_CONFIGS`, so a bare
-run cannot start paying for OpenCode sessions.
+`opencode-down` lives in `LANE_CONFIGS`, not `ALL_CONFIGS`, so a bare
+run cannot start paying for OpenCode sessions. `LANE_CONFIGS` also holds
+`claude-code-down`, the same lane run by `claude -p` on a Claude
+subscription login (see Results). It is a valid `--parity` candidate.
 
 ### Operator notes
 
@@ -184,6 +186,56 @@ different code (OpenCode vs warden's catalog).
 
 ## Results
 
-Pending an operator run (live, paid — the implementer ships the runner,
-the gate, and this doc; the operator runs the tracer). The scorecard
-lands under `packages/cli/scripts/eval/results/opencode-parity/`.
+### Tracer on Claude Code, 2026-10-09 (not a gate run)
+
+The operator chose not to pay for the full OpenCode tracer and not to
+run a reference. The run used the eval-only `claude-code-down` config
+(`scripts/eval/claude-code-lane.mts`): the same `warden-down.md` prompt,
+the same warden MCP tools, `evaluateLane`, and `runPostPass`, but run by
+`claude -p` on the operator's Claude subscription login. Thus this result
+is evidence about the down-lane method on another MCP client. It does
+not decide the OpenCode go/no-go.
+
+```
+pnpm --filter @warden/cli eval --config claude-code-down --samples 1 --max-cost 10
+```
+
+Scorecard:
+`results/opencode-parity/2026-10-09T06-43-53-982Z-claude-code-down.json`.
+`--max-cost` bounds the notional cost here (`total_cost_usd` is the API
+price equivalent; no money moves on a subscription login).
+
+| fixture | caught | comments | notional $ |
+| --- | --- | --- | --- |
+| `clean-formatting-only` (expects 0) | 0/0 | 0 | 0.0429 |
+| `clean-rename` (expects 0) | 0/0 | 0 | 0.0481 |
+| `committability-debugger-leftover` | 0/1 | 0 | 0.0610 |
+| `consistency-docstring-drift` | 0/1 | 1 | 0.0671 |
+| `correctness-off-by-one` | 1/1 | 1 | 0.0550 |
+| `leverage-stringify-clone` | 0/1 | 0 | 0.0456 |
+| `scalability-sequential-await` | 0/1 | 1 | 0.0669 |
+| `security-eval-injection` | 0/1 | 0 | 0.0508 |
+| `alfred-pr131-falsepos-9349d565` | 0/0, traps 0/8 | 3 | 2.0430 |
+| `alfred-pr14-misses-1ff9057` | 1/3 | 1 | 2.7617 |
+| `alfred-pr235-misses-a99d732f` | 1/5 | 2 | 1.4852 |
+| `m14-closeout-89bf988` | 0/3 | 1 | 0.4944 |
+| `m6-misses-2d4dc0b` | 0/4 | 4 | 0.7334 |
+
+- All 13 lanes ended `ok`, with no sample error. The session model was
+  `claude-opus-5-5` on every sample (requested `claude-opus-5-5#high`).
+- Synthetic 1/6, real-PR 2/15, false-positive traps 0/8, clean fixtures
+  0 comments. Total notional cost $7.96: synthetic fixtures cost about
+  $0.05 each, real PRs $0.49–2.76 each.
+- Every comment has category `correctness`, as the down charter says.
+  The committability, leverage, scalability, consistency, and security
+  plants are outside that charter (see Residuals).
+- `security-eval-injection` published no comment. The prompt tells the
+  lane not to restate det-prior findings, and the lane `CommentSet` does
+  not carry det-priors. Thus a det-prior-only bug does not reach the
+  published output. This is a known gap, not fixed in this slice.
+- The real PRs produced correctness findings that have no label (for
+  example 4 on `m6-misses-2d4dc0b`). A comment with no label is not
+  proof of a false positive.
+- On `correctness-off-by-one`, the OpenCode lane cost $0.1427 (an earlier
+  one-fixture tracer through the `warden-dev` gateway) and the Claude
+  Code lane cost $0.06–0.13.
