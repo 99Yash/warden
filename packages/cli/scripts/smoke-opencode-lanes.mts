@@ -31,6 +31,7 @@ import {
   parseMcpServers,
   resolveLoaderFlags,
   resolveWardenMcpCommand,
+  runOpencodeReview,
   waitForWardenMcp,
   wardenMcpReadiness,
 } from "../src/opencode/drive.js";
@@ -230,8 +231,21 @@ try {
   const allowed = permissions.filter((p) => p.effect === "allow").map((p) => p.action);
   const wantAllowed = [...DOWN_LANE_SPEC.allowedTools, ...LANE_MCP_TOOLS];
   assert(
-    allowed.length === wantAllowed.length && wantAllowed.every((t) => allowed.includes(t)),
-    `allows exactly the lane spec tools (${allowed.join(",")})`,
+    allowed.length === wantAllowed.length + 1 && wantAllowed.every((t) => allowed.includes(t)),
+    `allows the lane spec tools plus the .env.example carve-out (${allowed.join(",")})`,
+  );
+  // The `.env` guard sits after `allow read` and before the MCP allows:
+  // agent rules append after global rules and the last match wins, so a
+  // bare `allow read *` would otherwise re-open secret files.
+  const ruleShape = permissions.map((p) => `${p.effect} ${p.action} ${p.resource}`);
+  assert(
+    ruleShape[1] === "allow read *" &&
+      ruleShape[2] === "allow grep *" &&
+      ruleShape[3] === "allow glob *" &&
+      ruleShape[4] === "deny read *.env" &&
+      ruleShape[5] === "deny read *.env.*" &&
+      ruleShape[6] === "allow read *.env.example",
+    `read allow is followed by the .env deny guard (${ruleShape.slice(1, 7).join(" | ")})`,
   );
   for (const banned of ["shell", "edit", "webfetch", "subagent", "*"]) {
     assert(!allowed.includes(banned), `no allow for ${banned}`);
@@ -912,6 +926,39 @@ if (mode === "runfail") {
         d.message.includes("empty review target"),
     ) === true,
     "empty diff fails the lane with empty review target",
+  );
+
+  // (X1) a bin path that does not exist: exit 1 with an actionable
+  // lane-health entry and JSON output, at once (no MCP-timeout wait).
+  const savedWrite = process.stdout.write.bind(process.stdout);
+  let nobinOut = "";
+  process.stdout.write = ((chunk: unknown): boolean => {
+    nobinOut += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  const nobinStart = Date.now();
+  process.exitCode = 0;
+  await runOpencodeReview({
+    repoRoot: REPO,
+    baseRef: "HEAD~1",
+    json: true,
+    opencodeBin: "/nonexistent/opencode",
+  });
+  process.stdout.write = savedWrite;
+  const nobinExit = process.exitCode ?? 0;
+  process.exitCode = 0;
+  const nobinSet = parseOut(nobinOut);
+  assert(nobinExit === 1, `missing opencode binary exits 1 (got ${nobinExit})`);
+  assert(
+    Date.now() - nobinStart < 15000,
+    "missing binary fails at once, without waiting out the MCP timeout",
+  );
+  assert(nobinSet !== undefined, "missing binary still prints a JSON CommentSet");
+  assert(
+    nobinSet?.metadata.degradedWorkers.some(
+      (d) => d.kind === "actionable" && d.topic === "lane-health",
+    ) === true,
+    "missing binary carries an actionable lane-health entry",
   );
   rmSync(REPO, { recursive: true, force: true });
   rmSync(FAKE_BIN, { recursive: true, force: true });

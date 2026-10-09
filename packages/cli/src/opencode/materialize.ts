@@ -194,6 +194,13 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
   const permissions = [
     { action: "*", resource: "*", effect: "deny" },
     ...spec.allowedTools.map((tool) => ({ action: tool, resource: "*", effect: "allow" })),
+    // Secret guard (mirrors the built-in `explore` agent): agent rules are
+    // appended after global rules and the last match wins, so a bare
+    // `allow read *` would re-open `.env` files the host default and the
+    // user's global config deny. Deny (not ask) — an ask interrupts the run.
+    { action: "read", resource: "*.env", effect: "deny" },
+    { action: "read", resource: "*.env.*", effect: "deny" },
+    { action: "read", resource: "*.env.example", effect: "allow" },
     ...LANE_MCP_TOOLS.map((tool) => ({ action: tool, resource: "*", effect: "allow" })),
   ];
   const config = {

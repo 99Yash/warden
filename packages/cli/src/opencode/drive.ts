@@ -414,7 +414,12 @@ export async function waitForWardenMcp(opts: {
   for (;;) {
     let readiness: WardenMcpReadiness;
     try {
-      const res = await fetch(url, { headers: { Authorization: auth } });
+      // Bounded per request, so a hung response cannot outlive the wait.
+      const remaining = Math.max(1, deadline - Date.now());
+      const res = await fetch(url, {
+        headers: { Authorization: auth },
+        signal: AbortSignal.timeout(Math.min(pollMs * 4, remaining)),
+      });
       if (res.status === 401 || res.status === 403) {
         throw new Error(`MCP poll rejected (HTTP ${res.status}): password mismatch`);
       }
@@ -563,15 +568,28 @@ export async function runOpencodeReview(opts: DriveOptions): Promise<void> {
     serveStderr += d.toString();
     if (serveStderr.length > STDERR_TAIL_BYTES) serveStderr = serveStderr.slice(-STDERR_TAIL_BYTES);
   });
+  // A missing `opencode` binary throws an unhandled 'error' event without
+  // this listener — and the poll below would wait out the full MCP timeout
+  // on a serve that never started. Reject at once with a lane reason.
+  const serveSpawnFailed = new Promise<never>((_resolve, reject) => {
+    serve.once("error", (err) => {
+      reject(
+        new Error(`opencode not runnable: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    });
+  });
   // A leaked `opencode serve` is a bug: the child dies on every path below.
   try {
     try {
-      await waitForWardenMcp({
-        baseUrl,
-        password,
-        directory: opts.repoRoot,
-        timeoutMs: mcpTimeoutMs,
-      });
+      await Promise.race([
+        waitForWardenMcp({
+          baseUrl,
+          password,
+          directory: opts.repoRoot,
+          timeoutMs: mcpTimeoutMs,
+        }),
+        serveSpawnFailed,
+      ]);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       return await publishFailed(
@@ -694,6 +712,8 @@ function tailSuffix(tail: string): string {
 
 /** SIGTERM, then SIGKILL after a grace period; always awaited, never throws. */
 async function killServe(serve: ChildProcess): Promise<void> {
+  // The child never spawned (e.g. ENOENT): no 'exit' will ever arrive.
+  if (serve.pid === undefined) return;
   if (serve.exitCode !== null || serve.signalCode !== null) return;
   await new Promise<void>((resolveP) => {
     const timer = setTimeout(() => {
