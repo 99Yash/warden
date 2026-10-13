@@ -142,7 +142,7 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **content-addressed** — Cache keyed by content hash (SHA-256), not by mutable IDs. Same content always maps to the same address. Applied to chunks, embeddings, file snapshots, and the `import_graph` table. → ADR-0016.
 
-**`import_graph`** — M5 cache table mapping `(file_path, file_sha)` → JSON set of imported file paths. Immutable per row. Built from AST traversal. Rows are a parse cache only: a row is active for a review only when its `file_sha` matches the file's **source identity** in that review. Old rows stay in storage but never serve another snapshot. Read through `loadImportGraph` by the selector and the deadcode detector. → ADR-0018.
+**`import_graph`** — M5 cache table mapping `(file_path, file_sha)` → JSON set of imported file paths. Immutable per row. Built from AST traversal. Rows are a parse cache only: a row is active for a review only when its `file_sha` matches the file's **source identity** in that review. Resolved import targets are not trusted from the row; they depend on other files and tsconfig, so they are resolved again on each load. Old rows stay in storage but never serve another snapshot. Read through `loadImportGraph` by the selector and the deadcode detector. → ADR-0018.
 
 **source identity** — The SHA-256 of a tracked source file's bytes as read from the working tree during the current review. Never remembered between reviews: a clean `git status` does not prove a stored hash is current, because a commit, checkout, or reset changes content without making the file "modified". A file that cannot be read has no identity; it is reported by path and left out of the graph. → ADR-0018 amendment (issue #62).
 

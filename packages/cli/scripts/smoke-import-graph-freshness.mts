@@ -18,13 +18,15 @@
  *  [4] repeated review of unchanged source reuses parsed records
  *  [5] an unreadable file is reported by path and never served from cache
  *  [6] a deletion in the working tree leaves the snapshot without an error
+ *  [7] an unchanged importer's edge follows its target when another file
+ *      shadows or renames it (resolution is not cached with the row)
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 const TMP_ROOT = mkdtempSync(resolve(tmpdir(), "warden-import-graph-"));
 const REPO = resolve(TMP_ROOT, "repo");
@@ -113,6 +115,9 @@ function countingParser(): SourceParser & { calls: number } {
     async exports(abs: string, content: string) {
       return inner.exports(abs, content);
     },
+    resolve(moduleName: string, containingFile: string) {
+      return inner.resolve(moduleName, containingFile);
+    },
   };
   return counter;
 }
@@ -124,6 +129,18 @@ async function activeFiles(): Promise<string[]> {
     topic: "context",
   });
   return snapshot.files;
+}
+
+/** Loads the graph and returns the resolved target of `from`'s import of `module`, repo-relative. */
+async function resolvedImport(
+  parser: SourceParser,
+  from: string,
+  module: string,
+): Promise<string | undefined> {
+  const snapshot = await loadImportGraph({ repoRoot: REPO, parser, topic: "context" });
+  const entry = snapshot.graph.get(resolve(REPO, from));
+  const target = entry?.imports.find((i) => i.module === module)?.resolved;
+  return target ? relative(REPO, target) : undefined;
 }
 
 const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
@@ -267,6 +284,28 @@ try {
     same(await activeFiles(), ["src/c.ts", "src/lib.ts", "src/other.ts"]),
     "deleted file is not in the active file set",
   );
+
+  // ── [7] resolution changes while the importer's bytes do not ─────────
+  process.stdout.write(`\n[7] shadow and rename an import target, importer unchanged\n`);
+  git("checkout", "--", "src/renamed.ts");
+  mkdirSync(resolve(REPO, "src/util"), { recursive: true });
+  write("src/util/index.ts", "export const u = 1;\n");
+  write("src/d.ts", 'import { u } from "./util";\nexport const dd = u;\n');
+  commit("E: d imports util/index");
+  assert(
+    (await resolvedImport(countingParser(), "src/d.ts", "./util")) === "src/util/index.ts",
+    "E: d → src/util/index.ts",
+  );
+  write("src/util.ts", "export const u = 2;\n");
+  commit("F: util.ts shadows util/index.ts");
+  const shadowParser = countingParser();
+  const shadowed = await resolvedImport(shadowParser, "src/d.ts", "./util");
+  assert(shadowParser.calls === 1, `F: only util.ts is parsed (got ${shadowParser.calls})`);
+  assert(shadowed === "src/util.ts", `F: cached d row → src/util.ts (got ${shadowed})`);
+  git("mv", "src/util.ts", "src/util.tsx");
+  commit("G: util.ts renamed to util.tsx");
+  const renamed = await resolvedImport(countingParser(), "src/d.ts", "./util");
+  assert(renamed === "src/util.tsx", `G: cached d row → src/util.tsx (got ${renamed})`);
 } finally {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 }

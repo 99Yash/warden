@@ -20,6 +20,11 @@ import type { Graph } from "./signals/imports.js";
  * as much as asking git's index (~0.3s on a 10k-file repo); the expensive part,
  * the parse, stays cached per `(path, sha)`.
  *
+ * A row caches only what the file's own bytes determine. `ImportRef.resolved`
+ * also depends on other files (a new `b.ts` shadows `b/index.ts`, a target
+ * moves to `.tsx`) and on tsconfig, so it is re-resolved against today's tree
+ * on every load and the stored value is never used.
+ *
  * Rows for other snapshots stay in `import_graph` but never become active:
  * the graph contains only paths in today's `git ls-files`, each bound to the
  * hash of the bytes read today. Files that cannot be read are reported by path
@@ -73,7 +78,13 @@ export async function loadImportGraph(input: {
     const cached = readImportGraphRow(path, sha);
     if (cached) {
       stats.reused++;
-      graph.set(abs, cached);
+      graph.set(abs, {
+        imports: cached.imports.map((imp) => ({
+          ...imp,
+          resolved: parser.resolve(imp.module, abs),
+        })),
+        exports: cached.exports,
+      });
       return;
     }
     // Parse the same bytes that were hashed, so the stored row can never pair

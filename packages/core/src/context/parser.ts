@@ -18,7 +18,12 @@ import ts from "typescript";
 export interface ImportRef {
   /** The literal in the import specifier — `"react"`, `"./session"`, `"@warden/core"`. */
   module: string;
-  /** Absolute path resolved through tsconfig. Undefined for unresolved/external. */
+  /**
+   * Absolute path resolved through tsconfig. Undefined for unresolved/external.
+   * Depends on other files and on tsconfig, not only on this file's content —
+   * `loadImportGraph` re-resolves it on every load instead of trusting a
+   * cached value.
+   */
   resolved?: string;
   kind: "value" | "type";
   /** Named imports. Empty for default-only or namespace-only imports. */
@@ -37,6 +42,8 @@ export interface ExportRef {
 export interface SourceParser {
   imports(absPath: string, content: string): Promise<ImportRef[]>;
   exports(absPath: string, content: string): Promise<ExportRef[]>;
+  /** Resolves a module specifier as seen from `containingFile`, with the same rules as `imports`. */
+  resolve(moduleName: string, containingFile: string): string | undefined;
 }
 
 interface ResolvedTsconfig {
@@ -71,7 +78,7 @@ export class TsCompilerParser implements SourceParser {
         const range = lineRange(sf, stmt);
         refs.push({
           module: moduleName,
-          resolved: this.resolveModule(moduleName, absPath),
+          resolved: this.resolve(moduleName, absPath),
           kind: isTypeOnly ? "type" : "value",
           symbols,
           ...range,
@@ -88,7 +95,7 @@ export class TsCompilerParser implements SourceParser {
           const range = lineRange(sf, stmt);
           refs.push({
             module: moduleName,
-            resolved: this.resolveModule(moduleName, absPath),
+            resolved: this.resolve(moduleName, absPath),
             kind: "value",
             symbols: [stmt.name.text],
             ...range,
@@ -113,7 +120,7 @@ export class TsCompilerParser implements SourceParser {
         const range = lineRange(sf, stmt);
         refs.push({
           module: moduleName,
-          resolved: this.resolveModule(moduleName, absPath),
+          resolved: this.resolve(moduleName, absPath),
           kind: isTypeOnly ? "type" : "value",
           symbols,
           ...range,
@@ -159,7 +166,7 @@ export class TsCompilerParser implements SourceParser {
     return refs;
   }
 
-  private resolveModule(moduleName: string, containingFile: string): string | undefined {
+  resolve(moduleName: string, containingFile: string): string | undefined {
     const result = ts.resolveModuleName(
       moduleName,
       containingFile,
