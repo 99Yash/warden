@@ -142,9 +142,11 @@ This file is **not** an architecture overview (see [`CLAUDE.md`](./CLAUDE.md)), 
 
 **content-addressed** — Cache keyed by content hash (SHA-256), not by mutable IDs. Same content always maps to the same address. Applied to chunks, embeddings, file snapshots, and the `import_graph` table. → ADR-0016.
 
-**`import_graph`** — M5 cache table mapping `(file_path, file_sha)` → JSON set of imported file paths. Immutable per row. Built from AST traversal; supports reverse-lookup queries (e.g., the deadcode detector). → ADR-0018.
+**`import_graph`** — M5 cache table mapping `(file_path, file_sha)` → the parse result of that content: `ImportRef[]` in `imports_json` and `ExportRef[]` in `exports_json`. Immutable per row. Built from AST traversal. Rows are a parse cache only: a row is active for a review only when its `file_sha` matches the file's **source identity** in that review. Each stored `ImportRef` keeps the `resolved` target from the parse, but the loader ignores it. A resolved target depends on other files and tsconfig, so the loader resolves each import again on each load. Old rows stay in storage but never serve another snapshot. Read through `loadImportGraph` by the selector and the deadcode detector. In `runDetPriors`, both share one load per review. → ADR-0018.
 
-**`file_state`** — M5 cache table tracking which files changed since the last run, refreshed via `git ls-files --modified --others --exclude-standard`. Drives incremental selector updates. → ADR-0018.
+**source identity** — The SHA-256 of a tracked source file's bytes as read from the working tree during the current review. Never remembered between reviews: a clean `git status` does not prove a stored hash is current, because a commit, checkout, or reset changes content without making the file "modified". A file that cannot be read has no identity; it is reported by path and left out of the graph. A tracked file that is missing on disk also has no identity. Git classifies it: a deletion in the working tree stays silent, a file outside a sparse checkout is counted in one `info` entry, and any other missing file is reported by path as unreadable. → ADR-0018 amendment (issue #62).
+
+**`file_state`** — _Retired (migration `0008`, issue #62)._ Was the M5 path → last-observed-SHA pointer, refreshed only for `git ls-files --modified --others`. It went stale after commits and branch changes on a clean tree; replaced by per-review **source identity**. → ADR-0018.
 
 **`RetrievedContext`** — The structured payload handed to the formatter: changed files + selected candidates + their evidence excerpts + path-only same-folder neighbours.
 

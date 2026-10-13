@@ -15,6 +15,7 @@
     "lanes:materialize": "node --import tsx/esm scripts/materialize-lanes.mts",
     "lanes:check": "node --import tsx/esm scripts/materialize-lanes.mts --check",
     "smoke:m5-selector": "node --import tsx/esm scripts/smoke-m5-selector.mts",
+    "smoke:import-graph-freshness": "node --import tsx/esm scripts/smoke-import-graph-freshness.mts",
     "smoke:m5-jscpd": "node --import tsx/esm scripts/smoke-m5-jscpd.mts",
     "smoke:auto-migrate": "node --import tsx/esm scripts/smoke-auto-migrate.mts",
     "smoke:m7": "node --import tsx/esm scripts/smoke-m7-init.mts",

@@ -1,9 +1,16 @@
 import { readFile } from "node:fs/promises";
-import { resolve as resolvePath } from "node:path";
+import { relative, resolve as resolvePath, sep } from "node:path";
 import ts from "typescript";
-import { db, importGraph } from "@warden/db";
 import { assertNever } from "../assert-never.js";
+import {
+  loadImportGraph,
+  type ImportGraphLoader,
+  type ImportGraphSnapshot,
+} from "../context/import-graph.js";
+import { TsCompilerParser } from "../context/parser.js";
+import type { Graph } from "../context/signals/imports.js";
 import type { ChangedFile } from "../diff/index.js";
+import { plural } from "../plural.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, formatErr, parseChangedSourceFile } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
@@ -16,11 +23,18 @@ import type { ToolFinding } from "./types.js";
  *   1. For each diff-touched function with `export` modifier and at least one
  *      optional parameter (`?`, default value, or `T | undefined`/`T | null`),
  *      collect the optional params and their presence-checking branches.
- *   2. Scan `import_graph` for rows whose `imports_json` resolves to the
- *      changed file's absolute path (one-hop reverse).
+ *   2. Load the active import graph for the working tree (the shared
+ *      `importGraph`, else `loadImportGraph`) and find files whose imports
+ *      resolve to the changed file's absolute path (one-hop reverse). Rows
+ *      cached for other snapshots never count.
  *   3. Parse each caller; locate `CallExpression` nodes whose callee resolves
  *      to the function. If no callsite passes the optional position, emit one
  *      finding per `(param, branch)` pair with a 3-part evidence array.
+ *
+ * Unknown reach is not zero reach (issue #61): when the graph left a file out
+ * (unreadable, failed to parse, or outside a sparse checkout) or a caller
+ * cannot be read, the missing file may be the one caller that passes the
+ * param. Such a finding is withheld and counted in one `info` entry instead.
  *
  * Out of scope for v0 (per ADR-0021's caveats):
  *   - Dynamic dispatch (`obj[methodName]()`).
@@ -35,12 +49,23 @@ import type { ToolFinding } from "./types.js";
 export interface DeadcodeRunnerInput {
   repoRoot: string;
   changed: ChangedFile[];
+  /**
+   * The review's shared import graph (`runDetPriors`). The caller reports the
+   * snapshot's degraded entries. Without it, the runner loads the graph itself
+   * and reports them.
+   */
+  importGraph?: ImportGraphLoader;
+  /** tsconfig for import resolution when the runner loads the graph itself. */
+  tsconfigPath?: string;
 }
 
 export interface DeadcodeRunnerOutput {
   findings: ToolFinding[];
   degraded: DegradedEntry[];
 }
+
+/** Caller paths listed in the skip entry before "and N more". */
+const MAX_LISTED_PATHS = 10;
 
 interface OptionalParamInfo {
   paramName: string;
@@ -55,11 +80,14 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
   const findings: ToolFinding[] = [];
   const degraded: DegradedEntry[] = [];
 
-  // Build the reverse import-graph index once on first need. Repeating
-  // `import_graph.all()` per changed file blows up with cache size; one pass
-  // + an in-memory Map<targetAbs, callers[]> keeps deadcode O(rows + changed).
+  // Build the reverse import-graph index once on first need: one graph load
+  // + an in-memory Map<targetAbs, callers[]> keeps deadcode O(files + changed).
   let reverseIndex: Map<string, CallerEntry[]> | undefined;
   let indexFailed = false;
+  // Why the graph is incomplete, e.g. "1 unreadable file"; empty when complete.
+  let graphGaps: string[] = [];
+  let skipped = 0;
+  const unreadCallers = new Set<string>();
 
   for (const cf of input.changed) {
     const parseResult = await parseChangedSourceFile(input.repoRoot, cf, "deadcode");
@@ -75,7 +103,39 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
 
     if (!reverseIndex && !indexFailed) {
       try {
-        reverseIndex = buildReverseImportIndex(input.repoRoot);
+        let snapshot: ImportGraphSnapshot;
+        if (input.importGraph) {
+          snapshot = await input.importGraph();
+        } else {
+          snapshot = await loadImportGraph({
+            repoRoot: input.repoRoot,
+            parser: new TsCompilerParser({
+              repoRoot: input.repoRoot,
+              tsconfigPath: input.tsconfigPath,
+            }),
+            topic: "deadcode",
+          });
+          degraded.push(...snapshot.degraded);
+        }
+        // Gaps that affect a finding are also named in the skip entry below.
+        graphGaps = [
+          ...(snapshot.unreadable.length > 0
+            ? [plural(snapshot.unreadable.length, "unreadable file", "unreadable files")]
+            : []),
+          ...(snapshot.stats.parseErrors > 0
+            ? [plural(snapshot.stats.parseErrors, "parse error", "parse errors")]
+            : []),
+          ...(snapshot.outsideSparse.length > 0
+            ? [
+                plural(
+                  snapshot.outsideSparse.length,
+                  "file outside the sparse checkout",
+                  "files outside the sparse checkout",
+                ),
+              ]
+            : []),
+        ];
+        reverseIndex = buildReverseImportIndex(input.repoRoot, snapshot.graph);
       } catch (err) {
         indexFailed = true;
         degraded.push({
@@ -93,6 +153,11 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
       const callsites = await collectCallsites(callers, cand.fnName, cand.paramIndex);
       if (callsites.totalCount === 0) continue;
       if (callsites.passingCount > 0) continue;
+      if (graphGaps.length > 0 || callsites.unreadCallers.length > 0) {
+        skipped++;
+        for (const path of callsites.unreadCallers) unreadCallers.add(path);
+        continue;
+      }
 
       const example = callsites.exampleSite;
       const message = example
@@ -110,6 +175,27 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
         message,
       });
     }
+  }
+
+  if (skipped > 0) {
+    // Files the snapshot left out are named by its own warning; only callers
+    // that failed here are listed.
+    const reasons: string[] = [];
+    if (graphGaps.length > 0) reasons.push(`import graph incomplete (${graphGaps.join(", ")})`);
+    if (unreadCallers.size > 0) {
+      const listed = [...unreadCallers].sort();
+      const shown = listed.slice(0, MAX_LISTED_PATHS).join(", ");
+      const more =
+        listed.length > MAX_LISTED_PATHS ? ` and ${listed.length - MAX_LISTED_PATHS} more` : "";
+      reasons.push(
+        `could not read ${plural(listed.length, "caller file", "caller files")}: ${shown}${more}`,
+      );
+    }
+    degraded.push({
+      kind: "info",
+      topic: "deadcode",
+      message: `deadcode: ${plural(skipped, "candidate", "candidates")} skipped; ${reasons.join("; ")}`,
+    });
   }
 
   return { findings, degraded };
@@ -236,28 +322,15 @@ interface CallerEntry {
 }
 
 /**
- * One-pass scan of `import_graph` keyed by resolved import target. Caller
- * lookup per changed file collapses to a single Map.get() instead of
- * re-scanning the table.
+ * Reverse index over the active import graph, keyed by resolved import
+ * target. Caller lookup per changed file collapses to a single Map.get().
  */
-function buildReverseImportIndex(repoRoot: string): Map<string, CallerEntry[]> {
-  const rows = db()
-    .select({
-      filePath: importGraph.filePath,
-      importsJson: importGraph.importsJson,
-    })
-    .from(importGraph)
-    .all();
+function buildReverseImportIndex(repoRoot: string, graph: Graph): Map<string, CallerEntry[]> {
   const out = new Map<string, CallerEntry[]>();
   const seenPerTarget = new Map<string, Set<string>>();
-  for (const row of rows) {
-    let imports: { resolved?: string }[];
-    try {
-      imports = JSON.parse(row.importsJson) as { resolved?: string }[];
-    } catch {
-      continue;
-    }
-    for (const imp of imports) {
+  for (const [callerAbs, entry] of graph) {
+    const callerPath = relative(repoRoot, callerAbs).split(sep).join("/");
+    for (const imp of entry.imports) {
       if (!imp.resolved) continue;
       const targetAbs = resolvePath(imp.resolved);
       let seen = seenPerTarget.get(targetAbs);
@@ -265,14 +338,14 @@ function buildReverseImportIndex(repoRoot: string): Map<string, CallerEntry[]> {
         seen = new Set();
         seenPerTarget.set(targetAbs, seen);
       }
-      if (seen.has(row.filePath)) continue;
-      seen.add(row.filePath);
+      if (seen.has(callerPath)) continue;
+      seen.add(callerPath);
       let entries = out.get(targetAbs);
       if (!entries) {
         entries = [];
         out.set(targetAbs, entries);
       }
-      entries.push({ path: row.filePath, abs: resolvePath(repoRoot, row.filePath) });
+      entries.push({ path: callerPath, abs: callerAbs });
     }
   }
   return out;
@@ -282,6 +355,8 @@ interface CallsiteSurvey {
   totalCount: number;
   passingCount: number;
   exampleSite?: { path: string; line: number };
+  /** Callers that could not be read or parsed; their callsites are unknown. */
+  unreadCallers: string[];
 }
 
 async function collectCallsites(
@@ -295,17 +370,20 @@ async function collectCallsites(
   let totalCount = 0;
   let passingCount = 0;
   let exampleSite: CallsiteSurvey["exampleSite"];
+  const unreadCallers: string[] = [];
   for (const caller of callers) {
     let content: string;
     try {
       content = await readFile(caller.abs, "utf8");
     } catch {
+      unreadCallers.push(caller.path);
       continue;
     }
     let sf: ts.SourceFile;
     try {
       sf = ts.createSourceFile(caller.abs, content, ts.ScriptTarget.Latest, true);
     } catch {
+      unreadCallers.push(caller.path);
       continue;
     }
     visitCalls(sf, (call, line) => {
@@ -324,7 +402,7 @@ async function collectCallsites(
       }
     });
   }
-  return { totalCount, passingCount, exampleSite };
+  return { totalCount, passingCount, exampleSite, unreadCallers };
 }
 
 function visitCalls(

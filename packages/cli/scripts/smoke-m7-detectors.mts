@@ -8,6 +8,7 @@
  *   pnpm --filter @warden/cli smoke:m7-detectors
  */
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, unlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -22,7 +23,6 @@ mkdirSync(TMP_ROOT, { recursive: true });
 
 const { runScalability } = await import("@warden/core/runners/scalability");
 const { runDeadcode } = await import("@warden/core/runners/deadcode");
-const { db, importGraph } = await import("@warden/db");
 
 let failed = 0;
 function assert(cond: unknown, msg: string): void {
@@ -115,28 +115,10 @@ export const b = fetchSomething("b");
 `,
 );
 
-// Populate import_graph: caller imports dead.ts. The detector queries this
-// table for reverse callers; it never runs the M5 selector itself.
-db()
-  .insert(importGraph)
-  .values({
-    filePath: callerPath,
-    fileSha: "smoke-caller-sha",
-    importsJson: JSON.stringify([
-      {
-        module: "./dead",
-        resolved: dcAbs,
-        kind: "value",
-        symbols: ["fetchSomething"],
-        startLine: 2,
-        endLine: 2,
-      },
-    ]),
-    exportsJson: JSON.stringify([]),
-    computedAt: new Date(),
-  })
-  .onConflictDoNothing()
-  .run();
+// The detector loads the active import graph itself (issue #62): the fixture
+// must be a git repo with both files tracked; no pre-seeded rows.
+execFileSync("git", ["init", "-q"], { cwd: TMP_ROOT });
+execFileSync("git", ["add", "-A"], { cwd: TMP_ROOT });
 
 const dcAddedLines = Array.from({ length: 8 }, (_, i) => i + 1);
 const r3 = await runDeadcode({

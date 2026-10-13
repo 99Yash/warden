@@ -1,9 +1,5 @@
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import type { EmbeddingProvider } from "@warden/ai";
-import { and, db, eq, fileState, importGraph } from "@warden/db";
 import type { ChangedFile } from "../diff/index.js";
 import type { EcosystemContext } from "../ecosystem/index.js";
 import type { ChunkStore, EmbeddingStore } from "../indexing/index.js";
@@ -15,12 +11,16 @@ import {
   REASON_WEIGHTS,
 } from "./index.js";
 import type { ContextCandidate, ContextSelector, Reason, SelectorOutput } from "./index.js";
-import { TsCompilerParser, type ExportRef, type ImportRef, type SourceParser } from "./parser.js";
+import {
+  loadImportGraph,
+  type ImportGraphLoader,
+  type ImportGraphSnapshot,
+} from "./import-graph.js";
+import { TsCompilerParser, type ExportRef, type SourceParser } from "./parser.js";
 import {
   collectImportedByReasons,
   collectImporterReasons,
   deriveReverse,
-  type Graph,
 } from "./signals/imports.js";
 import { buildFilesByDir, collectSameFolderReasons } from "./signals/same-folder.js";
 import { semanticSignal } from "./signals/semantic.js";
@@ -32,23 +32,29 @@ import { collectSymbolRefHits } from "./signals/symbol-refs.js";
  * content-addressed in `import_graph`), runs four signals (direct importers,
  * direct imports, same-folder, symbol-refs), and returns ranked candidates.
  *
- * The whole flow is read-only against the host repo. Every cache read is
- * keyed on `(filePath, fileSha)` so any file change naturally produces a
- * cache miss and a re-parse — no manual invalidation required.
+ * The whole flow is read-only against the host repo. The graph comes from
+ * `loadImportGraph`, which hashes every tracked source file on each call and
+ * keys cache reads on `(filePath, fileSha)` — any content change, including
+ * one from a commit or checkout on a clean tree, produces a cache miss and a
+ * re-parse with no manual invalidation.
  *
- * Parser resolution order (per `select()` call):
- *   1. `opts.parser` — explicit injection (custom impl, tests).
- *   2. `new TsCompilerParser({ tsconfigPath: opts.tsconfigPath ?? ecosystem.tsconfigPaths[0] })`.
+ * Graph source (per `select()` call):
+ *   1. `input.importGraph` — the review's shared snapshot (`runDetPriors`).
+ *      The parser options below are not used, and the caller reports the
+ *      snapshot's degraded entries.
+ *   2. Otherwise a load of its own, with the parser below:
+ *      a. `opts.parser` — explicit injection (custom impl, tests).
+ *      b. `new TsCompilerParser({ tsconfigPath: opts.tsconfigPath ?? ecosystem.tsconfigPaths[0] })`.
  * Selectors are intended to be cheap to construct and per-review; the
  * `ecosystem` argument carries the host-repo state, so tsconfig discovery
  * stays at the call site rather than freezing into the constructor.
  */
 
-const PARSE_BATCH_SIZE = 20;
-const SOURCE_EXT_RE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
-
 export interface CheapSignalsSelectorOptions {
-  /** Custom parser. Takes precedence over the tsconfig-based default. */
+  /**
+   * Custom parser. Takes precedence over the tsconfig-based default. Not used
+   * when `select()` receives a shared `importGraph`.
+   */
   parser?: SourceParser;
   /** Override tsconfig path for module resolution. Falls back to `ecosystem.tsconfigPaths[0]`. */
   tsconfigPath?: string;
@@ -76,126 +82,30 @@ export class CheapSignalsSelector implements ContextSelector {
     changed: ChangedFile[];
     ecosystem: EcosystemContext;
     diff?: string;
+    importGraph?: ImportGraphLoader;
   }): Promise<SelectorOutput> {
     const { repoRoot, changed, ecosystem } = input;
     const degraded: DegradedEntry[] = [];
 
-    const parser =
-      this.opts.parser ??
-      new TsCompilerParser({
-        repoRoot,
-        tsconfigPath: this.opts.tsconfigPath ?? ecosystem.tsconfigPaths[0],
-      });
-
-    // 1. Source-file universe via `git ls-files`.
-    const allFilesRel = (await gitLs(repoRoot, ["ls-files"])).filter((f) => SOURCE_EXT_RE.test(f));
-    if (allFilesRel.length === 0) {
+    // 1–3. Active import graph for the working tree: every tracked source
+    //      file is hashed from disk, and only rows for those hashes are used.
+    let snapshot: ImportGraphSnapshot;
+    if (input.importGraph) {
+      snapshot = await input.importGraph();
+    } else {
+      const parser =
+        this.opts.parser ??
+        new TsCompilerParser({
+          repoRoot,
+          tsconfigPath: this.opts.tsconfigPath ?? ecosystem.tsconfigPaths[0],
+        });
+      snapshot = await loadImportGraph({ repoRoot, parser, topic: "context" });
+      degraded.push(...snapshot.degraded);
+    }
+    if (snapshot.files.length === 0) {
       return { candidates: [], degraded };
     }
-
-    // 2. Refresh staleness pointer for git-modified + untracked files.
-    let dirtyFiles: string[];
-    try {
-      dirtyFiles = await gitLs(repoRoot, [
-        "ls-files",
-        "--modified",
-        "--others",
-        "--exclude-standard",
-      ]);
-    } catch {
-      dirtyFiles = allFilesRel;
-      degraded.push({
-        kind: "info",
-        topic: "context",
-        message: "context: git ls-files --modified failed; falling back to full hash",
-      });
-    }
-
-    const dirtyFilesFiltered = dirtyFiles.filter((f) => SOURCE_EXT_RE.test(f));
-    const dirtyShaByPath = new Map<string, string>();
-    for (const path of dirtyFilesFiltered) {
-      const abs = resolvePath(repoRoot, path);
-      const sha = await safeSha256(abs);
-      if (!sha) continue;
-      dirtyShaByPath.set(path, sha);
-      upsertFileState(path, sha);
-    }
-
-    // 3. Build the import graph: lookup (path, sha) → cache; miss → parse + insert.
-    const knownState = readFileStateFor(allFilesRel);
-    const cacheCounts = { hits: 0, misses: 0, parseErrors: 0 };
-
-    const graph: Graph = new Map();
-
-    // Determine each file's resolved SHA — dirty list trumps file_state row.
-    const shaByPath = new Map<string, string>();
-    const needsHashing: string[] = [];
-    for (const path of allFilesRel) {
-      const sha = dirtyShaByPath.get(path) ?? knownState.get(path);
-      if (sha) shaByPath.set(path, sha);
-      else needsHashing.push(path);
-    }
-    // First-run case: no file_state rows yet, none dirty (clean tree).
-    if (needsHashing.length > 0) {
-      degraded.push({
-        kind: "info",
-        topic: "context",
-        message: `context: cold import-graph build (hashing ${needsHashing.length} files)`,
-      });
-      await runInBatches(needsHashing, PARSE_BATCH_SIZE, async (path) => {
-        const abs = resolvePath(repoRoot, path);
-        const sha = await safeSha256(abs);
-        if (sha) {
-          shaByPath.set(path, sha);
-          upsertFileState(path, sha);
-        }
-      });
-    }
-
-    // Build graph entries.
-    let coldParseCount = 0;
-    await runInBatches(allFilesRel, PARSE_BATCH_SIZE, async (path) => {
-      const sha = shaByPath.get(path);
-      if (!sha) return;
-      const cached = readImportGraphRow(path, sha);
-      if (cached) {
-        cacheCounts.hits++;
-        graph.set(resolvePath(repoRoot, path), {
-          imports: cached.imports,
-          exports: cached.exports,
-        });
-        return;
-      }
-      cacheCounts.misses++;
-      coldParseCount++;
-      const abs = resolvePath(repoRoot, path);
-      try {
-        const content = await readFile(abs, "utf8");
-        const [imports, exports] = await Promise.all([
-          parser.imports(abs, content),
-          parser.exports(abs, content),
-        ]);
-        insertImportGraphRow(path, sha, imports, exports);
-        graph.set(abs, { imports, exports });
-      } catch {
-        cacheCounts.parseErrors++;
-      }
-    });
-
-    if (cacheCounts.misses > 0 && cacheCounts.hits === 0) {
-      degraded.push({
-        kind: "info",
-        topic: "context",
-        message: `context: cold import-graph build (parsed ${coldParseCount} files in Ts)`,
-      });
-    }
-    if (cacheCounts.parseErrors > 0) {
-      degraded.push({
-        kind: "info",
-        topic: "context",
-        message: `context: ${cacheCounts.parseErrors} files failed to parse`,
-      });
-    }
+    const { graph } = snapshot;
 
     // 4. Reverse import index.
     const reverse = deriveReverse(graph);
@@ -208,7 +118,7 @@ export class CheapSignalsSelector implements ContextSelector {
     const importerReasons = collectImporterReasons(changedAbs, graph, reverse);
     const importedByReasons = collectImportedByReasons(changedAbs, graph);
 
-    const filesByDir = buildFilesByDir(allFilesRel);
+    const filesByDir = buildFilesByDir(snapshot.files);
     const sameFolderReasons = collectSameFolderReasons(changedRel, filesByDir);
 
     const changedExportsByPath = new Map<string, ExportRef[]>();
@@ -374,123 +284,6 @@ function scoreReasons(reasons: Reason[]): number {
   }
   if (maxSemantic > 0) sum += REASON_WEIGHTS.semantic * maxSemantic;
   return sum / MAX_REASON_WEIGHT_SUM;
-}
-
-function gitLs(repoRoot: string, args: string[]): Promise<string[]> {
-  return new Promise((resolveP, rejectP) => {
-    const child = spawn("git", args, {
-      cwd: repoRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
-    });
-    child.on("error", (err) => rejectP(err));
-    child.on("close", (code) => {
-      if (code !== 0) {
-        rejectP(new Error(`git ${args.join(" ")} exited ${code ?? "?"}`));
-        return;
-      }
-      resolveP(
-        stdout
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0),
-      );
-    });
-  });
-}
-
-async function runInBatches<T>(
-  items: T[],
-  batchSize: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  for (let i = 0; i < items.length; i += batchSize) {
-    const slice = items.slice(i, i + batchSize);
-    await Promise.all(slice.map(fn));
-  }
-}
-
-async function safeSha256(absPath: string): Promise<string | undefined> {
-  try {
-    const buf = await readFile(absPath);
-    return createHash("sha256").update(buf).digest("hex");
-  } catch {
-    return undefined;
-  }
-}
-
-function upsertFileState(filePath: string, sha: string): void {
-  db()
-    .insert(fileState)
-    .values({ filePath, currentSha: sha, observedAt: new Date() })
-    .onConflictDoUpdate({
-      target: fileState.filePath,
-      set: { currentSha: sha, observedAt: new Date() },
-    })
-    .run();
-}
-
-function readFileStateFor(paths: string[]): Map<string, string> {
-  const out = new Map<string, string>();
-  if (paths.length === 0) return out;
-  // Single-shot read of the whole table is simpler than chunked WHERE-IN
-  // queries for repos at the scale we target (~10k rows max).
-  const rows = db()
-    .select({ filePath: fileState.filePath, currentSha: fileState.currentSha })
-    .from(fileState)
-    .all();
-  const lookup = new Set(paths);
-  for (const r of rows) {
-    if (lookup.has(r.filePath)) out.set(r.filePath, r.currentSha);
-  }
-  return out;
-}
-
-function readImportGraphRow(
-  filePath: string,
-  fileSha: string,
-): { imports: ImportRef[]; exports: ExportRef[] } | undefined {
-  const row = db()
-    .select({
-      importsJson: importGraph.importsJson,
-      exportsJson: importGraph.exportsJson,
-    })
-    .from(importGraph)
-    .where(and(eq(importGraph.filePath, filePath), eq(importGraph.fileSha, fileSha)))
-    .get();
-  if (!row) return undefined;
-  try {
-    return {
-      imports: JSON.parse(row.importsJson) as ImportRef[],
-      exports: JSON.parse(row.exportsJson) as ExportRef[],
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function insertImportGraphRow(
-  filePath: string,
-  fileSha: string,
-  imports: ImportRef[],
-  exports: ExportRef[],
-): void {
-  // INSERT OR IGNORE — rows are immutable per (path, sha). If a parallel
-  // process raced ahead, the existing row is identical content by definition.
-  db()
-    .insert(importGraph)
-    .values({
-      filePath,
-      fileSha,
-      importsJson: JSON.stringify(imports),
-      exportsJson: JSON.stringify(exports),
-      computedAt: new Date(),
-    })
-    .onConflictDoNothing()
-    .run();
 }
 
 function pathFromGraphKey(key: string, repoRoot: string): string {

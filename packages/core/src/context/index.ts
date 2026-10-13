@@ -1,6 +1,7 @@
 import type { ChangedFile } from "../diff/index.js";
 import type { EcosystemContext } from "../ecosystem/index.js";
 import type { DegradedEntry } from "../schema.js";
+import type { ImportGraphLoader } from "./import-graph.js";
 
 export type { DegradedEntry } from "../schema.js";
 
@@ -50,6 +51,12 @@ export interface ContextSelector {
     ecosystem: EcosystemContext;
     /** Unified diff text — required for the M6 semantic signal; cheap signals ignore it. */
     diff?: string;
+    /**
+     * The review's shared import graph. A selector that reads the graph uses
+     * this instead of loading its own, and leaves the snapshot's degraded
+     * entries to the caller, which reports them once per review.
+     */
+    importGraph?: ImportGraphLoader;
   }): Promise<SelectorOutput>;
 }
 

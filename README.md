@@ -107,7 +107,7 @@ Warden is local-first by default — source code, caches, and the SQLite databas
 | Embedding vectors                                  | `.warden/cache.sqlite` → `embeddings`                      |
 | Merkle tree (file/dir hashes for change detection) | `.warden/cache.sqlite` → `merkle`                          |
 | LLM review cache                                   | `.warden/cache.sqlite` → `llm_review_cache`                |
-| M5 caches (import graph, file state)               | `.warden/cache.sqlite`                                     |
+| Import graph (parsed imports + exports per file)   | `.warden/cache.sqlite` → `import_graph`                    |
 | API keys                                           | Env vars only — read at runtime; never logged or persisted |
 | Tool output (TSC, ESLint, jscpd, npm-audit)        | In-memory during the run                                   |
 
