@@ -10,21 +10,25 @@ import type { Graph, GraphEntry } from "./signals/imports.js";
 
 /**
  * Active import graph for the working tree being reviewed (ADR-0018, issue
- * #62). Shared by the context selector and the deadcode detector so both read
- * the same snapshot (see `ImportGraphLoader`).
+ * #62). Read by the context selector and the deadcode detector. Inside
+ * `runDetPriors` they share one load, so both read the same snapshot (see
+ * `ImportGraphLoader`). Called without the shared loader, each one loads the
+ * graph on its own.
  *
  * Source identity is established per load, never remembered: every tracked
- * source file is read and hashed from disk, and that hash is the only key used
- * to look up its `import_graph` row. A clean `git status` is not evidence that
+ * source file is read and hashed from disk, and its `import_graph` row is
+ * looked up only by `(path, that hash)`. A clean `git status` is not evidence that
  * a previously stored hash is current — a commit, checkout, or reset changes
  * content without leaving the file "modified". Hashing every file costs about
- * as much as asking git's index (~0.3s on a 10k-file repo); the expensive part,
- * the parse, stays cached per `(path, sha)`.
+ * as much as asking git's index (~0.3s on a 10k-file repo). The parse stays
+ * cached per `(path, sha)`. On a warm cache, import resolution is the main
+ * cost (~2.0s on a 10k-file repo).
  *
- * A row caches only what the file's own bytes determine. `ImportRef.resolved`
- * also depends on other files (a new `b.ts` shadows `b/index.ts`, a target
- * moves to `.tsx`) and on tsconfig, so it is re-resolved against today's tree
- * on every load and the stored value is never used.
+ * The loader trusts only what the file's own bytes determine. A row also
+ * stores `ImportRef.resolved` from the parse, but that target depends on other
+ * files (a new `b.ts` shadows `b/index.ts`, a target moves to `.tsx`) and on
+ * tsconfig. So it is re-resolved against today's tree on every load, and the
+ * stored value is never used.
  *
  * Rows for other snapshots stay in `import_graph` but never become active:
  * the graph contains only paths in today's `git ls-files`, each bound to the

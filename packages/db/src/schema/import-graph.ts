@@ -2,15 +2,19 @@ import { sql } from "drizzle-orm";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
- * Content-addressed parsed-imports cache for the M5 cheap-signals context
- * selector (ADR-0018). Primary key is `(file_path, file_sha)` — a row is
- * forever-valid for that exact content. Stale rows for the same path with
- * older SHAs are harmless; never `UPDATE`, only `INSERT OR IGNORE`.
+ * Content-addressed parse cache for the import graph (ADR-0018). Primary key
+ * is `(file_path, file_sha)`. Rows are immutable: never `UPDATE`, only
+ * `INSERT OR IGNORE`. Rows for older SHAs of the same path stay here.
  *
- * There is no invalidation step: `loadImportGraph` hashes every tracked
- * source file per review and reads only the rows for those hashes, so rows
- * for other snapshots stay here but are never active (ADR-0018 amendment,
- * issue #62).
+ * `loadImportGraph` hashes every tracked source file on each load and reads
+ * only the rows for those `(path, sha)` keys. Rows for other snapshots are
+ * never active (ADR-0018 amendment, issue #62).
+ *
+ * The loader trusts only the facts that the file's own bytes determine:
+ * specifiers, symbols, ranges, exports. Each stored `ImportRef` also keeps
+ * `resolved` from the parse. That target depends on other files and on
+ * tsconfig, so the loader ignores the stored value and resolves each import
+ * again on each load.
  */
 export const importGraph = sqliteTable(
   "import_graph",
