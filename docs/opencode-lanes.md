@@ -197,6 +197,39 @@ context is also disabled on the driven path (there is no per-agent
 opt-out), so the lane reviews without the repo's contributor guidance —
 acceptable for a correctness lane, which needs the code, not the customs.
 
+## Untrusted input (ADR-0054)
+
+The lane reads untrusted text through tools: the diff, the files, and the
+`warden mcp` output. Warden does not own the OpenCode tool output, so the
+containment is outside the model:
+
+- **Nested `AGENTS.md` gate.** After each `read`, OpenCode loads each
+  `AGENTS.md` between the file and the location root as session
+  instructions. No flag stops it (binary v2.0.25: `uL="AGENTS.md"`,
+  `u.up({targets:[uL],…})`). The project-config lockout above covers only
+  the root file. So if the diff adds, changes, or renames to an
+  `AGENTS.md` below the root, the driver fails the lane before spawn
+  (`laneInstructionFileGate`, known $0, not clean). It reads the diff
+  headers, because a pure rename or a binary file has no `+++` line. A
+  nested `AGENTS.md` that the PR does not touch is base-branch content
+  and loads as usual.
+- **Base ref.** `--base` must be a plain ref name (`assertPlainBaseRef`):
+  no leading `-`, no `..`, no quotes, spaces, or braces. It goes into the
+  lane message and into git argv.
+- **Secret guard.** The post-pass drops a finding that cites a secret
+  file (the `read` deny globs, `SECRET_FILE_GLOBS` in `@warden/core`,
+  matched case-insensitively) or that holds a known credential format.
+  It adds one `actionable` `secret-guard` entry with the rule and the
+  anchor, never the value. `--lanes-out` writes such a finding as
+  `{ "secretGuard": "<rule>" }`. Residuals: a plain password quoted in
+  prose, and a symlink with a non-`.env` name that points at a secret
+  file. The model provider and the OpenCode session store still see what
+  the lane reads.
+
+`smoke:untrusted-input` covers the pure functions;
+`smoke:opencode-lanes` covers the gate and the `--lanes-out` placeholder
+end to end.
+
 ## Submission contract
 
 The final assistant message ends with exactly one fenced ` ```json `

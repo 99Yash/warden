@@ -9,6 +9,7 @@ import {
   isNotClean,
   resolveDiff,
   runPostPass,
+  screenFinding,
   type CommentSet,
   type DegradedEntry,
   type LaneOutput,
@@ -458,6 +459,63 @@ export function laneScopeOverCeiling(scope: string[]): string | undefined {
   );
 }
 
+/**
+ * ADR-0054 §2(d): the `read` tool loads each `AGENTS.md` between a read
+ * file and the location root into the session as instructions, and no
+ * flag stops it (verified in the shipped binary v2.0.25: `uL="AGENTS.md"`,
+ * `u.up({targets:[uL],…})`; `OPENCODE_DISABLE_PROJECT_CONFIG` covers only
+ * the root file). So a nested `AGENTS.md` that the diff adds or changes is
+ * PR text with instruction authority. Reads the diff headers, not
+ * `parseUnifiedDiff`: a pure rename or a binary file has no `+++` line.
+ * Case-insensitive, so a case-insensitive filesystem cannot slip past.
+ */
+export function nestedAgentsMdChanges(diff: string): string[] {
+  const targets = new Set<string>();
+  for (const line of diff.split("\n")) {
+    let path: string | undefined;
+    if (line.startsWith("+++ ")) path = line.slice(4);
+    else if (line.startsWith("rename to ")) path = line.slice("rename to ".length);
+    else if (line.startsWith("copy to ")) path = line.slice("copy to ".length);
+    else {
+      const binary = /^Binary files .* and (.+) differ$/.exec(line);
+      if (binary !== null) path = binary[1];
+    }
+    if (path === undefined) continue;
+    let target = path.trim();
+    if (target.startsWith('"') && target.endsWith('"')) target = target.slice(1, -1);
+    if (target === "/dev/null") continue;
+    if (target.startsWith("b/") && !line.startsWith("rename to ") && !line.startsWith("copy to ")) {
+      target = target.slice(2);
+    }
+    const slash = target.lastIndexOf("/");
+    if (slash > 0 && target.slice(slash + 1).toLowerCase() === "agents.md") targets.add(target);
+  }
+  return [...targets].sort();
+}
+
+/** The lane failure reason when the diff changes a nested `AGENTS.md`, else `undefined`. */
+export function laneInstructionFileGate(diff: string): string | undefined {
+  const changed = nestedAgentsMdChanges(diff);
+  if (changed.length === 0) return undefined;
+  return (
+    `untrusted instruction file: this diff changes ${changed.join(", ")}; OpenCode loads a nested ` +
+    `AGENTS.md as lane instructions when the lane reads a file below it, so the lane does not run (ADR-0054 §2(d))`
+  );
+}
+
+/**
+ * ADR-0054 §2(b): the base ref goes into the lane message and into git
+ * argv, so it must be a plain ref name. No leading `-` (a git option), no
+ * `..`, no quotes, spaces, or braces.
+ */
+export function assertPlainBaseRef(ref: string): void {
+  if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@-]*$/.test(ref) || ref.includes("..")) {
+    throw new Error(
+      `warden opencode-review: base ref ${JSON.stringify(ref)} is not a plain ref name`,
+    );
+  }
+}
+
 function withTail(reason: string, tail: string | undefined): string {
   if (tail === undefined || tail === "") return reason;
   return `${reason} (stderr: ${tail})`;
@@ -735,6 +793,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   // stdout and setting `process.exitCode`. It still writes `--lanes-out`
   // (part of the driver contract). The eval runner calls this directly so
   // the scored output is the same published `CommentSet` a user gets.
+  if (opts.baseRef !== undefined) assertPlainBaseRef(opts.baseRef);
   const resolved = await resolveDiff({
     repoRoot: opts.repoRoot,
     mode: "review",
@@ -769,6 +828,19 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   if (overCeiling !== undefined) {
     const lanes: LaneOutput[] = [
       { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: overCeiling, scope, findings: [] },
+    ];
+    writeLanesOut(opts, lanes);
+    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
+      runSpawned: false,
+    });
+  }
+
+  // A nested AGENTS.md the diff changes would reach the lane as
+  // instructions: fail the lane before spawn, at a known $0.
+  const instructionFile = laneInstructionFileGate(resolved.diff);
+  if (instructionFile !== undefined) {
+    const lanes: LaneOutput[] = [
+      { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: instructionFile, scope, findings: [] },
     ];
     writeLanesOut(opts, lanes);
     return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
@@ -892,11 +964,23 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
 
 type ResolvedDiff = Awaited<ReturnType<typeof resolveDiff>>;
 
+/**
+ * `--lanes-out` holds raw lane findings from before the post-pass, so it
+ * gets the same secret guard (ADR-0054 §4): a matched finding is written
+ * as `{ secretGuard: <rule> }`, which keeps the count and drops the value.
+ */
 function writeLanesOut(opts: DriveOptions, lanes: LaneOutput[]): void {
   if (opts.lanesOut !== undefined) {
+    const screened = lanes.map((lane) => ({
+      ...lane,
+      findings: lane.findings.map((finding) => {
+        const secret = screenFinding(finding);
+        return secret === undefined ? finding : { secretGuard: secret.rule };
+      }),
+    }));
     writeFileSync(
       resolve(opts.repoRoot, opts.lanesOut),
-      JSON.stringify({ version: 1, lanes }, null, 2) + "\n",
+      JSON.stringify({ version: 1, lanes: screened }, null, 2) + "\n",
     );
   }
 }
