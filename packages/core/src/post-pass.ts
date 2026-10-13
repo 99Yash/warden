@@ -11,6 +11,7 @@ import {
   scopeCommentsToDiff,
 } from "./review-harness/comment-scope.js";
 import { CommentSchema, type Comment, type CommentSet, type DegradedEntry } from "./schema.js";
+import { matchCredential, screenFinding } from "./secret-guard.js";
 
 /**
  * Mandatory post-pass outside model discretion (ADR-0053 §4). Publication
@@ -75,8 +76,9 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   const cap = resolveVolumeCap(input.config?.volumeCap);
   const postPass: DegradedEntry[] = [];
 
-  // 1. Per-finding schema validation. Invalid findings drop, counted per
-  // lane. Every id is minted content-addressed without the lane in the
+  // 1. Per-finding schema validation, then the secret guard (1b). Invalid
+  // findings drop, counted per lane. Every id is minted content-addressed
+  // without the lane in the
   // key, so byte-identical findings (same file, lines, category, and
   // claim) submitted by two lanes dedupe at step 8.
   const perLane: Comment[][] = [];
@@ -90,6 +92,21 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
         continue;
       }
       const rest = result.data;
+      // 1b. Secret guard (ADR-0054 §3): a finding that cites a secret file
+      // or holds a known credential format never publishes. The entry
+      // names the rule and the anchor, never the value — and omits the
+      // anchor when the anchor string itself matches a credential rule.
+      const secret = screenFinding(rest);
+      if (secret !== undefined) {
+        const anchor =
+          matchCredential(rest.file) === undefined ? ` at ${rest.file}:${rest.lineStart}` : "";
+        postPass.push({
+          kind: "actionable",
+          topic: "secret-guard",
+          message: `secret-guard: dropped a ${lane.lane} lane finding${anchor} (rule ${secret.rule}) — the value is not shown`,
+        });
+        continue;
+      }
       kept.push({
         ...rest,
         id: stableCommentId(

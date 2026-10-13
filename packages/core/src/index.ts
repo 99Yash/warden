@@ -194,6 +194,16 @@ export {
   type PostPassInput,
 } from "./post-pass.js";
 export {
+  CREDENTIAL_RULES,
+  SECRET_FILE_GLOBS,
+  SECRET_FILE_RULE_ID,
+  isSecretFilePath,
+  matchCredential,
+  screenFinding,
+  type CredentialRule,
+  type SecretMatch,
+} from "./secret-guard.js";
+export {
   BUNDLE_LIMITS,
   REVIEW_BUNDLE_VERSION,
   ReviewBundleBodySchema,
