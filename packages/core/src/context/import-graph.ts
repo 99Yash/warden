@@ -34,9 +34,13 @@ import type { Graph, GraphEntry } from "./signals/imports.js";
 const BATCH_SIZE = 20;
 const SOURCE_EXT_RE = /\.(?:tsx?|jsx?|mjs|cjs)$/;
 const MAX_LISTED_PATHS = 10;
+const MAX_STDERR_CHARS = 2000;
 
 export interface ImportGraphSnapshot {
-  /** Repo-relative source files present in the snapshot (tracked and on disk). */
+  /**
+   * Repo-relative source files present in the snapshot (tracked and on disk),
+   * in `git ls-files` order.
+   */
   files: string[];
   /**
    * Absolute path → parsed entry, for every snapshot file that parsed.
@@ -59,12 +63,12 @@ export async function loadImportGraph(input: {
   const { repoRoot, parser, topic } = input;
   const tracked = (await gitLsFiles(repoRoot)).filter((f) => SOURCE_EXT_RE.test(f));
 
-  const files: string[] = [];
   const stats = { reused: 0, parsed: 0, parseErrors: 0 };
-  const unreadable: string[] = [];
-  // Entries land by `tracked` index, not by read completion, so the graph's
-  // iteration order is the same on every load of the same tree. Consumers
-  // (the deadcode example callsite, the selector's reason order) depend on it.
+  // Results land by `tracked` index, not by read completion, so `files`,
+  // `unreadable`, and the graph share one order (git's byte order) on every
+  // load of the same tree. Consumers (the deadcode example callsite, the
+  // selector's reason order and same-folder cap) depend on it.
+  const status: ("read" | "unreadable" | undefined)[] = [];
   const entries: (GraphEntry | undefined)[] = [];
 
   await runInBatches(tracked, BATCH_SIZE, async (path, index) => {
@@ -75,10 +79,10 @@ export async function loadImportGraph(input: {
     } catch (err) {
       // Tracked but deleted in the working tree: not part of this snapshot.
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-      unreadable.push(path);
+      status[index] = "unreadable";
       return;
     }
-    files.push(path);
+    status[index] = "read";
     const sha = createHash("sha256").update(bytes).digest("hex");
 
     const cached = readImportGraphRow(path, sha);
@@ -109,13 +113,16 @@ export async function loadImportGraph(input: {
     }
   });
 
+  const files: string[] = [];
+  const unreadable: string[] = [];
   const graph: Graph = new Map();
   for (let i = 0; i < tracked.length; i++) {
+    const path = tracked[i]!;
+    if (status[i] === "read") files.push(path);
+    else if (status[i] === "unreadable") unreadable.push(path);
     const entry = entries[i];
-    if (entry) graph.set(resolvePath(repoRoot, tracked[i]!), entry);
+    if (entry) graph.set(resolvePath(repoRoot, path), entry);
   }
-  files.sort();
-  unreadable.sort();
 
   const degraded: DegradedEntry[] = [];
   if (stats.parsed > 0 && stats.reused === 0) {
@@ -154,16 +161,28 @@ function gitLsFiles(repoRoot: string): Promise<string[]> {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let stdout = "";
+    // Decode once at the end: a multi-byte character split across two chunks
+    // would turn into U+FFFD if each chunk were decoded on its own, and the
+    // corrupted path would then read as deleted.
+    const chunks: Buffer[] = [];
     child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
+      chunks.push(d);
+    });
+    // Drain stderr so a noisy git cannot block on a full pipe; keep the tail
+    // for the error message.
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (d: string) => {
+      stderr = (stderr + d).slice(-MAX_STDERR_CHARS);
     });
     child.on("error", (err) => rejectP(err));
     child.on("close", (code) => {
       if (code !== 0) {
-        rejectP(new Error(`git ls-files exited ${code ?? "?"}`));
+        const reason = stderr.trim();
+        rejectP(new Error(`git ls-files exited ${code ?? "?"}${reason ? `: ${reason}` : ""}`));
         return;
       }
+      const stdout = Buffer.concat(chunks).toString("utf8");
       resolveP(stdout.split("\0").filter((l) => l.length > 0));
     });
   });

@@ -26,6 +26,8 @@
  *      that passes the optional param is unreadable (left out of the graph,
  *      or unreadable when callsites are collected), no "never passed"
  *      finding is emitted and an info entry names the skip
+ * [10] non-ASCII paths: `git ls-files -z` output spans many pipe chunks of
+ *      multi-byte characters, and no path is corrupted at a chunk boundary
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
@@ -353,8 +355,8 @@ try {
     graphOrders.add(JSON.stringify(keys));
     if (i === 0) {
       assert(
-        same(keys, [...snapshot.files].sort()),
-        `graph keys follow sorted tracked order (got ${keys.slice(0, 4)}…)`,
+        same(keys, snapshot.files),
+        `graph keys follow snapshot.files order (got ${keys.slice(0, 4)}…)`,
       );
     }
   }
@@ -491,6 +493,52 @@ ${target
     fsp.readFile = realReadFile;
     syncBuiltinESMExports();
   }
+
+  // ── [10] multi-byte paths across stdout chunk boundaries ──────────────
+  // Long paths of 3-byte characters (CJK, no Unicode decomposition) fill
+  // many 64 KiB pipe chunks with few files. A character split across two
+  // chunks must not decode to U+FFFD: the corrupted path would fail to read
+  // with ENOENT and leave the snapshot as a "deletion", with no report.
+  process.stdout.write(`\n[10] non-ASCII tracked paths across stdout chunks\n`);
+  const WIDE = 800;
+  const wideDir = `src/${"日本語の道".repeat(12)}/${"漢字目録".repeat(15)}`;
+  mkdirSync(resolve(REPO, wideDir), { recursive: true });
+  const widePaths: string[] = [];
+  for (let i = 0; i < WIDE; i++) {
+    const rel = `${wideDir}/${"字".repeat(60)}-${String(i).padStart(3, "0")}.ts`;
+    write(rel, `export const w${i} = ${i};\n`);
+    widePaths.push(rel);
+  }
+  // U+FF71 sorts before U+1F600 in git's byte order but after it in UTF-16
+  // code units (JS `.sort()`), so `files` and the graph must not each pick
+  // their own order.
+  for (const rel of ["src/order-\uFF71.ts", "src/order-\u{1F600}.ts"]) {
+    write(rel, "export const o = 1;\n");
+    widePaths.push(rel);
+  }
+  commit("J: 800 files under multi-byte paths");
+  const lsBytes = execFileSync("git", ["ls-files", "-z"], { cwd: REPO }).length;
+  assert(lsBytes > 4 * 65536, `ls-files output spans more than 4 chunks (${lsBytes} bytes)`);
+  const wideSnapshot = await loadImportGraph({
+    repoRoot: REPO,
+    parser: new TsCompilerParser({ repoRoot: REPO }),
+    topic: "context",
+  });
+  const corrupted = wideSnapshot.files.filter((f) => f.includes("\uFFFD"));
+  assert(corrupted.length === 0, `no path holds U+FFFD (got ${corrupted.slice(0, 2)})`);
+  const fileSet = new Set(wideSnapshot.files);
+  const missingFiles = widePaths.filter((p) => !fileSet.has(p));
+  assert(
+    missingFiles.length === 0,
+    `all ${widePaths.length} paths are in snapshot.files (missing ${missingFiles.length})`,
+  );
+  const missingGraph = widePaths.filter((p) => !wideSnapshot.graph.has(resolve(REPO, p)));
+  assert(
+    missingGraph.length === 0,
+    `all ${widePaths.length} paths are in the graph (missing ${missingGraph.length})`,
+  );
+  const wideKeys = [...wideSnapshot.graph.keys()].map((k) => relative(REPO, k));
+  assert(same(wideKeys, wideSnapshot.files), "graph keys and snapshot.files share one order");
 } finally {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 }
