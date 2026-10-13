@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { and, db, eq, importGraph } from "@warden/db";
+import { plural } from "../plural.js";
 import type { DegradedEntry } from "../schema.js";
 import type { ExportRef, ImportRef, SourceParser } from "./parser.js";
 import type { Graph, GraphEntry } from "./signals/imports.js";
@@ -29,6 +30,12 @@ import type { Graph, GraphEntry } from "./signals/imports.js";
  * the graph contains only paths in today's `git ls-files`, each bound to the
  * hash of the bytes read today. Files that cannot be read are reported by path
  * and left out of the graph rather than falling back to an older row.
+ *
+ * A tracked path that is missing on disk (ENOENT) is not always a deletion.
+ * Git classifies it: an unstaged deletion is left out silently; a
+ * skip-worktree entry outside a sparse checkout is counted, because the graph
+ * is then incomplete; anything git still sees as present (a dangling symlink)
+ * is unreadable.
  */
 
 const BATCH_SIZE = 20;
@@ -51,6 +58,11 @@ export interface ImportGraphSnapshot {
   stats: { reused: number; parsed: number; parseErrors: number };
   /** Repo-relative paths that could not be read or hashed; excluded from `graph`. */
   unreadable: string[];
+  /**
+   * Repo-relative tracked paths absent on disk because they are outside the
+   * sparse checkout (skip-worktree); excluded from `graph`.
+   */
+  outsideSparse: string[];
   degraded: DegradedEntry[];
 }
 
@@ -61,14 +73,14 @@ export async function loadImportGraph(input: {
   topic: string;
 }): Promise<ImportGraphSnapshot> {
   const { repoRoot, parser, topic } = input;
-  const tracked = (await gitLsFiles(repoRoot)).filter((f) => SOURCE_EXT_RE.test(f));
+  const tracked = (await gitLsFiles(repoRoot, [])).filter((f) => SOURCE_EXT_RE.test(f));
 
   const stats = { reused: 0, parsed: 0, parseErrors: 0 };
   // Results land by `tracked` index, not by read completion, so `files`,
   // `unreadable`, and the graph share one order (git's byte order) on every
   // load of the same tree. Consumers (the deadcode example callsite, the
   // selector's reason order and same-folder cap) depend on it.
-  const status: ("read" | "unreadable" | undefined)[] = [];
+  const status: ("read" | "unreadable" | "absent" | undefined)[] = [];
   const entries: (GraphEntry | undefined)[] = [];
 
   await runInBatches(tracked, BATCH_SIZE, async (path, index) => {
@@ -77,9 +89,8 @@ export async function loadImportGraph(input: {
     try {
       bytes = await readFile(abs);
     } catch (err) {
-      // Tracked but deleted in the working tree: not part of this snapshot.
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-      status[index] = "unreadable";
+      // A missing path is classified below; any other error is a read failure.
+      status[index] = (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unreadable";
       return;
     }
     status[index] = "read";
@@ -113,13 +124,31 @@ export async function loadImportGraph(input: {
     }
   });
 
+  // Ask git about missing paths only when a read missed, so a full working
+  // tree spends no extra spawn. `-t` tags each path: `R` is an unstaged
+  // deletion, `S` is skip-worktree. Git lists neither a skip-worktree entry
+  // nor a dangling symlink under `-d`.
+  const deleted = new Set<string>();
+  const skipWorktree = new Set<string>();
+  if (status.includes("absent")) {
+    for (const record of await gitLsFiles(repoRoot, ["-t", "-c", "-d"])) {
+      const tag = record.slice(0, 2);
+      if (tag === "R ") deleted.add(record.slice(2));
+      else if (tag === "S ") skipWorktree.add(record.slice(2));
+    }
+  }
+
   const files: string[] = [];
   const unreadable: string[] = [];
+  const outsideSparse: string[] = [];
   const graph: Graph = new Map();
   for (let i = 0; i < tracked.length; i++) {
     const path = tracked[i]!;
     if (status[i] === "read") files.push(path);
     else if (status[i] === "unreadable") unreadable.push(path);
+    else if (status[i] === "absent" && !deleted.has(path)) {
+      (skipWorktree.has(path) ? outsideSparse : unreadable).push(path);
+    }
     const entry = entries[i];
     if (entry) graph.set(resolvePath(repoRoot, path), entry);
   }
@@ -129,14 +158,21 @@ export async function loadImportGraph(input: {
     degraded.push({
       kind: "info",
       topic,
-      message: `${topic}: cold import-graph build (parsed ${stats.parsed} files)`,
+      message: `${topic}: cold import-graph build (parsed ${plural(stats.parsed, "file", "files")})`,
     });
   }
   if (stats.parseErrors > 0) {
     degraded.push({
       kind: "info",
       topic,
-      message: `${topic}: ${stats.parseErrors} files failed to parse`,
+      message: `${topic}: ${plural(stats.parseErrors, "file", "files")} failed to parse`,
+    });
+  }
+  if (outsideSparse.length > 0) {
+    degraded.push({
+      kind: "info",
+      topic,
+      message: `${topic}: ${plural(outsideSparse.length, "tracked source file", "tracked source files")} outside the sparse checkout; left out of the import graph`,
     });
   }
   if (unreadable.length > 0) {
@@ -148,16 +184,17 @@ export async function loadImportGraph(input: {
     degraded.push({
       kind: "warning",
       topic,
-      message: `${topic}: could not read ${unreadable.length} source files; left out of the import graph: ${listed}${more}`,
+      message: `${topic}: could not read ${plural(unreadable.length, "source file", "source files")}; left out of the import graph: ${listed}${more}`,
     });
   }
 
-  return { files, graph, stats, unreadable, degraded };
+  return { files, graph, stats, unreadable, outsideSparse, degraded };
 }
 
-function gitLsFiles(repoRoot: string): Promise<string[]> {
+/** Runs `git ls-files -z <args>` and returns the NUL-separated records. */
+function gitLsFiles(repoRoot: string, args: string[]): Promise<string[]> {
   return new Promise((resolveP, rejectP) => {
-    const child = spawn("git", ["ls-files", "-z"], {
+    const child = spawn("git", ["ls-files", "-z", ...args], {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
     });

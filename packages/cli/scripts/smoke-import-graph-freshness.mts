@@ -28,11 +28,26 @@
  *      finding is emitted and an info entry names the skip
  * [10] non-ASCII paths: `git ls-files -z` output spans many pipe chunks of
  *      multi-byte characters, and no path is corrupted at a chunk boundary
+ * [11] a dangling tracked symlink is reported by path as unreadable, not
+ *      dropped as a deletion
+ * [12] a sparse checkout: files outside it are counted in one info entry,
+ *      deadcode holds back a finding whose only passing caller is outside
+ *      it, and a working-tree deletion in the same tree stays silent
+ * [13] degraded messages say "1 file" and "2 files"
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
@@ -539,6 +554,182 @@ ${target
   );
   const wideKeys = [...wideSnapshot.graph.keys()].map((k) => relative(REPO, k));
   assert(same(wideKeys, wideSnapshot.files), "graph keys and snapshot.files share one order");
+
+  // ── [11] dangling tracked symlink ────────────────────────────────────
+  // readFile follows the link and fails with ENOENT, but git lists the link
+  // as present, not deleted. It must not pass as a deletion.
+  process.stdout.write(`\n[11] tracked symlink whose target is missing\n`);
+  symlinkSync("missing-target.ts", resolve(REPO, "src/dangling.ts"));
+  commit("K: dangling symlink");
+  const dangling = await loadImportGraph({
+    repoRoot: REPO,
+    parser: new TsCompilerParser({ repoRoot: REPO }),
+    topic: "context",
+  });
+  assert(
+    same(dangling.unreadable, ["src/dangling.ts"]),
+    `dangling link is unreadable (got ${dangling.unreadable})`,
+  );
+  const danglingWarning = dangling.degraded.find(
+    (d) => d.kind === "warning" && d.message.includes("could not read"),
+  );
+  assert(
+    danglingWarning?.message ===
+      "context: could not read 1 source file; left out of the import graph: src/dangling.ts",
+    `warning names the link (got ${danglingWarning?.message ?? "none"})`,
+  );
+  git("rm", "-q", "src/dangling.ts");
+  commit("L: drop dangling symlink");
+
+  // ── [12] sparse checkout ─────────────────────────────────────────────
+  // A skip-worktree entry is tracked but absent on disk. It is not a
+  // deletion: the graph is incomplete, and the absent file may be the one
+  // caller that passes the param.
+  process.stdout.write(`\n[12] sparse checkout leaves the passer out of the working tree\n`);
+  git("sparse-checkout", "set", "--no-cone", "/*", `!/${PASSER}`);
+  unlinkSync(resolve(REPO, "src/c.ts"));
+  try {
+    assert(!existsSync(passerAbs), "passer is absent from the working tree");
+    assert(
+      git("ls-files", "-t", "--", PASSER) === `S ${PASSER}`,
+      "passer is a skip-worktree entry",
+    );
+    const sparse = await loadImportGraph({
+      repoRoot: REPO,
+      parser: new TsCompilerParser({ repoRoot: REPO }),
+      topic: "context",
+    });
+    assert(
+      same(sparse.outsideSparse, [PASSER]),
+      `snapshot lists the passer outside the sparse checkout (got ${sparse.outsideSparse})`,
+    );
+    assert(sparse.unreadable.length === 0, `no unreadable files (got ${sparse.unreadable})`);
+    assert(
+      !sparse.files.includes("src/c.ts") && !sparse.files.includes(PASSER),
+      "absent files are not in the active file set",
+    );
+    const sparseInfo = sparse.degraded.find((d) => d.message.includes("sparse checkout"));
+    assert(
+      sparseInfo?.kind === "info" &&
+        sparseInfo.message ===
+          "context: 1 tracked source file outside the sparse checkout; left out of the import graph",
+      `info entry counts the sparse file (got ${sparseInfo?.message ?? "none"})`,
+    );
+    assert(
+      !sparse.degraded.some((d) => d.message.includes("could not read")),
+      "the working-tree deletion stays silent",
+    );
+    const sparseCheck = await runDeadcode({
+      repoRoot: REPO,
+      changed: [{ path: "src/fan/target.ts", addedLines: [1, 2, 3, 4, 5, 6] }],
+    });
+    assert(
+      unreachable(sparseCheck.findings).length === 0,
+      `check: no unreachable-optional-param finding (got ${sparseCheck.findings.map((f) => f.message)})`,
+    );
+    const sparseSkip = skipEntry(sparseCheck.degraded);
+    assert(
+      sparseSkip?.message ===
+        "deadcode: 1 candidate skipped; import graph incomplete (1 file outside the sparse checkout)",
+      `check: info entry names the skip (got ${sparseSkip?.message ?? "none"})`,
+    );
+    const sparseReview = await runDetPriors({ diff: TARGET_DIFF, repoRoot: REPO, mode: "review" });
+    assert(
+      unreachable(sparseReview.findings).length === 0,
+      `review: no unreachable-optional-param finding (got ${sparseReview.findings.map((f) => f.message)})`,
+    );
+    assert(
+      skipEntry(sparseReview.degraded) !== undefined,
+      `review: deadcode skip entry reaches the output (got ${sparseReview.degraded.map((d) => d.message)})`,
+    );
+  } finally {
+    git("sparse-checkout", "disable");
+    git("checkout", "--", "src/c.ts");
+  }
+
+  // ── [13] message plurals for counts of 1 and 2 ───────────────────────
+  // Each case gets its own repo with fresh content, so no row is reused and
+  // the cold-build note is emitted.
+  process.stdout.write(`\n[13] degraded messages use singular and plural\n`);
+  let fresh = 0;
+  const nonce = `${process.pid}-${Date.now()}`;
+  async function freshMessages(input: {
+    files: string[];
+    broken?: string[];
+    links?: string[];
+    sparseOut?: string[];
+  }): Promise<string[]> {
+    const dir = resolve(TMP_ROOT, `plural-${++fresh}`);
+    const run = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+    const all = [...input.files, ...(input.broken ?? []), ...(input.sparseOut ?? [])];
+    for (const rel of all) {
+      mkdirSync(resolve(dir, rel, ".."), { recursive: true });
+      writeFileSync(resolve(dir, rel), `// ${nonce} ${dir} ${rel}\nexport const x = 1;\n`);
+    }
+    for (const rel of input.links ?? []) symlinkSync("missing-target.ts", resolve(dir, rel));
+    run("init", "-q", "-b", "main");
+    run("add", "-A");
+    run(
+      "-c",
+      "user.email=s@w",
+      "-c",
+      "user.name=s",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "x",
+    );
+    if (input.sparseOut) {
+      run("sparse-checkout", "set", "--no-cone", "/*", ...input.sparseOut.map((p) => `!/${p}`));
+    }
+    const inner = new TsCompilerParser({ repoRoot: dir });
+    const broken = new Set((input.broken ?? []).map((p) => resolve(dir, p)));
+    const parser: SourceParser = {
+      async imports(abs, content) {
+        if (broken.has(abs)) throw new Error("simulated parse failure");
+        return inner.imports(abs, content);
+      },
+      exports: (abs, content) => inner.exports(abs, content),
+      resolve: (moduleName, containingFile) => inner.resolve(moduleName, containingFile),
+    };
+    const snapshot = await loadImportGraph({ repoRoot: dir, parser, topic: "context" });
+    return snapshot.degraded.map((d) => d.message);
+  }
+  const expectMessage = (messages: string[], expected: string) =>
+    assert(messages.includes(expected), `"${expected}" (got ${JSON.stringify(messages)})`);
+  expectMessage(
+    await freshMessages({ files: ["a.ts"] }),
+    "context: cold import-graph build (parsed 1 file)",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts", "b.ts"] }),
+    "context: cold import-graph build (parsed 2 files)",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts"], broken: ["x.ts"] }),
+    "context: 1 file failed to parse",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts"], broken: ["x.ts", "y.ts"] }),
+    "context: 2 files failed to parse",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts"], links: ["l1.ts"] }),
+    "context: could not read 1 source file; left out of the import graph: l1.ts",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts"], links: ["l1.ts", "l2.ts"] }),
+    "context: could not read 2 source files; left out of the import graph: l1.ts, l2.ts",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts"], sparseOut: ["out/x.ts"] }),
+    "context: 1 tracked source file outside the sparse checkout; left out of the import graph",
+  );
+  expectMessage(
+    await freshMessages({ files: ["a.ts"], sparseOut: ["out/x.ts", "out/y.ts"] }),
+    "context: 2 tracked source files outside the sparse checkout; left out of the import graph",
+  );
 } finally {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 }

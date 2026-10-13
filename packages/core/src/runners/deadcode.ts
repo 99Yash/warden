@@ -6,6 +6,7 @@ import { loadImportGraph } from "../context/import-graph.js";
 import { TsCompilerParser } from "../context/parser.js";
 import type { Graph } from "../context/signals/imports.js";
 import type { ChangedFile } from "../diff/index.js";
+import { plural } from "../plural.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, formatErr, parseChangedSourceFile } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
@@ -26,9 +27,9 @@ import type { ToolFinding } from "./types.js";
  *      finding per `(param, branch)` pair with a 3-part evidence array.
  *
  * Unknown reach is not zero reach (issue #61): when the graph left a file out
- * (unreadable or failed to parse) or a caller cannot be read, the missing
- * file may be the one caller that passes the param. Such a finding is
- * withheld and counted in one `info` entry instead.
+ * (unreadable, failed to parse, or outside a sparse checkout) or a caller
+ * cannot be read, the missing file may be the one caller that passes the
+ * param. Such a finding is withheld and counted in one `info` entry instead.
  *
  * Out of scope for v0 (per ADR-0021's caveats):
  *   - Dynamic dispatch (`obj[methodName]()`).
@@ -99,8 +100,10 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
           }),
           topic: "deadcode",
         });
-        // Cold-build notes are the selector's to report; read failures are
-        // forwarded because check mode runs deadcode without the selector.
+        // Info notes (cold build, parse errors, sparse checkout) are the
+        // selector's to report; gaps that affect a finding are named in the
+        // skip entry below. Read failures are forwarded because check mode
+        // runs deadcode without the selector.
         degraded.push(...snapshot.degraded.filter((d) => d.kind !== "info"));
         graphGaps = [
           ...(snapshot.unreadable.length > 0
@@ -108,6 +111,15 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
             : []),
           ...(snapshot.stats.parseErrors > 0
             ? [plural(snapshot.stats.parseErrors, "parse error", "parse errors")]
+            : []),
+          ...(snapshot.outsideSparse.length > 0
+            ? [
+                plural(
+                  snapshot.outsideSparse.length,
+                  "file outside the sparse checkout",
+                  "files outside the sparse checkout",
+                ),
+              ]
             : []),
         ];
         reverseIndex = buildReverseImportIndex(input.repoRoot, snapshot.graph);
@@ -174,10 +186,6 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
   }
 
   return { findings, degraded };
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 function collectOptionalParamCandidates(
