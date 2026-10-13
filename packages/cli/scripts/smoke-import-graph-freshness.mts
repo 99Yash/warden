@@ -22,11 +22,16 @@
  *      shadows or renames it (resolution is not cached with the row)
  *  [8] graph key order follows tracked order, so the deadcode finding
  *      message (and its comment id) is the same on every run
+ *  [9] deadcode fails closed on an incomplete graph: when the only caller
+ *      that passes the optional param is unreadable (left out of the graph,
+ *      or unreadable when callsites are collected), no "never passed"
+ *      finding is emitted and an info entry names the skip
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 
@@ -372,6 +377,120 @@ try {
       message.endsWith("Example callsite: src/fan/caller-00.ts:2"),
     `example callsite is the first caller in path order (got ${message ?? "none"})`,
   );
+  const complete = await runDeadcode({
+    repoRoot: REPO,
+    changed: [{ path: "src/fan/target.ts", addedLines: [1, 2, 3, 4, 5, 6] }],
+  });
+  assert(
+    !complete.degraded.some((d) => d.message.includes("skipped")),
+    `complete graph: no deadcode skip entry (got ${complete.degraded.map((d) => d.message)})`,
+  );
+
+  // ── [9] unknown reach is not reported as zero reach ──────────────────
+  // One more caller passes `opt`. If deadcode cannot see it, it must not
+  // claim `opt` is never passed.
+  process.stdout.write(`\n[9] the only caller that passes opt is unreadable\n`);
+  const PASSER = "src/fan/passer.ts";
+  const passerAbs = resolve(REPO, PASSER);
+  write(PASSER, 'import { pick } from "./target";\nexport const p = pick(1, "x");\n');
+  commit("I: passer.ts passes opt");
+  const TARGET_DIFF = `diff --git a/src/fan/target.ts b/src/fan/target.ts
+--- a/src/fan/target.ts
++++ b/src/fan/target.ts
+@@ -1,6 +1,6 @@
+${target
+  .split("\n")
+  .slice(0, 6)
+  .map((l) => `+${l}`)
+  .join("\n")}
+`;
+  const unreachable = (findings: { ruleId?: string; file: string }[]) =>
+    findings.filter(
+      (f) => f.ruleId === "unreachable-optional-param" && f.file === "src/fan/target.ts",
+    );
+  const skipEntry = (degraded: { kind: string; topic: string; message: string }[]) =>
+    degraded.find(
+      (d) => d.kind === "info" && d.topic === "deadcode" && d.message.includes("skipped"),
+    );
+
+  const readable = await runDeadcode({
+    repoRoot: REPO,
+    changed: [{ path: "src/fan/target.ts", addedLines: [1, 2, 3, 4, 5, 6] }],
+  });
+  assert(
+    unreachable(readable.findings).length === 0 && !skipEntry(readable.degraded),
+    `readable passer: no finding and no skip entry (got ${readable.findings.length} findings)`,
+  );
+
+  if (process.getuid?.() === 0) {
+    process.stdout.write(`  - skipped: running as root, chmod 000 does not block reads\n`);
+  } else {
+    chmodSync(passerAbs, 0o000);
+    try {
+      const check = await runDeadcode({
+        repoRoot: REPO,
+        changed: [{ path: "src/fan/target.ts", addedLines: [1, 2, 3, 4, 5, 6] }],
+      });
+      assert(
+        unreachable(check.findings).length === 0,
+        `check: no unreachable-optional-param finding (got ${check.findings.map((f) => f.message)})`,
+      );
+      const checkSkip = skipEntry(check.degraded);
+      assert(
+        checkSkip?.message ===
+          "deadcode: 1 candidate skipped; import graph incomplete (1 unreadable file)",
+        `check: info entry names the skip (got ${checkSkip?.message ?? "none"})`,
+      );
+      const reviewed = await runDetPriors({ diff: TARGET_DIFF, repoRoot: REPO, mode: "review" });
+      assert(
+        unreachable(reviewed.findings).length === 0,
+        `review: no unreachable-optional-param finding (got ${reviewed.findings.map((f) => f.message)})`,
+      );
+      assert(
+        skipEntry(reviewed.degraded) !== undefined,
+        `review: deadcode skip entry reaches the output (got ${reviewed.degraded.map((d) => d.message)})`,
+      );
+    } finally {
+      chmodSync(passerAbs, 0o644);
+    }
+  }
+
+  // The graph sees the passer, but the read in `collectCallsites` fails.
+  // Builtin ESM exports follow the CommonJS object after a sync, so the
+  // runner's `readFile` import picks up this wrapper: the first read of the
+  // passer (graph load) succeeds, and later reads fail.
+  const fsp = createRequire(import.meta.url)(
+    "node:fs/promises",
+  ) as typeof import("node:fs/promises");
+  const realReadFile = fsp.readFile;
+  let passerReads = 0;
+  fsp.readFile = ((path: Parameters<typeof realReadFile>[0], ...rest: unknown[]) => {
+    if (typeof path === "string" && resolve(path) === passerAbs && ++passerReads > 1) {
+      return Promise.reject(Object.assign(new Error("EACCES: simulated"), { code: "EACCES" }));
+    }
+    return (realReadFile as (...a: unknown[]) => Promise<unknown>)(path, ...rest);
+  }) as typeof realReadFile;
+  syncBuiltinESMExports();
+  try {
+    const failedRead = await runDeadcode({
+      repoRoot: REPO,
+      changed: [{ path: "src/fan/target.ts", addedLines: [1, 2, 3, 4, 5, 6] }],
+    });
+    assert(passerReads >= 2, `caller read was failed after graph load (reads=${passerReads})`);
+    assert(
+      unreachable(failedRead.findings).length === 0,
+      `caller read failure: no finding (got ${failedRead.findings.map((f) => f.message)})`,
+    );
+    const readSkip = skipEntry(failedRead.degraded);
+    assert(
+      readSkip?.message ===
+        `deadcode: 1 candidate skipped; could not read 1 caller file: ${PASSER}`,
+      `caller read failure: info entry names the skip (got ${readSkip?.message ?? "none"})`,
+    );
+  } finally {
+    fsp.readFile = realReadFile;
+    syncBuiltinESMExports();
+  }
 } finally {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 }

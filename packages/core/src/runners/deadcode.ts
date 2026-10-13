@@ -25,6 +25,11 @@ import type { ToolFinding } from "./types.js";
  *      to the function. If no callsite passes the optional position, emit one
  *      finding per `(param, branch)` pair with a 3-part evidence array.
  *
+ * Unknown reach is not zero reach (issue #61): when the graph left a file out
+ * (unreadable or failed to parse) or a caller cannot be read, the missing
+ * file may be the one caller that passes the param. Such a finding is
+ * withheld and counted in one `info` entry instead.
+ *
  * Out of scope for v0 (per ADR-0021's caveats):
  *   - Dynamic dispatch (`obj[methodName]()`).
  *   - Multi-hop re-exports.
@@ -47,6 +52,9 @@ export interface DeadcodeRunnerOutput {
   degraded: DegradedEntry[];
 }
 
+/** Caller paths listed in the skip entry before "and N more". */
+const MAX_LISTED_PATHS = 10;
+
 interface OptionalParamInfo {
   paramName: string;
   paramIndex: number;
@@ -64,6 +72,10 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
   // + an in-memory Map<targetAbs, callers[]> keeps deadcode O(files + changed).
   let reverseIndex: Map<string, CallerEntry[]> | undefined;
   let indexFailed = false;
+  // Why the graph is incomplete, e.g. "1 unreadable file"; empty when complete.
+  let graphGaps: string[] = [];
+  let skipped = 0;
+  const unreadCallers = new Set<string>();
 
   for (const cf of input.changed) {
     const parseResult = await parseChangedSourceFile(input.repoRoot, cf, "deadcode");
@@ -90,6 +102,14 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
         // Cold-build notes are the selector's to report; read failures are
         // forwarded because check mode runs deadcode without the selector.
         degraded.push(...snapshot.degraded.filter((d) => d.kind !== "info"));
+        graphGaps = [
+          ...(snapshot.unreadable.length > 0
+            ? [plural(snapshot.unreadable.length, "unreadable file", "unreadable files")]
+            : []),
+          ...(snapshot.stats.parseErrors > 0
+            ? [plural(snapshot.stats.parseErrors, "parse error", "parse errors")]
+            : []),
+        ];
         reverseIndex = buildReverseImportIndex(input.repoRoot, snapshot.graph);
       } catch (err) {
         indexFailed = true;
@@ -108,6 +128,11 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
       const callsites = await collectCallsites(callers, cand.fnName, cand.paramIndex);
       if (callsites.totalCount === 0) continue;
       if (callsites.passingCount > 0) continue;
+      if (graphGaps.length > 0 || callsites.unreadCallers.length > 0) {
+        skipped++;
+        for (const path of callsites.unreadCallers) unreadCallers.add(path);
+        continue;
+      }
 
       const example = callsites.exampleSite;
       const message = example
@@ -127,7 +152,32 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
     }
   }
 
+  if (skipped > 0) {
+    // Files the snapshot left out are named by its own warning; only callers
+    // that failed here are listed.
+    const reasons: string[] = [];
+    if (graphGaps.length > 0) reasons.push(`import graph incomplete (${graphGaps.join(", ")})`);
+    if (unreadCallers.size > 0) {
+      const listed = [...unreadCallers].sort();
+      const shown = listed.slice(0, MAX_LISTED_PATHS).join(", ");
+      const more =
+        listed.length > MAX_LISTED_PATHS ? ` and ${listed.length - MAX_LISTED_PATHS} more` : "";
+      reasons.push(
+        `could not read ${plural(listed.length, "caller file", "caller files")}: ${shown}${more}`,
+      );
+    }
+    degraded.push({
+      kind: "info",
+      topic: "deadcode",
+      message: `deadcode: ${plural(skipped, "candidate", "candidates")} skipped; ${reasons.join("; ")}`,
+    });
+  }
+
   return { findings, degraded };
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 function collectOptionalParamCandidates(
@@ -284,6 +334,8 @@ interface CallsiteSurvey {
   totalCount: number;
   passingCount: number;
   exampleSite?: { path: string; line: number };
+  /** Callers that could not be read or parsed; their callsites are unknown. */
+  unreadCallers: string[];
 }
 
 async function collectCallsites(
@@ -297,17 +349,20 @@ async function collectCallsites(
   let totalCount = 0;
   let passingCount = 0;
   let exampleSite: CallsiteSurvey["exampleSite"];
+  const unreadCallers: string[] = [];
   for (const caller of callers) {
     let content: string;
     try {
       content = await readFile(caller.abs, "utf8");
     } catch {
+      unreadCallers.push(caller.path);
       continue;
     }
     let sf: ts.SourceFile;
     try {
       sf = ts.createSourceFile(caller.abs, content, ts.ScriptTarget.Latest, true);
     } catch {
+      unreadCallers.push(caller.path);
       continue;
     }
     visitCalls(sf, (call, line) => {
@@ -326,7 +381,7 @@ async function collectCallsites(
       }
     });
   }
-  return { totalCount, passingCount, exampleSite };
+  return { totalCount, passingCount, exampleSite, unreadCallers };
 }
 
 function visitCalls(
