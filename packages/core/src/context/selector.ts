@@ -11,7 +11,11 @@ import {
   REASON_WEIGHTS,
 } from "./index.js";
 import type { ContextCandidate, ContextSelector, Reason, SelectorOutput } from "./index.js";
-import { loadImportGraph } from "./import-graph.js";
+import {
+  loadImportGraph,
+  type ImportGraphLoader,
+  type ImportGraphSnapshot,
+} from "./import-graph.js";
 import { TsCompilerParser, type ExportRef, type SourceParser } from "./parser.js";
 import {
   collectImportedByReasons,
@@ -34,16 +38,23 @@ import { collectSymbolRefHits } from "./signals/symbol-refs.js";
  * one from a commit or checkout on a clean tree, produces a cache miss and a
  * re-parse with no manual invalidation.
  *
- * Parser resolution order (per `select()` call):
- *   1. `opts.parser` — explicit injection (custom impl, tests).
- *   2. `new TsCompilerParser({ tsconfigPath: opts.tsconfigPath ?? ecosystem.tsconfigPaths[0] })`.
+ * Graph source (per `select()` call):
+ *   1. `input.importGraph` — the review's shared snapshot (`runDetPriors`).
+ *      The parser options below are not used, and the caller reports the
+ *      snapshot's degraded entries.
+ *   2. Otherwise a load of its own, with the parser below:
+ *      a. `opts.parser` — explicit injection (custom impl, tests).
+ *      b. `new TsCompilerParser({ tsconfigPath: opts.tsconfigPath ?? ecosystem.tsconfigPaths[0] })`.
  * Selectors are intended to be cheap to construct and per-review; the
  * `ecosystem` argument carries the host-repo state, so tsconfig discovery
  * stays at the call site rather than freezing into the constructor.
  */
 
 export interface CheapSignalsSelectorOptions {
-  /** Custom parser. Takes precedence over the tsconfig-based default. */
+  /**
+   * Custom parser. Takes precedence over the tsconfig-based default. Not used
+   * when `select()` receives a shared `importGraph`.
+   */
   parser?: SourceParser;
   /** Override tsconfig path for module resolution. Falls back to `ecosystem.tsconfigPaths[0]`. */
   tsconfigPath?: string;
@@ -71,21 +82,26 @@ export class CheapSignalsSelector implements ContextSelector {
     changed: ChangedFile[];
     ecosystem: EcosystemContext;
     diff?: string;
+    importGraph?: ImportGraphLoader;
   }): Promise<SelectorOutput> {
     const { repoRoot, changed, ecosystem } = input;
     const degraded: DegradedEntry[] = [];
 
-    const parser =
-      this.opts.parser ??
-      new TsCompilerParser({
-        repoRoot,
-        tsconfigPath: this.opts.tsconfigPath ?? ecosystem.tsconfigPaths[0],
-      });
-
     // 1–3. Active import graph for the working tree: every tracked source
     //      file is hashed from disk, and only rows for those hashes are used.
-    const snapshot = await loadImportGraph({ repoRoot, parser, topic: "context" });
-    degraded.push(...snapshot.degraded);
+    let snapshot: ImportGraphSnapshot;
+    if (input.importGraph) {
+      snapshot = await input.importGraph();
+    } else {
+      const parser =
+        this.opts.parser ??
+        new TsCompilerParser({
+          repoRoot,
+          tsconfigPath: this.opts.tsconfigPath ?? ecosystem.tsconfigPaths[0],
+        });
+      snapshot = await loadImportGraph({ repoRoot, parser, topic: "context" });
+      degraded.push(...snapshot.degraded);
+    }
     if (snapshot.files.length === 0) {
       return { candidates: [], degraded };
     }

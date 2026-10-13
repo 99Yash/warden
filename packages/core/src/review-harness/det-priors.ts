@@ -2,11 +2,14 @@ import { CURRENT_DEFAULT, getEmbeddingProvider } from "@warden/ai";
 import { wardenEnv } from "@warden/env";
 import { bannerStateToDegraded, computeBannerState, type BannerState } from "../banner/index.js";
 import { CodeChunkAdapter } from "../context/chunker.js";
+import { loadImportGraph, type ImportGraphSnapshot } from "../context/import-graph.js";
 import {
   CheapSignalsSelector,
+  TsCompilerParser,
   candidatesToRetrievedContext,
   type ContextSelector,
   type SelectorOutput,
+  type SourceParser,
 } from "../context/index.js";
 import { parseUnifiedDiff, type ChangedFile } from "../diff/index.js";
 import { pruneDiff } from "../diff/prune.js";
@@ -57,8 +60,8 @@ export interface DetPriorsInput {
   mode: "check" | "review";
   /**
    * Override the M5/M6 cheap-signals selector. Default constructs a
-   * `CheapSignalsSelector` keyed on the host repo's tsconfig + Voyage
-   * embeddings (when the index exists). Pass `null` to skip context
+   * `CheapSignalsSelector` that reads the review's shared import graph +
+   * Voyage embeddings (when the index exists). Pass `null` to skip context
    * selection entirely.
    */
   selector?: ContextSelector | null;
@@ -74,6 +77,11 @@ export interface DetPriorsInput {
    * Undefined `baseRef` (or absent struct) → react-doctor auto-detects.
    */
   diffBase?: { baseRef?: string; description: string };
+  /**
+   * Override the parser of the review's shared import graph. Default:
+   * `TsCompilerParser` on the host repo's first tsconfig. Used by tests.
+   */
+  parser?: SourceParser;
 }
 
 export interface DetPriors {
@@ -269,7 +277,6 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
       ? input.selector
       : shouldRunSelector
         ? new CheapSignalsSelector({
-            tsconfigPath: ecosystem.tsconfigPaths[0],
             embeddingProvider: semanticDeps?.embeddingProvider ?? null,
             embeddingStore: semanticDeps?.embeddingStore ?? null,
             chunkStore: semanticDeps?.chunkStore ?? null,
@@ -277,6 +284,23 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
             lockedModelVersionForDocument: semanticDeps?.lockedModelVersionForDocument,
           })
         : null;
+
+  // One import graph per review, built with one parser and read by both the
+  // selector and the deadcode detector, so they see the same tree. The load
+  // starts on first use: check mode pays for it only when deadcode has a
+  // candidate.
+  let graphLoad: Promise<ImportGraphSnapshot> | undefined;
+  const importGraph = () =>
+    (graphLoad ??= loadImportGraph({
+      repoRoot: input.repoRoot,
+      parser:
+        input.parser ??
+        new TsCompilerParser({
+          repoRoot: input.repoRoot,
+          tsconfigPath: ecosystem.tsconfigPaths[0],
+        }),
+      topic: "context",
+    }));
 
   // Parallel detectors. scalabilityRunner + leverageRunner are `Runner`-
   // contract objects; call `.run()` directly — the M8 `dispatch()` was
@@ -334,6 +358,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
             changed,
             ecosystem,
             diff: input.diff,
+            importGraph,
           })
           .catch(
             (err: unknown): SelectorOutput => ({
@@ -352,7 +377,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
       ? runDeadcode({
           repoRoot: input.repoRoot,
           changed,
-          tsconfigPath: ecosystem.tsconfigPaths[0],
+          importGraph,
         }).catch((err: unknown) => ({
           findings: [] as ToolFinding[],
           degraded: [
@@ -437,6 +462,16 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
       : Promise.resolve({ findings: [] as ToolFinding[], degraded: [] as DegradedEntry[] }),
   ]);
 
+  // The snapshot's own entries (cold build, parse errors, sparse count, read
+  // failures) are reported here, once, whichever consumer loaded it. A failed
+  // load is already reported by each consumer that awaited it.
+  const graphDegraded = graphLoad
+    ? await graphLoad.then(
+        (snapshot) => snapshot.degraded,
+        () => [],
+      )
+    : [];
+
   // jscpd runs sequentially after the selector — it consumes the candidate
   // path set per ADR-0018. Skipped when there's nothing scoped to look at.
   const candidatePaths = selectorResult.candidates.map((c) => c.path);
@@ -482,6 +517,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
     ...environmentalDegraded,
     ...bannerStateToDegraded(bannerState),
     ...vulnResult.degraded,
+    ...graphDegraded,
     ...selectorResult.degraded,
     ...tscResult.degraded,
     ...eslintResult.degraded,

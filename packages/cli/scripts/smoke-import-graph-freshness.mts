@@ -34,6 +34,11 @@
  *      deadcode holds back a finding whose only passing caller is outside
  *      it, and a working-tree deletion in the same tree stays silent
  * [13] degraded messages say "1 file" and "2 files"
+ * [14] check mode, cold cache: the cold-build note reaches the output
+ * [15] deadcode follows the reviewed commit in review and check mode: commit
+ *      B adds the caller that passes the optional param
+ * [16] one review loads the graph once, parses each changed file once with
+ *      the shared parser, and reports each snapshot warning once
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
@@ -49,6 +54,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import type { spawn as spawnFn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 
@@ -57,7 +63,7 @@ const REPO = resolve(TMP_ROOT, "repo");
 process.env["WARDEN_CACHE_PATH"] = resolve(TMP_ROOT, "cache.sqlite");
 process.env["WARDEN_REVIEW_REFRESH_MAX_USD"] = "0";
 
-const { CheapSignalsSelector, TsCompilerParser, runDetPriors } = await import("@warden/core");
+const { TsCompilerParser, runDetPriors } = await import("@warden/core");
 const { loadImportGraph } = await import("@warden/core/context/import-graph");
 const { runDeadcode } = await import("@warden/core/runners/deadcode");
 type SourceParser = import("@warden/core/context/parser").SourceParser;
@@ -107,12 +113,12 @@ interface ReviewView {
   semanticReasons: number;
 }
 
-async function review(selectorParser?: SourceParser): Promise<ReviewView> {
+async function review(parser?: SourceParser): Promise<ReviewView> {
   const out = await runDetPriors({
     diff: DIFF,
     repoRoot: REPO,
     mode: "review",
-    ...(selectorParser ? { selector: new CheapSignalsSelector({ parser: selectorParser }) } : {}),
+    ...(parser ? { parser } : {}),
   });
   const candidates = out.selectorOutput.candidates;
   return {
@@ -128,16 +134,25 @@ async function review(selectorParser?: SourceParser): Promise<ReviewView> {
   };
 }
 
-/** Wraps the default parser and counts parse calls. */
-function countingParser(): SourceParser & { calls: number } {
-  const inner = new TsCompilerParser({ repoRoot: REPO });
+/**
+ * Wraps the default parser and counts parse calls: `calls` counts `imports`,
+ * `perFile` counts `imports` + `exports` by absolute path.
+ */
+function countingParser(
+  repoRoot = REPO,
+): SourceParser & { calls: number; perFile: Map<string, number> } {
+  const inner = new TsCompilerParser({ repoRoot });
+  const bump = (abs: string) => counter.perFile.set(abs, (counter.perFile.get(abs) ?? 0) + 1);
   const counter = {
     calls: 0,
+    perFile: new Map<string, number>(),
     async imports(abs: string, content: string) {
       counter.calls++;
+      bump(abs);
       return inner.imports(abs, content);
     },
     async exports(abs: string, content: string) {
+      bump(abs);
       return inner.exports(abs, content);
     },
     resolve(moduleName: string, containingFile: string) {
@@ -169,6 +184,29 @@ async function resolvedImport(
 }
 
 const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Counts `git ls-files -z` spawns with no other argument: one per graph load.
+ * Builtin ESM exports follow the CommonJS object after a sync.
+ */
+async function countGraphLoads<T>(fn: () => Promise<T>): Promise<{ result: T; loads: number }> {
+  const cp = createRequire(import.meta.url)("node:child_process") as {
+    spawn: typeof spawnFn;
+  };
+  const realSpawn = cp.spawn;
+  let loads = 0;
+  cp.spawn = ((cmd: string, args: readonly string[], ...rest: unknown[]) => {
+    if (cmd === "git" && args.length === 2 && args[0] === "ls-files" && args[1] === "-z") loads++;
+    return (realSpawn as (...a: unknown[]) => unknown)(cmd, args, ...rest);
+  }) as typeof realSpawn;
+  syncBuiltinESMExports();
+  try {
+    return { result: await fn(), loads };
+  } finally {
+    cp.spawn = realSpawn;
+    syncBuiltinESMExports();
+  }
+}
 
 try {
   mkdirSync(resolve(REPO, "src"), { recursive: true });
@@ -730,6 +768,103 @@ ${target
     await freshMessages({ files: ["a.ts"], sparseOut: ["out/x.ts", "out/y.ts"] }),
     "context: 2 tracked source files outside the sparse checkout; left out of the import graph",
   );
+
+  // A second repo with fresh content, so the first load is cold. `target.ts`
+  // has an optional param that is checked in the body; the diff touches it,
+  // so deadcode loads the graph in both modes.
+  const SHARED = resolve(TMP_ROOT, "shared");
+  const sgit = (...args: string[]) =>
+    execFileSync("git", args, { cwd: SHARED, encoding: "utf8" }).trim();
+  const swrite = (rel: string, content: string) => writeFileSync(resolve(SHARED, rel), content);
+  const scommit = (message: string) => {
+    sgit("add", "-A");
+    sgit("commit", "-q", "-m", message);
+  };
+  mkdirSync(resolve(SHARED, "src"), { recursive: true });
+  sgit("init", "-q", "-b", "main");
+  sgit("config", "user.email", "smoke@warden.local");
+  sgit("config", "user.name", "warden smoke");
+  sgit("config", "commit.gpgsign", "false");
+  swrite("package.json", `{ "name": "shared-fixture", "private": true }\n`);
+  swrite(".gitignore", ".warden/\n");
+  swrite("src/target.ts", `${target}// ${nonce}\n`);
+  swrite("src/x.ts", `import { pick } from "./target";\nexport const x = pick(1);\n// ${nonce}\n`);
+  swrite("src/y.ts", `export const y = 1;\n// ${nonce}\n`);
+  scommit("A: x calls pick without opt");
+  const PICK_DIFF = TARGET_DIFF.replaceAll("src/fan/target.ts", "src/target.ts");
+  const pickFindings = (out: { findings: { ruleId?: string; file: string }[] }) =>
+    out.findings.filter(
+      (f) => f.ruleId === "unreachable-optional-param" && f.file === "src/target.ts",
+    ).length;
+  const detPriors = (mode: "check" | "review", parser?: SourceParser) =>
+    runDetPriors({ diff: PICK_DIFF, repoRoot: SHARED, mode, ...(parser ? { parser } : {}) });
+
+  // ── [14] check mode reports the cold build ───────────────────────────
+  // Check mode runs no selector; deadcode's load is the only one.
+  process.stdout.write(`\n[14] check mode on a cold cache reports the cold build\n`);
+  const coldCheck = await detPriors("check");
+  const coldNotes = coldCheck.degraded.filter((d) => d.message.includes("cold import-graph build"));
+  assert(
+    coldNotes.length === 1 &&
+      coldNotes[0]?.kind === "info" &&
+      coldNotes[0].message === "context: cold import-graph build (parsed 3 files)",
+    `one cold-build info entry (got ${JSON.stringify(coldNotes.map((d) => d.message))})`,
+  );
+  assert(
+    pickFindings(coldCheck) === 1,
+    `A, check: opt is never passed (got ${pickFindings(coldCheck)})`,
+  );
+
+  // ── [15] deadcode follows the reviewed commit ────────────────────────
+  // Commit B adds an import of `target.ts` to y.ts, and y passes opt. A
+  // graph from commit A has no y → target edge and would keep the finding.
+  process.stdout.write(`\n[15] warm on A, commit B (new caller passes opt), review and check B\n`);
+  const warmA = await detPriors("review");
+  assert(pickFindings(warmA) === 1, `A, review: opt is never passed (got ${pickFindings(warmA)})`);
+  swrite(
+    "src/y.ts",
+    `import { pick } from "./target";\nexport const y = pick(2, "y");\n// ${nonce}\n`,
+  );
+  scommit("B: y passes opt");
+  assert(sgit("status", "--porcelain") === "", "B: working tree is clean");
+  const reviewB = await detPriors("review");
+  assert(pickFindings(reviewB) === 0, `B, review: no finding (got ${pickFindings(reviewB)})`);
+  const checkB = await detPriors("check");
+  assert(pickFindings(checkB) === 0, `B, check: no finding (got ${pickFindings(checkB)})`);
+
+  // ── [16] one load, one parse per changed file, one warning ───────────
+  process.stdout.write(`\n[16] one review: one graph load, one parse per changed file\n`);
+  swrite("src/x.ts", `import { pick } from "./target";\nexport const x = pick(3);\n// ${nonce}\n`);
+  swrite("src/z.ts", `export const z = 1;\n// ${nonce}\n`);
+  scommit("C: x changes, z added");
+  const zAbs = resolve(SHARED, "src/z.ts");
+  const blockZ = process.getuid?.() !== 0;
+  if (blockZ) chmodSync(zAbs, 0o000);
+  try {
+    const parser = countingParser(SHARED);
+    const { result: oneReview, loads } = await countGraphLoads(() => detPriors("review", parser));
+    assert(loads === 1, `one review → one graph load (got ${loads})`);
+    // `imports` + `exports` once each per new file; an unreadable z is not parsed.
+    const parsed = [...parser.perFile].map(([abs, n]) => `${relative(SHARED, abs)}×${n}`).sort();
+    const expectedParsed = blockZ ? ["src/x.ts×2"] : ["src/x.ts×2", "src/z.ts×2"];
+    assert(
+      same(parsed, expectedParsed),
+      `the shared parser parses each new file once (got ${parsed})`,
+    );
+    if (blockZ) {
+      const warnings = oneReview.degraded.filter((d) => d.message.includes("could not read"));
+      assert(
+        warnings.length === 1 &&
+          warnings[0]?.message ===
+            "context: could not read 1 source file; left out of the import graph: src/z.ts",
+        `the read warning appears once (got ${JSON.stringify(warnings.map((d) => d.message))})`,
+      );
+    } else {
+      process.stdout.write(`  - skipped read warning: running as root\n`);
+    }
+  } finally {
+    if (blockZ) chmodSync(zAbs, 0o644);
+  }
 } finally {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 }

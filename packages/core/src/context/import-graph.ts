@@ -11,7 +11,7 @@ import type { Graph, GraphEntry } from "./signals/imports.js";
 /**
  * Active import graph for the working tree being reviewed (ADR-0018, issue
  * #62). Shared by the context selector and the deadcode detector so both read
- * the same snapshot.
+ * the same snapshot (see `ImportGraphLoader`).
  *
  * Source identity is established per load, never remembered: every tracked
  * source file is read and hashed from disk, and that hash is the only key used
@@ -65,6 +65,13 @@ export interface ImportGraphSnapshot {
   outsideSparse: string[];
   degraded: DegradedEntry[];
 }
+
+/**
+ * Returns one review's snapshot. `runDetPriors` passes the same memoized
+ * loader to the context selector and the deadcode detector, so a review loads
+ * the graph at most once, with one parser, and both read the same tree.
+ */
+export type ImportGraphLoader = () => Promise<ImportGraphSnapshot>;
 
 export async function loadImportGraph(input: {
   repoRoot: string;

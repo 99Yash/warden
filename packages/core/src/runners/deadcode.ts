@@ -2,7 +2,11 @@ import { readFile } from "node:fs/promises";
 import { relative, resolve as resolvePath, sep } from "node:path";
 import ts from "typescript";
 import { assertNever } from "../assert-never.js";
-import { loadImportGraph } from "../context/import-graph.js";
+import {
+  loadImportGraph,
+  type ImportGraphLoader,
+  type ImportGraphSnapshot,
+} from "../context/import-graph.js";
 import { TsCompilerParser } from "../context/parser.js";
 import type { Graph } from "../context/signals/imports.js";
 import type { ChangedFile } from "../diff/index.js";
@@ -19,9 +23,10 @@ import type { ToolFinding } from "./types.js";
  *   1. For each diff-touched function with `export` modifier and at least one
  *      optional parameter (`?`, default value, or `T | undefined`/`T | null`),
  *      collect the optional params and their presence-checking branches.
- *   2. Load the active import graph for the working tree (`loadImportGraph`)
- *      and find files whose imports resolve to the changed file's absolute
- *      path (one-hop reverse). Rows cached for other snapshots never count.
+ *   2. Load the active import graph for the working tree (the shared
+ *      `importGraph`, else `loadImportGraph`) and find files whose imports
+ *      resolve to the changed file's absolute path (one-hop reverse). Rows
+ *      cached for other snapshots never count.
  *   3. Parse each caller; locate `CallExpression` nodes whose callee resolves
  *      to the function. If no callsite passes the optional position, emit one
  *      finding per `(param, branch)` pair with a 3-part evidence array.
@@ -44,7 +49,13 @@ import type { ToolFinding } from "./types.js";
 export interface DeadcodeRunnerInput {
   repoRoot: string;
   changed: ChangedFile[];
-  /** tsconfig for import resolution; must match the context selector's. */
+  /**
+   * The review's shared import graph (`runDetPriors`). The caller reports the
+   * snapshot's degraded entries. Without it, the runner loads the graph itself
+   * and reports them.
+   */
+  importGraph?: ImportGraphLoader;
+  /** tsconfig for import resolution when the runner loads the graph itself. */
   tsconfigPath?: string;
 }
 
@@ -92,19 +103,21 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
 
     if (!reverseIndex && !indexFailed) {
       try {
-        const snapshot = await loadImportGraph({
-          repoRoot: input.repoRoot,
-          parser: new TsCompilerParser({
+        let snapshot: ImportGraphSnapshot;
+        if (input.importGraph) {
+          snapshot = await input.importGraph();
+        } else {
+          snapshot = await loadImportGraph({
             repoRoot: input.repoRoot,
-            tsconfigPath: input.tsconfigPath,
-          }),
-          topic: "deadcode",
-        });
-        // Info notes (cold build, parse errors, sparse checkout) are the
-        // selector's to report; gaps that affect a finding are named in the
-        // skip entry below. Read failures are forwarded because check mode
-        // runs deadcode without the selector.
-        degraded.push(...snapshot.degraded.filter((d) => d.kind !== "info"));
+            parser: new TsCompilerParser({
+              repoRoot: input.repoRoot,
+              tsconfigPath: input.tsconfigPath,
+            }),
+            topic: "deadcode",
+          });
+          degraded.push(...snapshot.degraded);
+        }
+        // Gaps that affect a finding are also named in the skip entry below.
         graphGaps = [
           ...(snapshot.unreadable.length > 0
             ? [plural(snapshot.unreadable.length, "unreadable file", "unreadable files")]
