@@ -5,7 +5,7 @@ import { resolve as resolvePath } from "node:path";
 import { and, db, eq, importGraph } from "@warden/db";
 import type { DegradedEntry } from "../schema.js";
 import type { ExportRef, ImportRef, SourceParser } from "./parser.js";
-import type { Graph } from "./signals/imports.js";
+import type { Graph, GraphEntry } from "./signals/imports.js";
 
 /**
  * Active import graph for the working tree being reviewed (ADR-0018, issue
@@ -38,7 +38,10 @@ const MAX_LISTED_PATHS = 10;
 export interface ImportGraphSnapshot {
   /** Repo-relative source files present in the snapshot (tracked and on disk). */
   files: string[];
-  /** Absolute path → parsed entry, for every snapshot file that parsed. */
+  /**
+   * Absolute path → parsed entry, for every snapshot file that parsed.
+   * Iterates in `git ls-files` order on every load.
+   */
   graph: Graph;
   /** Parse-cache counters for this load. */
   stats: { reused: number; parsed: number; parseErrors: number };
@@ -57,11 +60,14 @@ export async function loadImportGraph(input: {
   const tracked = (await gitLsFiles(repoRoot)).filter((f) => SOURCE_EXT_RE.test(f));
 
   const files: string[] = [];
-  const graph: Graph = new Map();
   const stats = { reused: 0, parsed: 0, parseErrors: 0 };
   const unreadable: string[] = [];
+  // Entries land by `tracked` index, not by read completion, so the graph's
+  // iteration order is the same on every load of the same tree. Consumers
+  // (the deadcode example callsite, the selector's reason order) depend on it.
+  const entries: (GraphEntry | undefined)[] = [];
 
-  await runInBatches(tracked, BATCH_SIZE, async (path) => {
+  await runInBatches(tracked, BATCH_SIZE, async (path, index) => {
     const abs = resolvePath(repoRoot, path);
     let bytes: Buffer;
     try {
@@ -78,13 +84,13 @@ export async function loadImportGraph(input: {
     const cached = readImportGraphRow(path, sha);
     if (cached) {
       stats.reused++;
-      graph.set(abs, {
+      entries[index] = {
         imports: cached.imports.map((imp) => ({
           ...imp,
           resolved: parser.resolve(imp.module, abs),
         })),
         exports: cached.exports,
-      });
+      };
       return;
     }
     // Parse the same bytes that were hashed, so the stored row can never pair
@@ -96,13 +102,18 @@ export async function loadImportGraph(input: {
         parser.exports(abs, content),
       ]);
       insertImportGraphRow(path, sha, imports, exports);
-      graph.set(abs, { imports, exports });
+      entries[index] = { imports, exports };
       stats.parsed++;
     } catch {
       stats.parseErrors++;
     }
   });
 
+  const graph: Graph = new Map();
+  for (let i = 0; i < tracked.length; i++) {
+    const entry = entries[i];
+    if (entry) graph.set(resolvePath(repoRoot, tracked[i]!), entry);
+  }
   files.sort();
   unreadable.sort();
 
@@ -161,11 +172,11 @@ function gitLsFiles(repoRoot: string): Promise<string[]> {
 async function runInBatches<T>(
   items: T[],
   batchSize: number,
-  fn: (item: T) => Promise<void>,
+  fn: (item: T, index: number) => Promise<void>,
 ): Promise<void> {
   for (let i = 0; i < items.length; i += batchSize) {
     const slice = items.slice(i, i + batchSize);
-    await Promise.all(slice.map(fn));
+    await Promise.all(slice.map((item, j) => fn(item, i + j)));
   }
 }
 

@@ -20,6 +20,8 @@
  *  [6] a deletion in the working tree leaves the snapshot without an error
  *  [7] an unchanged importer's edge follows its target when another file
  *      shadows or renames it (resolution is not cached with the row)
+ *  [8] graph key order follows tracked order, so the deadcode finding
+ *      message (and its comment id) is the same on every run
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
@@ -35,6 +37,7 @@ process.env["WARDEN_REVIEW_REFRESH_MAX_USD"] = "0";
 
 const { CheapSignalsSelector, TsCompilerParser, runDetPriors } = await import("@warden/core");
 const { loadImportGraph } = await import("@warden/core/context/import-graph");
+const { runDeadcode } = await import("@warden/core/runners/deadcode");
 type SourceParser = import("@warden/core/context/parser").SourceParser;
 
 let failed = 0;
@@ -306,6 +309,69 @@ try {
   commit("G: util.ts renamed to util.tsx");
   const renamed = await resolvedImport(countingParser(), "src/d.ts", "./util");
   assert(renamed === "src/util.tsx", `G: cached d row → src/util.tsx (got ${renamed})`);
+
+  // ── [8] deterministic order on identical input ───────────────────────
+  // Reads run in parallel batches; if the graph took readFile completion
+  // order, the deadcode example callsite (hashed into the comment id) would
+  // change between runs of the same tree.
+  process.stdout.write(`\n[8] many callers: graph order and deadcode message are stable\n`);
+  const CALLERS = 25;
+  mkdirSync(resolve(REPO, "src/fan"), { recursive: true });
+  const target = [
+    "export function pick(a: number, opt?: string): string {",
+    "  if (opt) {",
+    "    return opt;",
+    "  }",
+    "  return String(a);",
+    "}",
+    "",
+  ].join("\n");
+  write("src/fan/target.ts", target);
+  for (let i = 0; i < CALLERS; i++) {
+    const n = String(i).padStart(2, "0");
+    // Vary the size so reads do not all finish in submission order.
+    const pad = "// pad\n".repeat((i * 7919) % 400);
+    write(
+      `src/fan/caller-${n}.ts`,
+      `import { pick } from "./target";\n${pad}export const v${n} = pick(${i});\n`,
+    );
+  }
+  commit("H: 25 callers of pick, none pass opt");
+  const graphOrders = new Set<string>();
+  for (let i = 0; i < 5; i++) {
+    const snapshot = await loadImportGraph({
+      repoRoot: REPO,
+      parser: new TsCompilerParser({ repoRoot: REPO }),
+      topic: "context",
+    });
+    const keys = [...snapshot.graph.keys()].map((k) => relative(REPO, k));
+    graphOrders.add(JSON.stringify(keys));
+    if (i === 0) {
+      assert(
+        same(keys, [...snapshot.files].sort()),
+        `graph keys follow sorted tracked order (got ${keys.slice(0, 4)}…)`,
+      );
+    }
+  }
+  assert(graphOrders.size === 1, `5 loads → 1 graph key order (got ${graphOrders.size})`);
+  const messages = new Set<string>();
+  for (let i = 0; i < 30; i++) {
+    const out = await runDeadcode({
+      repoRoot: REPO,
+      changed: [{ path: "src/fan/target.ts", addedLines: [1, 2, 3, 4, 5, 6] }],
+    });
+    for (const f of out.findings) messages.add(f.message);
+  }
+  const [message] = messages;
+  assert(
+    messages.size === 1,
+    `30 deadcode runs → 1 distinct message (got ${messages.size}: ${[...messages].join(" | ")})`,
+  );
+  assert(
+    message?.includes(`any of ${CALLERS} callsite(s)`) &&
+      message.endsWith("Example callsite: src/fan/caller-00.ts:2"),
+    `example callsite is the first caller in path order (got ${message ?? "none"})`,
+  );
 } finally {
   rmSync(TMP_ROOT, { recursive: true, force: true });
 }
