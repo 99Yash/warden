@@ -7,9 +7,10 @@ import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
  * forever-valid for that exact content. Stale rows for the same path with
  * older SHAs are harmless; never `UPDATE`, only `INSERT OR IGNORE`.
  *
- * Invalidation is `git ls-files --modified --others --exclude-standard` →
- * fresh SHA → cache miss → reparse. See ADR-0018 "content-addressing turns
- * cache invalidation into cache lookup."
+ * There is no invalidation step: `loadImportGraph` hashes every tracked
+ * source file per review and reads only the rows for those hashes, so rows
+ * for other snapshots stay here but are never active (ADR-0018 amendment,
+ * issue #62).
  */
 export const importGraph = sqliteTable(
   "import_graph",

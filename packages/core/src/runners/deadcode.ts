@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { resolve as resolvePath } from "node:path";
+import { relative, resolve as resolvePath, sep } from "node:path";
 import ts from "typescript";
-import { db, importGraph } from "@warden/db";
 import { assertNever } from "../assert-never.js";
+import { loadImportGraph } from "../context/import-graph.js";
+import { TsCompilerParser } from "../context/parser.js";
+import type { Graph } from "../context/signals/imports.js";
 import type { ChangedFile } from "../diff/index.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, formatErr, parseChangedSourceFile } from "./_shared.js";
@@ -16,8 +18,9 @@ import type { ToolFinding } from "./types.js";
  *   1. For each diff-touched function with `export` modifier and at least one
  *      optional parameter (`?`, default value, or `T | undefined`/`T | null`),
  *      collect the optional params and their presence-checking branches.
- *   2. Scan `import_graph` for rows whose `imports_json` resolves to the
- *      changed file's absolute path (one-hop reverse).
+ *   2. Load the active import graph for the working tree (`loadImportGraph`)
+ *      and find files whose imports resolve to the changed file's absolute
+ *      path (one-hop reverse). Rows cached for other snapshots never count.
  *   3. Parse each caller; locate `CallExpression` nodes whose callee resolves
  *      to the function. If no callsite passes the optional position, emit one
  *      finding per `(param, branch)` pair with a 3-part evidence array.
@@ -35,6 +38,8 @@ import type { ToolFinding } from "./types.js";
 export interface DeadcodeRunnerInput {
   repoRoot: string;
   changed: ChangedFile[];
+  /** tsconfig for import resolution; must match the context selector's. */
+  tsconfigPath?: string;
 }
 
 export interface DeadcodeRunnerOutput {
@@ -55,9 +60,8 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
   const findings: ToolFinding[] = [];
   const degraded: DegradedEntry[] = [];
 
-  // Build the reverse import-graph index once on first need. Repeating
-  // `import_graph.all()` per changed file blows up with cache size; one pass
-  // + an in-memory Map<targetAbs, callers[]> keeps deadcode O(rows + changed).
+  // Build the reverse import-graph index once on first need: one graph load
+  // + an in-memory Map<targetAbs, callers[]> keeps deadcode O(files + changed).
   let reverseIndex: Map<string, CallerEntry[]> | undefined;
   let indexFailed = false;
 
@@ -75,7 +79,18 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
 
     if (!reverseIndex && !indexFailed) {
       try {
-        reverseIndex = buildReverseImportIndex(input.repoRoot);
+        const snapshot = await loadImportGraph({
+          repoRoot: input.repoRoot,
+          parser: new TsCompilerParser({
+            repoRoot: input.repoRoot,
+            tsconfigPath: input.tsconfigPath,
+          }),
+          topic: "deadcode",
+        });
+        // Cold-build notes are the selector's to report; read failures are
+        // forwarded because check mode runs deadcode without the selector.
+        degraded.push(...snapshot.degraded.filter((d) => d.kind !== "info"));
+        reverseIndex = buildReverseImportIndex(input.repoRoot, snapshot.graph);
       } catch (err) {
         indexFailed = true;
         degraded.push({
@@ -236,28 +251,15 @@ interface CallerEntry {
 }
 
 /**
- * One-pass scan of `import_graph` keyed by resolved import target. Caller
- * lookup per changed file collapses to a single Map.get() instead of
- * re-scanning the table.
+ * Reverse index over the active import graph, keyed by resolved import
+ * target. Caller lookup per changed file collapses to a single Map.get().
  */
-function buildReverseImportIndex(repoRoot: string): Map<string, CallerEntry[]> {
-  const rows = db()
-    .select({
-      filePath: importGraph.filePath,
-      importsJson: importGraph.importsJson,
-    })
-    .from(importGraph)
-    .all();
+function buildReverseImportIndex(repoRoot: string, graph: Graph): Map<string, CallerEntry[]> {
   const out = new Map<string, CallerEntry[]>();
   const seenPerTarget = new Map<string, Set<string>>();
-  for (const row of rows) {
-    let imports: { resolved?: string }[];
-    try {
-      imports = JSON.parse(row.importsJson) as { resolved?: string }[];
-    } catch {
-      continue;
-    }
-    for (const imp of imports) {
+  for (const [callerAbs, entry] of graph) {
+    const callerPath = relative(repoRoot, callerAbs).split(sep).join("/");
+    for (const imp of entry.imports) {
       if (!imp.resolved) continue;
       const targetAbs = resolvePath(imp.resolved);
       let seen = seenPerTarget.get(targetAbs);
@@ -265,14 +267,14 @@ function buildReverseImportIndex(repoRoot: string): Map<string, CallerEntry[]> {
         seen = new Set();
         seenPerTarget.set(targetAbs, seen);
       }
-      if (seen.has(row.filePath)) continue;
-      seen.add(row.filePath);
+      if (seen.has(callerPath)) continue;
+      seen.add(callerPath);
       let entries = out.get(targetAbs);
       if (!entries) {
         entries = [];
         out.set(targetAbs, entries);
       }
-      entries.push({ path: row.filePath, abs: resolvePath(repoRoot, row.filePath) });
+      entries.push({ path: callerPath, abs: callerAbs });
     }
   }
   return out;

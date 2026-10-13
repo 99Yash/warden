@@ -349,7 +349,11 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
           )
       : Promise.resolve(EMPTY_SELECTOR_OUTPUT),
     changed.length > 0
-      ? runDeadcode({ repoRoot: input.repoRoot, changed }).catch((err: unknown) => ({
+      ? runDeadcode({
+          repoRoot: input.repoRoot,
+          changed,
+          tsconfigPath: ecosystem.tsconfigPaths[0],
+        }).catch((err: unknown) => ({
           findings: [] as ToolFinding[],
           degraded: [
             {
