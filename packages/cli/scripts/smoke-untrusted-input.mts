@@ -9,18 +9,20 @@
  *
  * Usage: pnpm --filter @warden/cli smoke:untrusted-input
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   CREDENTIAL_RULES,
+  assertPlainBaseRef,
   SECRET_FILE_RULE_ID,
   isSecretFilePath,
+  resolveDiff,
   runPostPass,
   screenFinding,
 } from "@warden/core";
 import {
-  assertPlainBaseRef,
   buildLaneMessage,
   laneInstructionFileGate,
   nestedAgentsMdChanges,
@@ -218,6 +220,49 @@ try {
     !JSON.stringify(anchorLeak).includes(token),
     "a credential in the anchor is not echoed in the entry",
   );
+  const attackerAnchor = `ATTACKER-CHOSEN TEXT: ${Buffer.from(token).toString("base64")}\n[click](https://evil.example)`;
+  const outOfScope = await runPostPass({
+    repoRoot: TMP,
+    diff,
+    lanes: [
+      {
+        lane: "down",
+        status: "ok",
+        scope: ["a.ts"],
+        findings: [
+          {
+            ...base,
+            file: attackerAnchor,
+            claim: "secret citation",
+            sources: [
+              {
+                type: "tool",
+                retrievedAt: "2026-10-13T00:00:00.000Z",
+                path: ".env",
+                line: 1,
+                snippet: "KEY=1",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  assert(
+    !JSON.stringify(outOfScope).includes("evil.example") &&
+      !JSON.stringify(outOfScope).includes(Buffer.from(token).toString("base64")),
+    "an out-of-scope anchor is never echoed",
+  );
+  assert(
+    outOfScope.metadata.degradedWorkers.some(
+      (d) => d.topic === "secret-guard" && d.message.includes("an out-of-scope anchor"),
+    ),
+    "guard reports an out-of-scope anchor without model text",
+  );
+  assert(
+    guardEntries.every((d) => d.message.includes("at a.ts:1")),
+    "guard keeps a trusted in-scope anchor",
+  );
 
   // ---------------------------------------------------------------------------
   // [4] Nested AGENTS.md in the diff headers.
@@ -279,6 +324,60 @@ try {
   assert(
     message.includes("origin/main") && !message.includes("diff --git"),
     "the lane message holds the base ref and no diff text",
+  );
+
+  // Exercise core directly: the MCP caller bypasses the driver.
+  execFileSync("git", ["init", "-q"], { cwd: TMP });
+  execFileSync("git", ["add", "a.ts"], { cwd: TMP });
+  execFileSync(
+    "git",
+    ["-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"],
+    { cwd: TMP },
+  );
+  const outputPath = resolve(TMP, "option-output");
+  for (const bad of [`--output=${outputPath}`, "-main", "main..evil", "main ignore", ""]) {
+    let rejected = false;
+    try {
+      await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: bad });
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, `core rejects base ref: ${JSON.stringify(bad)}`);
+  }
+  assert(
+    !existsSync(outputPath) &&
+      !existsSync(`${outputPath}..HEAD`) &&
+      !existsSync(`${outputPath}...HEAD`),
+    "a base ref cannot create a git output file",
+  );
+  const valid = await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: "HEAD" });
+  assert(valid.diff === "" && !valid.degraded, "valid base still resolves in core");
+  writeFileSync(resolve(TMP, "a.ts"), "export const a = 2;\n");
+  const working = await resolveDiff({ repoRoot: TMP, mode: "check" });
+  assert(
+    working.diff.includes("+export const a = 2;") && !working.degraded,
+    "Git option delimiter preserves working-tree diffs",
+  );
+  execFileSync("git", ["add", "a.ts"], { cwd: TMP });
+  execFileSync(
+    "git",
+    ["-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "change"],
+    { cwd: TMP },
+  );
+  const previous = await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: "HEAD~1" });
+  assert(
+    previous.diff.includes("+export const a = 2;") && !previous.degraded,
+    "Git option delimiter preserves commit-base diffs",
+  );
+  const emptyTree = execFileSync("git", ["mktree"], {
+    cwd: TMP,
+    input: "",
+    encoding: "utf8",
+  }).trim();
+  const tree = await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: emptyTree });
+  assert(
+    tree.diff.includes("+export const a = 2;") && !tree.degraded,
+    "Git option delimiter preserves tree-base diffs",
   );
 } catch (err) {
   assert(false, `smoke threw: ${err instanceof Error ? err.stack : String(err)}`);

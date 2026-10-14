@@ -200,9 +200,28 @@ acceptable for a correctness lane, which needs the code, not the customs.
 ## Untrusted input (ADR-0054)
 
 The lane reads untrusted text through tools: the diff, the files, and the
-`warden mcp` output. Warden does not own the OpenCode tool output, so the
-containment is outside the model:
+`warden mcp` output. The main attacker supplies third-party text inside a
+trusted PR, such as a vendored file, a dependency update, pasted code, or a
+fetched document. The
+main goal is to suppress findings and obtain a clean result. Runner secrets
+are a separate asset: process environment values, `.git/config`, and files
+written by earlier CI steps. Same-repo-only CI does not remove this attacker;
+an author who can execute a changed workflow is outside Warden's boundary.
 
+Warden does not own the OpenCode tool output. These controls have separate
+limits:
+
+- **Independent integrity signals.** `runInputIntegrity` checks all added
+  diff lines for hidden Unicode (`hidden-unicode`) and commands aimed at an
+  AI reviewer or its instructions (`reviewer-instruction`). The post-pass
+  publishes these as Tier 1 / `security` tool findings, even when the lane
+  submits `[]` or fails. They bypass lane scope, noise pruning, and volume
+  caps. `warden check`, the MCP det-prior bundle, and the legacy review
+  harness also include them. Messages give code points or a rule, without
+  quoting the payload. Valid language, emoji, documentation, and test text
+  can match; check the text's purpose. These rules cover some suppression
+  attacks. Other wording, encodings, unchanged text, and fetched documents
+  can evade them. A clean result does not prove the absence of injection.
 - **Nested `AGENTS.md` gate.** After each `read`, OpenCode loads each
   `AGENTS.md` between the file and the location root as session
   instructions. No flag stops it (binary v2.0.25: `uL="AGENTS.md"`,
@@ -212,29 +231,46 @@ containment is outside the model:
   (`laneInstructionFileGate`, known $0, not clean). It reads the diff
   headers, because a pure rename or a binary file has no `+++` line. A
   nested `AGENTS.md` that the PR does not touch is base-branch content
-  and loads as usual.
-- **Base ref.** `--base` must be a plain ref name (`assertPlainBaseRef`):
+  and loads as usual. Its contents can still contain hostile instructions.
+- **Base ref.** CLI `--base` and model-chosen MCP bases must be plain ref names (`assertPlainBaseRef` in core `resolveDiff`):
   no leading `-`, no `..`, no quotes, spaces, or braces. It goes into the
-  lane message and into git argv.
-- **Secret guard.** The post-pass drops a finding that cites a secret
-  file (the `read` deny globs, `SECRET_FILE_GLOBS` in `@warden/core`,
+  lane message and into git argv. Git revision probes and diff argv use `--end-of-options`.
+- **Repo-controlled detector code.** ESLint config and repo-local compiler
+  executables can run arbitrary code. The MCP command starts with
+  `/usr/bin/env -i` and a fixed execution-settings allowlist. Direct
+  `warden mcp` sessions apply that limit and disable Warden env-file loading.
+  All detector children also use the allowlist, including explicit caller
+  envs. Provider keys, CI tokens, custom secrets, config paths, and Node
+  startup hooks are excluded. OpenCode keeps the credentials its model needs.
+  This does not isolate files or other same-user processes. For #48, run
+  det-priors with no secrets; keep credentials outside resources that detector
+  code can access. Fork and hosted review still need runner isolation.
+- **Secret guard, defence in depth.** The post-pass drops a finding that
+  cites a secret file (the `read` deny globs, `SECRET_FILE_GLOBS` in `@warden/core`,
   matched case-insensitively) or that holds a known credential format.
   It adds one `actionable` `secret-guard` entry with the rule and the
-  anchor, never the value. `--lanes-out` writes such a finding as
-  `{ "secretGuard": "<rule>" }`. Residuals: a plain password quoted in
-  prose, and a symlink with a non-`.env` name that points at a secret
-  file. The model provider and the OpenCode session store still see what
-  the lane reads.
+  anchor only when it is in the driver-owned lane scope and has no credential
+  match. An out-of-scope file becomes "an out-of-scope anchor"; the entry
+  never copies its text or the matched value. `--lanes-out` writes such a finding as
+  `{ "secretGuard": "<rule>" }`. This is DLP for accidental disclosure into
+  stored output, not containment of an injected model. Base64, tokens split across fields, spaced tokens,
+  plain passwords, and symlinks with a non-`.env` name can pass. Fixed lane
+  configuration does not isolate runner secrets; runner isolation needs a
+  separate design. The model provider and OpenCode session store still
+  see what the lane reads.
 
-`smoke:untrusted-input` covers the pure functions;
+`smoke:input-integrity` covers detection and publication outside lane discretion;
+`smoke:untrusted-input` covers the guard and authority checks;
 `smoke:opencode-lanes` covers the gate and the `--lanes-out` placeholder
-end to end.
+end to end. `smoke:secret-isolation` runs repo-controlled ESLint and compiler
+code through real MCP and checks inherited and env-file secrets.
 
 ## Submission contract
 
 The final assistant message ends with exactly one fenced ` ```json `
-block holding `{"findings":[...]}`; `[]` is a clean lane result. The
-driver takes the final message to be the `messageID` of the last
+block holding `{"findings":[...]}`; `[]` means the lane reports no findings.
+The independent integrity signals can still make the final result non-clean.
+The driver takes the final message to be the `messageID` of the last
 `step_start` event, and a stream with no trustworthy identity (a `text`
 part without a `messageID`, a `step_start` without one, a `text` part no
 `step_start` announced, or no `step_start` at all) fails the lane closed.

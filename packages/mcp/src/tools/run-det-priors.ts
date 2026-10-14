@@ -3,6 +3,7 @@ import {
   resolveDiff,
   runDetPriors,
   ReviewBundlePageSchema,
+  type ResolvedDiff,
 } from "@warden/core";
 import { z } from "zod";
 import {
@@ -172,7 +173,16 @@ export async function runRunDetPriors(
   if (args.target === "diff") {
     diffText = args.diff;
   } else {
-    const resolved = await resolveDiff({ repoRoot, mode: args.mode, baseRef: args.base });
+    let resolved: ResolvedDiff;
+    try {
+      resolved = await resolveDiff({ repoRoot, mode: args.mode, baseRef: args.base });
+    } catch (err) {
+      return errorEnvelope(
+        TOOL_NAME_RUN_DET_PRIORS,
+        "invalid_input",
+        err instanceof Error ? err.message : "Could not resolve the review target",
+      );
+    }
     // A git failure is a **failed target**, not an empty review. Round 0 caught
     // this returning `status: "ok"` with zero findings and the failure buried in
     // an info entry — indistinguishable from a clean repo, which is the

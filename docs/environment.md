@@ -14,6 +14,17 @@ then configured env files load in order, then project `.env` / `.env.local`, and
 `WARDEN_ENV_FILE=/path/to/env` can add a one-off override file. This keeps
 Infisical, Doppler, 1Password, CI secrets, and shell exports as first-class paths.
 
+`warden mcp` applies a separate policy (ADR-0054 §2(f)): it keeps only the
+execution settings in `deterministicProcessEnv` and disables Warden env-file
+loading. The OpenCode driver clears the MCP environment before Node starts.
+Detector children use the same allowlist for both inherited and explicit
+caller envs. The list is `PATH`, `SystemRoot`, `WINDIR`, `TMPDIR`, `TEMP`, `TMP`,
+`LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `WARDEN_REACT_DOCTOR`, and `WARDEN_CACHE_PATH`. Provider keys,
+CI tokens, custom secrets, user config paths, and Node startup hooks are not
+forwarded. OpenCode itself still receives the model credentials it needs.
+This policy does not prevent access to secrets in runner files or other
+same-user processes. CI det-priors must run with no accessible secrets.
+
 | Var                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`                | Recommended for `warden review` boss planning. If present, the default boss is `claude-opus-5-5` high. `warden check` does not need it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

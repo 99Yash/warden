@@ -254,6 +254,8 @@ function isNonSubstantivePath(p: string): boolean {
 function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
   if (!finding) return "correctness";
   switch (finding.source) {
+    case "input-integrity":
+      return "security";
     case "scalability":
       return "scalability";
     case "consistency":

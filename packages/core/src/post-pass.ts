@@ -5,6 +5,8 @@ import { parseUnifiedDiff } from "./diff/index.js";
 import { pruneDiff } from "./diff/prune.js";
 import { verifyCitations } from "./llm/verify-citations.js";
 import { compareByPriority } from "./priority.js";
+import { runInputIntegrity } from "./runners/input-integrity.js";
+import { toComment } from "./runners/to-comment.js";
 import {
   anchorInScope,
   commentInScope,
@@ -84,6 +86,7 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   const perLane: Comment[][] = [];
   const invalidByLane = new Map<string, number>();
   for (const lane of input.lanes) {
+    const scope = new Set(lane.scope.map((p) => p.replace(/\\/g, "/")));
     const kept: Comment[] = [];
     for (const finding of lane.findings) {
       const result = LaneFindingSchema.safeParse(finding);
@@ -95,11 +98,14 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
       // 1b. Secret guard (ADR-0054 §3): a finding that cites a secret file
       // or holds a known credential format never publishes. The entry
       // names the rule and the anchor, never the value — and omits the
-      // anchor when the anchor string itself matches a credential rule.
+      // anchor when it is outside the trusted scope or matches a credential rule.
       const secret = screenFinding(rest);
       if (secret !== undefined) {
-        const anchor =
-          matchCredential(rest.file) === undefined ? ` at ${rest.file}:${rest.lineStart}` : "";
+        const anchor = !scope.has(rest.file.replace(/\\/g, "/"))
+          ? " at an out-of-scope anchor"
+          : matchCredential(rest.file) === undefined
+            ? ` at ${rest.file}:${rest.lineStart}`
+            : "";
         postPass.push({
           kind: "actionable",
           topic: "secret-guard",
@@ -222,7 +228,12 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   }
 
   // 7. Priority sort.
-  const sorted = [...gated].sort(compareByPriority);
+  // ADR-0054: scan driver-owned diff text outside lane discretion. These
+  // tool-authored Tier-1 signals bypass lane scope, noise pruning, and prose
+  // screening (messages contain rule facts, never untrusted payload text).
+  const sorted = [...gated, ...runInputIntegrity(input.diff).map(toComment)].sort(
+    compareByPriority,
+  );
 
   // 8. Dedupe by id, keeping the first (highest-priority) occurrence.
   const seen = new Set<string>();

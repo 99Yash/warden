@@ -2,6 +2,7 @@ import { z } from "zod";
 import { currentWardenRuntime } from "./config.js";
 
 export * from "./config.js";
+export * from "./subprocess.js";
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z

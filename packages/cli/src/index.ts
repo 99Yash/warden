@@ -18,6 +18,7 @@ import {
   configuredReviewLlmProviders,
   loadWardenRuntime,
   requireAnyProviderApiKey,
+  restrictProcessToDeterministicEnv,
 } from "@warden/env";
 import { startMcpServer } from "@warden/mcp";
 import { Command } from "commander";
@@ -279,7 +280,8 @@ program
   .description("Start Warden's MCP tool-provider over stdio. Stdout is reserved for JSON-RPC.")
   .action(async () => {
     const repoRoot = findRepoRoot();
-    loadWardenRuntime({ repoRoot });
+    restrictProcessToDeterministicEnv();
+    loadWardenRuntime({ repoRoot, loadEnvFiles: false });
     // Do not use sharedOpts, runReview, or the phase renderer here: stdin and
     // stdout belong exclusively to the MCP transport, not diff input or logs.
     await startMcpServer({ repoRoot });

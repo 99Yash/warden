@@ -35,6 +35,7 @@ export { detectEcosystem, type EcosystemContext, type Lockfile } from "./ecosyst
 export { parseUnifiedDiff, type ChangedFile } from "./diff/index.js";
 export { pruneDiff, type PruneResult } from "./diff/prune.js";
 export {
+  assertPlainBaseRef,
   resolveDiff,
   type DiffMode,
   type ResolveDiffOptions,
@@ -177,6 +178,7 @@ export {
   type TriageGateResult,
 } from "./security/index.js";
 export { toComment } from "./runners/to-comment.js";
+export { runInputIntegrity } from "./runners/input-integrity.js";
 export { PRIORITY_ORDER, compareByPriority } from "./priority.js";
 export {
   DEFAULT_VOLUME_CAP,
@@ -417,14 +419,11 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
     ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
 
-  // No package.json at repoRoot → preserve pre-M14 behavior: short-circuit
-  // before any further synthesis with a single `info` degraded entry.
-  // Det-prior detectors degrade gracefully on missing tooling, but we
-  // surface this explicit signal for the no-Node project case so the user
-  // sees one clear "skipping — TS/JS only in v0" line.
+  // No package.json → skip ecosystem-specific synthesis. Input-integrity
+  // findings apply to every language and must still publish (ADR-0054).
   if (!detPriors.ecosystem.hasPackageJson) {
     return {
-      comments: [],
+      comments: detPriors.findings.filter((f) => f.source === "input-integrity").map(toComment),
       metadata: {
         durationMs: Date.now() - startedAt,
         degradedWorkers: [

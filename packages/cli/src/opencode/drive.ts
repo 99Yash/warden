@@ -4,6 +4,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deterministicProcessEnv } from "@warden/env";
 import {
   deriveLaneScope,
   isNotClean,
@@ -207,7 +208,8 @@ export function resolveWardenMcpCommand(): string[] {
  * `core/src/config.ts`), so a partial `{mcp:…}` override would replace the
  * committed `mcp` object and drop `type`/`codemode`, and the server entry
  * would fail validation and never register. Values mirror the committed
- * `opencode.json`; only command/cwd vary per install.
+ * `opencode.json`. The command is wrapped with a fixed environment allowlist
+ * before Node starts, so the MCP server does not inherit OpenCode's credentials.
  *
  * `anthropicBaseUrl` forwards `ANTHROPIC_BASE_URL`. The AI SDK in warden's
  * own harness reads that env var, but the v2.0.25 binary ignores it and
@@ -222,7 +224,17 @@ export function buildMcpConfigContent(opts: {
   return JSON.stringify({
     mcp: {
       servers: {
-        warden: { type: "local", command: opts.command, cwd: opts.cwd, codemode: false },
+        warden: {
+          type: "local",
+          command: [
+            "/usr/bin/env",
+            "-i",
+            ...Object.entries(deterministicProcessEnv()).map(([key, value]) => `${key}=${value}`),
+            ...opts.command,
+          ],
+          cwd: opts.cwd,
+          codemode: false,
+        },
       },
     },
     ...(opts.anthropicBaseUrl
@@ -503,19 +515,6 @@ export function laneInstructionFileGate(diff: string): string | undefined {
   );
 }
 
-/**
- * ADR-0054 §2(b): the base ref goes into the lane message and into git
- * argv, so it must be a plain ref name. No leading `-` (a git option), no
- * `..`, no quotes, spaces, or braces.
- */
-export function assertPlainBaseRef(ref: string): void {
-  if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@-]*$/.test(ref) || ref.includes("..")) {
-    throw new Error(
-      `warden opencode-review: base ref ${JSON.stringify(ref)} is not a plain ref name`,
-    );
-  }
-}
-
 function withTail(reason: string, tail: string | undefined): string {
   if (tail === undefined || tail === "") return reason;
   return `${reason} (stderr: ${tail})`;
@@ -793,7 +792,6 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   // stdout and setting `process.exitCode`. It still writes `--lanes-out`
   // (part of the driver contract). The eval runner calls this directly so
   // the scored output is the same published `CommentSet` a user gets.
-  if (opts.baseRef !== undefined) assertPlainBaseRef(opts.baseRef);
   const resolved = await resolveDiff({
     repoRoot: opts.repoRoot,
     mode: "review",

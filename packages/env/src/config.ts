@@ -86,6 +86,7 @@ export interface EnvVarSource {
 }
 
 export interface WardenRuntime {
+  envFilesEnabled: boolean;
   config: WardenConfig;
   layers: ConfigLayer[];
   envFiles: LoadedEnvFile[];
@@ -166,13 +167,17 @@ export function defaultWardenConfig(): WardenConfig {
   };
 }
 
-export function loadWardenRuntime(opts: { repoRoot?: string } = {}): WardenRuntime {
+export function loadWardenRuntime(
+  opts: { repoRoot?: string; loadEnvFiles?: boolean } = {},
+): WardenRuntime {
   const resolvedRepoRoot = opts.repoRoot ? path.resolve(opts.repoRoot) : undefined;
   const layers = loadConfigLayers(resolvedRepoRoot);
   const merged = layers.reduce<WardenConfig>((acc, layer) => mergeConfig(acc, layer.config), {});
-  const envFiles = collectEnvFiles(layers, resolvedRepoRoot);
+  const envFilesEnabled = opts.loadEnvFiles !== false;
+  const envFiles = envFilesEnabled ? collectEnvFiles(layers, resolvedRepoRoot) : [];
   const envSources = loadEnvFiles(envFiles);
   runtime = {
+    envFilesEnabled,
     config: merged,
     layers,
     envFiles,
@@ -189,7 +194,7 @@ export function loadWardenRuntime(opts: { repoRoot?: string } = {}): WardenRunti
 
 export function currentWardenRuntime(opts: { repoRoot?: string } = {}): WardenRuntime {
   if (!runtime || (opts.repoRoot && path.resolve(opts.repoRoot) !== runtime.repoRoot)) {
-    return loadWardenRuntime(opts);
+    return loadWardenRuntime({ ...opts, loadEnvFiles: runtime?.envFilesEnabled ?? true });
   }
   return runtime;
 }

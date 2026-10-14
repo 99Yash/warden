@@ -46,8 +46,16 @@ export interface ResolvedDiff {
   degraded?: DegradedEntry[];
 }
 
+/** ADR-0054 §2(b): validate at the shared CLI/MCP boundary before any Git call. */
+export function assertPlainBaseRef(ref: string): void {
+  if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@-]*$/.test(ref) || ref.includes("..")) {
+    throw new Error("warden: base ref is not a plain ref name");
+  }
+}
+
 export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDiff> {
-  if (opts.baseRef) {
+  if (opts.baseRef !== undefined) {
+    assertPlainBaseRef(opts.baseRef);
     // PR-style merge-base semantic (three-dot) for commit refs, raw two-dot
     // comparison for tree-only refs. Probe `<ref>^{commit}` to decide:
     //   - commit-ish (branch, tag, SHA) → `<ref>...HEAD` preserves "what
@@ -57,7 +65,13 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
     //     only legal form; three-dot rejects `<tree>...<commit>` and
     //     silently fed an empty diff before repo-audit 2026-05-18 #3.
     const isCommit = (
-      await runGit(opts.repoRoot, ["rev-parse", "--verify", "--quiet", `${opts.baseRef}^{commit}`])
+      await runGit(opts.repoRoot, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        `${opts.baseRef}^{commit}`,
+      ])
     ).ok;
     const range = isCommit ? `${opts.baseRef}...HEAD` : `${opts.baseRef}..HEAD`;
     const { diff, degraded } = await runGitDiff(opts.repoRoot, [range]);
@@ -94,6 +108,7 @@ export async function resolveDiff(opts: ResolveDiffOptions): Promise<ResolvedDif
       ...(degraded ? { degraded: [degraded] } : {}),
     };
   }
+  assertPlainBaseRef(base);
   const { diff, degraded } = await runGitDiff(opts.repoRoot, [`${base}...HEAD`]);
   return {
     diff,
@@ -115,7 +130,13 @@ async function resolveDefaultBranch(repoRoot: string): Promise<string | undefine
   }
 
   for (const candidate of ["origin/main", "origin/master", "main", "master"]) {
-    const probe = await runGit(repoRoot, ["rev-parse", "--verify", "--quiet", candidate]);
+    const probe = await runGit(repoRoot, [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "--end-of-options",
+      candidate,
+    ]);
     if (probe.ok && probe.stdout.trim().length > 0) return candidate;
   }
   return undefined;
@@ -125,7 +146,7 @@ async function runGitDiff(
   repoRoot: string,
   args: string[],
 ): Promise<{ diff: string; degraded?: DegradedEntry }> {
-  const result = await runGit(repoRoot, ["diff", ...args]);
+  const result = await runGit(repoRoot, ["diff", "--end-of-options", ...args]);
   if (!result.ok) {
     const stderrSummary = result.stderr.trim().split("\n").slice(0, 2).join(" ").slice(0, 200);
     return {

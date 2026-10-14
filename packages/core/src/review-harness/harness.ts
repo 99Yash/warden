@@ -12,6 +12,7 @@ import type { ContextSelector } from "../context/index.js";
 import type { FormatterListener } from "../llm/index.js";
 import { verifyCitations } from "../llm/verify-citations.js";
 import { Semaphore } from "../orchestration/semaphore.js";
+import { toComment } from "../runners/to-comment.js";
 import type {
   CommentSet,
   CostByTier,
@@ -107,11 +108,15 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     retrievedContext: input.retrievedContext,
     ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
+  // ADR-0054: these signals are published independently of model output,
+  // including no-package and all-pruned early returns.
+  const integrityComments = detPriors.findings
+    .filter((f) => f.source === "input-integrity")
+    .map(toComment);
 
-  // No package.json → empty result with the ecosystem degraded entry.
-  // Matches the early-return that lives in `review()` today.
+  // No package.json → skip the model, but keep language-independent signals.
   if (!detPriors.ecosystem.hasPackageJson) {
-    return makeEmptySet(startedAt, [
+    const result = makeEmptySet(startedAt, [
       ...detPriors.degraded,
       {
         kind: "info",
@@ -119,13 +124,14 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
         message: "ecosystem: no package.json at repoRoot — TS/JS only in v0",
       },
     ]);
+    return { ...result, comments: integrityComments };
   }
 
   // Empty-diff early-return (M14 plan §Design nuances). Zero LLM calls,
   // zero cost; do not instantiate the scratchpad. Det-priors still ran so
   // its degraded entries (gitignore-ensure, banner lookup, etc.) surface.
   if (detPriors.changed.length === 0) {
-    return makeEmptySet(startedAt, detPriors.degraded);
+    return { ...makeEmptySet(startedAt, detPriors.degraded), comments: integrityComments };
   }
 
   // ADR-0048 §2 — durable review-run identity. Minted once, here (after the
@@ -194,6 +200,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     repoRoot: input.repoRoot,
   });
   const scoped = scopeCommentsToDiff(verified.comments, detPriors.changed);
+  const finalComments = [...scoped.comments, ...integrityComments];
 
   // Aggregate degraded entries from every layer: det-priors, every worker
   // recorded into the scratchpad, the dispatch tool's budget-cap entries
@@ -279,12 +286,12 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     modelLabels,
     tokenUsage,
     costUsd: costs?.costUsd ?? 0,
-    commentsEmitted: scoped.comments.length,
+    commentsEmitted: finalComments.length,
   });
   aggregatedDegraded.push(...recordDegraded);
 
   return {
-    comments: scoped.comments,
+    comments: finalComments,
     metadata: {
       durationMs: Date.now() - startedAt,
       degradedWorkers: aggregatedDegraded,
