@@ -61,7 +61,7 @@ agent rules are appended after global rules so they win:
 | --- | --- |
 | deny `*` / `*` | Closed by default; a `deny *` also removes the tool from the model's view. |
 | allow `read` | Read changed files and their context. |
-| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
+| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (followed after a link-path-only check, verified live 2026-10-14 — the diff symlink gate in ADR-0054 §2(g) is the control); and `*.env.*` also blocks names such as `src/config.env.ts`. |
 | allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
 | allow `grep` | Find the one-hop caller or definition site of a changed symbol (the `grepRepo` role in method docs). A grep hit does not count against the per-claim file bound (see the submission contract). |
 | allow `glob` | Locate files by pattern. |
@@ -232,6 +232,22 @@ limits:
   headers, because a pure rename or a binary file has no `+++` line. A
   nested `AGENTS.md` that the PR does not touch is base-branch content
   and loads as usual. Its contents can still contain hostile instructions.
+- **Symlink gate and Git-metadata deny (ADR-0054 §2(g)).** The binary's
+  `read` checks permission on the link path, then follows the link:
+  verified live on 2026-10-14 (v2.0.25) — a committed `src/x` pointing
+  outside the repo returned the outside file, and `src/gc` →
+  `../.git/config` returned the config, while a direct `.git/config`
+  read was denied. So the driver also gates the diff before spawn
+  (`laneSymlinkGate`): a changed symlink (mode 120000, pure renames
+  checked against the live checkout) whose canonical target leaves the
+  repo or enters `.git` fails the lane closed, as does a declared
+  symlink missing or replaced in the checkout. The lane config denies
+  `read` on `.git/*` and `*/.git/*`, and the secret guard drops a
+  finding that cites `.git/config` even when the credential is
+  base64-encoded. A symlink already on the base branch is outside the
+  diff gate and remains readable through its link path; `grep` through
+  a symlink is unverified. In CI (#48), every `actions/checkout` sets
+  `persist-credentials: false` so `.git/config` holds no token.
 - **Base ref.** CLI `--base` and model-chosen MCP bases must be plain ref names (`assertPlainBaseRef` in core `resolveDiff`):
   no leading `-`, no `..`, no quotes, spaces, or braces. It goes into the
   lane message and into git argv. Git revision probes and diff argv use `--end-of-options`.
@@ -254,7 +270,9 @@ limits:
   never copies its text or the matched value. `--lanes-out` writes such a finding as
   `{ "secretGuard": "<rule>" }`. This is DLP for accidental disclosure into
   stored output, not containment of an injected model. Base64, tokens split across fields, spaced tokens,
-  plain passwords, and symlinks with a non-`.env` name can pass. Fixed lane
+  plain passwords, and secret files reached through a symlink with a
+  non-`.env` name can pass (the publication guard sees the link path;
+  the §2(g) diff gate is what blocks adding such a link). Fixed lane
   configuration does not isolate runner secrets; runner isolation needs a
   separate design. The model provider and OpenCode session store still
   see what the lane reads.

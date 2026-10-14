@@ -22,6 +22,9 @@ export const SECRET_FILE_GLOBS = {
   allow: ["*.env.example"],
 } as const;
 
+/** Denied after env-example allows: Git metadata can contain checkout credentials. */
+export const GIT_METADATA_GLOBS = [".git/*", "*/.git/*"] as const;
+
 export const SECRET_FILE_RULE_ID = "secret-file-citation";
 
 export interface CredentialRule {
@@ -69,6 +72,7 @@ function globToRegExp(glob: string): RegExp {
 const SECRET_FILE_RULES = [
   ...SECRET_FILE_GLOBS.deny.map((glob) => ({ re: globToRegExp(glob), deny: true })),
   ...SECRET_FILE_GLOBS.allow.map((glob) => ({ re: globToRegExp(glob), deny: false })),
+  ...GIT_METADATA_GLOBS.map((glob) => ({ re: globToRegExp(glob), deny: true })),
 ];
 
 /**

@@ -10,7 +10,7 @@
  * Usage: pnpm --filter @warden/cli smoke:untrusted-input
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
@@ -24,9 +24,11 @@ import {
 } from "@warden/core";
 import {
   buildLaneMessage,
+  driveOpencodeLane,
   laneInstructionFileGate,
   nestedAgentsMdChanges,
 } from "../src/opencode/drive.js";
+import { laneSymlinkGate } from "../src/opencode/symlink-gate.js";
 import { DOWN_LANE_SPEC, materializeLane } from "../src/opencode/materialize.js";
 
 let failed = 0;
@@ -95,6 +97,13 @@ try {
     ["apps/web/.env.example", false],
     ["src/env.ts", false],
     ["docs/environment.md", false],
+    [".git/config", true],
+    ["nested/.git/config", true],
+    [".git/.env.example", true],
+    ["nested/.git/.env.example", true],
+    ["/repo/.git/config", true],
+    ["nested\\.git\\config", true],
+    ["src/git/config.ts", false],
   ];
   for (const [path, expected] of pathCases) {
     assert(isSecretFilePath(path) === expected, `isSecretFilePath(${path}) === ${expected}`);
@@ -123,6 +132,8 @@ try {
         { action: "read", resource: "*.env", effect: "deny" },
         { action: "read", resource: "*.env.*", effect: "deny" },
         { action: "read", resource: "*.env.example", effect: "allow" },
+        { action: "read", resource: ".git/*", effect: "deny" },
+        { action: "read", resource: "*/.git/*", effect: "deny" },
       ]),
     "the materializer emits the shared globs in the same order",
   );
@@ -141,6 +152,16 @@ try {
     "",
   ].join("\n");
   const token = "AKIA" + "R".repeat(16);
+  const checkoutAuth = `AUTHORIZATION: basic ${Buffer.from("x-access-token:" + "ghs_" + "q".repeat(36)).toString("base64")}`;
+  assert(
+    screenFinding({ claim: checkoutAuth }) === undefined,
+    "encoded checkout auth is outside literal credential rules",
+  );
+  assert(
+    screenFinding({ sources: [{ path: ".git/config", snippet: checkoutAuth }] })?.rule ===
+      SECRET_FILE_RULE_ID,
+    "Git credential citations are blocked even when the value is encoded",
+  );
   const base = {
     file: "a.ts",
     lineStart: 1,
@@ -379,6 +400,113 @@ try {
     tree.diff.includes("+export const a = 2;") && !tree.degraded,
     "Git option delimiter preserves tree-base diffs",
   );
+
+  // Real Git modes + real filesystem links: include aliases and pure renames.
+  process.stdout.write("\n[6] unsafe symlink gate\n");
+  const repo = resolve(TMP, "symlinks");
+  mkdirSync(resolve(repo, "src"), { recursive: true });
+  const git = (...args: string[]): string =>
+    execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+  git("init", "-q");
+  git("config", "user.name", "smoke");
+  git("config", "user.email", "smoke@example.invalid");
+  writeFileSync(resolve(repo, "src/a.ts"), "export const a = 0;\n");
+  symlinkSync(".git", resolve(repo, "metadata"));
+  symlinkSync(TMP, resolve(repo, "external-dir"));
+  symlinkSync(resolve(TMP, "missing-dir"), resolve(repo, "broken-external"));
+  symlinkSync(".git/missing", resolve(repo, "broken-metadata"));
+  symlinkSync("a.ts", resolve(repo, "src/move-me"));
+  git("add", "-A");
+  git("commit", "-qm", "base");
+  const baseCommit = git("rev-parse", "HEAD").trim();
+  const cases: Array<[string, string, boolean]> = [
+    ["external", "/proc/self/environ", true],
+    ["relative-escape", "../../outside.env", true],
+    ["prefix-sibling", `${repo}-sibling/missing`, true],
+    ["git-config", "../.git/config", true],
+    ["nested-git", "../nested/.git/config", true],
+    ["git-chain", "../metadata/config", true],
+    ["external-chain", "../external-dir/missing", true],
+    ["broken-external-chain", "../broken-external/file", true],
+    ["broken-git-chain", "../broken-metadata", true],
+    ["safe", "a.ts", false],
+    ["safe-dangling", "not-created.ts", false],
+    ["safe-absolute", resolve(repo, "src/a.ts"), false],
+    ["s p\t雪", "/proc/self/environ", true],
+  ];
+  for (const [name, target, blocked] of cases) {
+    const path = `src/${name}`;
+    symlinkSync(target, resolve(repo, path));
+    git("add", "--", path);
+    const diff = git("diff", "--cached", baseCommit);
+    assert(diff.includes("new file mode 120000"), `Git marks ${JSON.stringify(name)} as a symlink`);
+    assert(
+      (laneSymlinkGate(diff, repo) !== undefined) === blocked,
+      `gate ${blocked ? "blocks" : "allows"} ${JSON.stringify(name)}`,
+    );
+    git("reset", "-q", baseCommit, "--", path);
+    rmSync(resolve(repo, path));
+  }
+  symlinkSync("loop", resolve(repo, "src/loop"));
+  git("add", "src/loop");
+  assert(
+    laneSymlinkGate(git("diff", "--cached", baseCommit), repo) !== undefined,
+    "cyclic links fail closed",
+  );
+  git("reset", "-q", baseCommit, "--", "src/loop");
+  rmSync(resolve(repo, "src/loop"));
+
+  // A moved link has no mode header or hunk; its relative target can escape.
+  git("mv", "src/move-me", "moved");
+  rmSync(resolve(repo, "moved"));
+  symlinkSync("../outside.env", resolve(repo, "moved"));
+  git("add", "moved");
+  assert(
+    laneSymlinkGate(git("diff", "--cached", baseCommit), repo) !== undefined,
+    "changed link target fails closed",
+  );
+  git("reset", "--hard", "-q", baseCommit);
+  git("mv", "src/move-me", "moved");
+  // Same target bytes, but a base link at the destination resolves outside.
+  rmSync(resolve(repo, "moved"));
+  symlinkSync("../outside.env", resolve(repo, "moved"));
+  // Keep the pure-rename diff and check the checkout, as the driver does.
+  const renameDiff = git("diff", "--cached", baseCommit);
+  assert(
+    renameDiff.includes("rename to moved") && !renameDiff.includes("+++"),
+    "fixture is a pure rename without a hunk",
+  );
+  assert(laneSymlinkGate(renameDiff, repo) !== undefined, "pure rename checks the live link");
+  git("reset", "--hard", "-q", baseCommit);
+
+  symlinkSync("../.git/config", resolve(repo, "src/x"));
+  git("add", "src/x");
+  const linkDiff = git("diff", "--cached", baseCommit);
+  rmSync(resolve(repo, "src/x"));
+  assert(laneSymlinkGate(linkDiff, repo) !== undefined, "missing mode-120000 link fails closed");
+  writeFileSync(resolve(repo, "src/x"), "ordinary file\n");
+  assert(laneSymlinkGate(linkDiff, repo) !== undefined, "replaced mode-120000 link fails closed");
+  rmSync(resolve(repo, "src/x"));
+  symlinkSync("../.git/config", resolve(repo, "src/x"));
+  git("commit", "-qm", "unsafe link");
+  const lanesOut = resolve(TMP, "symlink-lanes.json");
+  const driven = await driveOpencodeLane({
+    repoRoot: repo,
+    baseRef: baseCommit,
+    lanesOut,
+    opencodeBin: resolve(TMP, "must-not-start"),
+  });
+  assert(
+    !driven.runSpawned && driven.lanes[0]?.reason?.startsWith("unsafe symlink:"),
+    "driver blocks before OpenCode serve or run starts",
+  );
+  assert(
+    driven.result.metadata.degradedWorkers.some(
+      (d) => d.kind === "actionable" && d.topic === "lane-health",
+    ),
+    "symlink rejection is actionable, never clean",
+  );
+  assert(existsSync(lanesOut), "blocked run writes the failed lanes envelope");
 } catch (err) {
   assert(false, `smoke threw: ${err instanceof Error ? err.stack : String(err)}`);
 } finally {

@@ -15,6 +15,7 @@ import {
   type DegradedEntry,
   type LaneOutput,
 } from "@warden/core";
+import { laneSymlinkGate } from "./symlink-gate.js";
 import { DOWN_LANE_SPEC } from "./materialize.js";
 import { formatCommentSet } from "../format.js";
 
@@ -835,7 +836,8 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
 
   // A nested AGENTS.md the diff changes would reach the lane as
   // instructions: fail the lane before spawn, at a known $0.
-  const instructionFile = laneInstructionFileGate(resolved.diff);
+  const instructionFile =
+    laneInstructionFileGate(resolved.diff) ?? laneSymlinkGate(resolved.diff, opts.repoRoot);
   if (instructionFile !== undefined) {
     const lanes: LaneOutput[] = [
       { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: instructionFile, scope, findings: [] },

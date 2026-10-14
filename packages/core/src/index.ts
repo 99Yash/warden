@@ -198,6 +198,7 @@ export {
 export {
   CREDENTIAL_RULES,
   SECRET_FILE_GLOBS,
+  GIT_METADATA_GLOBS,
   SECRET_FILE_RULE_ID,
   isSecretFilePath,
   matchCredential,

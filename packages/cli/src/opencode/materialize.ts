@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LaneFindingSchema, SECRET_FILE_GLOBS } from "@warden/core";
+import { LaneFindingSchema, SECRET_FILE_GLOBS, GIT_METADATA_GLOBS } from "@warden/core";
 
 /**
  * Slice #42 / ADR-0053 §9: the down-lane prompt materializer. Pure —
@@ -223,6 +223,7 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
     // drops a finding that cites a path these rules deny.
     ...SECRET_FILE_GLOBS.deny.map((glob) => ({ action: "read", resource: glob, effect: "deny" })),
     ...SECRET_FILE_GLOBS.allow.map((glob) => ({ action: "read", resource: glob, effect: "allow" })),
+    ...GIT_METADATA_GLOBS.map((glob) => ({ action: "read", resource: glob, effect: "deny" })),
     ...LANE_MCP_TOOLS.map((tool) => ({ action: tool, resource: "*", effect: "allow" })),
   ];
   const config = {

@@ -291,7 +291,9 @@ try {
       ruleShape[3] === "allow glob *" &&
       ruleShape[4] === "deny read *.env" &&
       ruleShape[5] === "deny read *.env.*" &&
-      ruleShape[6] === "allow read *.env.example",
+      ruleShape[6] === "allow read *.env.example" &&
+      ruleShape[7] === "deny read .git/*" &&
+      ruleShape[8] === "deny read */.git/*",
     `read allow is followed by the .env deny guard (${ruleShape.slice(1, 7).join(" | ")})`,
   );
   for (const banned of ["shell", "edit", "webfetch", "subagent", "*"]) {

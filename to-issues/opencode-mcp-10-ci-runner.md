@@ -22,6 +22,11 @@ any CI).
 - [ ] Diff/base resolution for the PR feeds the review target deterministically.
 - [ ] The `CommentSet` is posted to the PR.
 - [ ] Keys come from CI secrets; nothing secret is written to the repo or index.
+- [ ] Every `actions/checkout` step sets `persist-credentials: false`, including
+      auxiliary checkouts. The review must not receive a checkout token through
+      `.git/config`. Use a test token to verify this.
+- [ ] Keep the initial runner limited to same-repo PRs. Do not use
+      `pull_request_target`. Run det-priors without accessible runner secrets.
 - [ ] A real test PR run is documented end-to-end.
 
 ## Blocked by

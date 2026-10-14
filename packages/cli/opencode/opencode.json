@@ -43,6 +43,16 @@
           "effect": "allow"
         },
         {
+          "action": "read",
+          "resource": ".git/*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*/.git/*",
+          "effect": "deny"
+        },
+        {
           "action": "warden_run_det_priors",
           "resource": "*",
           "effect": "allow"
