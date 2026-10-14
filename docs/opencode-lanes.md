@@ -268,7 +268,10 @@ limits:
   anchor only when it is in the driver-owned lane scope and has no credential
   match. An out-of-scope file becomes "an out-of-scope anchor"; the entry
   never copies its text or the matched value. `--lanes-out` writes such a finding as
-  `{ "secretGuard": "<rule>" }`. This is DLP for accidental disclosure into
+  `{ "secretGuard": "<rule>" }`. On replay, the post-pass restores the
+  actionable `secret-guard` entry with the lane and rule ID. The marker
+  has no anchor, so the restored entry has none. Unknown rule IDs or extra
+  fields fail validation. This is DLP for accidental disclosure into
   stored output, not containment of an injected model. Base64, tokens split across fields, spaced tokens,
   plain passwords, and secret files reached through a symlink with a
   non-`.env` name can pass (the publication guard sees the link path;
@@ -279,7 +282,7 @@ limits:
 
 `smoke:input-integrity` covers detection and publication outside lane discretion;
 `smoke:untrusted-input` covers the guard and authority checks;
-`smoke:opencode-lanes` covers the gate and the `--lanes-out` placeholder
+`smoke:opencode-lanes` covers the gate, the `--lanes-out` placeholder, and replay
 end to end. `smoke:secret-isolation` runs repo-controlled ESLint and compiler
 code through real MCP and checks inherited and env-file secrets.
 
@@ -354,7 +357,8 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   before parsing and forward `findings: []`. `--lanes-out` writes the
   envelope for audit / replay through `warden post-pass`.
 - Output matches `warden post-pass` exactly; exit 1 when
-  `isNotClean(result)` (actionable `lane-health` / `diff-source`).
+  `isNotClean(result)` (actionable `lane-health` / `diff-source` / `secret-guard`).
+  A guard drop causes exit 1 even when other findings publish.
 - An extra `info` entry, topic `lane-trace`, records the tool-call counts
   (e.g. `warden_run_det_priors×2, warden_lookup_type_def×0, read×7`).
   After the run resolves and before the serve child is killed, the driver

@@ -514,10 +514,10 @@ async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
     ...(extraDegraded && extraDegraded.length > 0 ? { extraDegraded } : {}),
   });
 
-  // Issue #29 parity: a false-clean (no lanes, every lane failed, or an
-  // empty diff that anchored nothing) must not look like success. Only
-  // `lane-health` and `diff-source` gate the exit — other actionable
-  // entries (e.g. `noise-filter`) fire on normal runs.
+  // Issue #29 parity: a false-clean (no lanes, every lane failed, an
+  // empty diff that anchored nothing, or a secret guard drop) must not look
+  // like success. `lane-health`, `diff-source`, and `secret-guard` gate the
+  // exit — other actionable entries (e.g. `noise-filter`) fire on normal runs.
   if (isNotClean(result)) {
     process.exitCode = 1;
   }

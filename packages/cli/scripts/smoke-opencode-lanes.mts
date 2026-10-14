@@ -987,7 +987,7 @@ if (mode === "runfail") {
 } else if (mode === "ok" || mode === "notools" || mode === "outofscope") {
   if (mode !== "notools") tool("warden_run_det_priors");
   tool("read");
-  text(block(mode === "outofscope" ? [{ ...finding, file: "src/other.ts" }] : [finding]));
+  text(block(mode === "outofscope" ? [{ ...finding, file: "src/other.ts" }] : Array.isArray(finding) ? finding : [finding]));
 } else if (mode === "nosubmission") {
   tool("warden_run_det_priors");
   text("looks clean to me, no block here");
@@ -1020,7 +1020,8 @@ if (mode === "runfail") {
     confidence: 0.9,
   };
 
-  const runDriver = (
+  const runCli = (
+    command: "opencode-review" | "post-pass",
     args: string[],
     extraEnv: Record<string, string> = {},
   ): { exit: number; out: string } => {
@@ -1031,7 +1032,7 @@ if (mode === "runfail") {
           "--import",
           import.meta.resolve("tsx/esm"),
           resolve(CLI_ROOT, "src/index.ts"),
-          "opencode-review",
+          command,
           ...args,
         ],
         {
@@ -1053,6 +1054,9 @@ if (mode === "runfail") {
       return { exit: e.status ?? -1, out: e.stdout ?? "" };
     }
   };
+
+  const runDriver = (args: string[], extraEnv: Record<string, string> = {}) =>
+    runCli("opencode-review", args, extraEnv);
 
   const fakeServePort = (): number | undefined => {
     try {
@@ -1226,6 +1230,75 @@ if (mode === "runfail") {
     "secret guard: --lanes-out writes the placeholder, not the value",
   );
   await assertServeDead("secret guard");
+
+  const replaySecret = runCli("post-pass", [
+    "--base",
+    "HEAD~1",
+    "--json",
+    "--lanes",
+    "lanes-secret.json",
+  ]);
+  const replaySecretSet = parseOut(replaySecret.out);
+  assert(replaySecret.exit === 1, "secret-only lanes replay exits 1");
+  assert(
+    replaySecretSet?.comments.length === 0 &&
+      replaySecretSet.metadata.degradedWorkers.some(
+        (d) =>
+          d.kind === "actionable" &&
+          d.topic === "secret-guard" &&
+          d.message.includes("rule github-token"),
+      ) &&
+      !replaySecretSet.metadata.degradedWorkers.some((d) => d.message.includes("invalid")) &&
+      replaySecretSet.metadata.degradedWorkers.some(
+        (d) => d.topic === "lane-health" && d.message.includes("secret guard"),
+      ) &&
+      !replaySecret.out.includes(fakeToken),
+    "secret-only replay restores the guard entry and names the guard in lane health",
+  );
+
+  const mixedSecret = runDriver(
+    ["--base", "HEAD~1", "--json", "--lanes-out", "lanes-mixed-secret.json"],
+    {
+      WARDEN_SMOKE_FINDING: JSON.stringify([
+        inScopeFinding,
+        { ...inScopeFinding, claim: `smoke: the config leaks ${fakeToken}` },
+      ]),
+    },
+  );
+  const mixedSecretSet = parseOut(mixedSecret.out);
+  const replayMixed = runCli("post-pass", [
+    "--base",
+    "HEAD~1",
+    "--json",
+    "--lanes",
+    "lanes-mixed-secret.json",
+  ]);
+  const replayMixedSet = parseOut(replayMixed.out);
+  assert(
+    mixedSecret.exit === 1 && replayMixed.exit === 1,
+    "a guard drop plus a good finding exits 1 in the driver and replay",
+  );
+  assert(
+    mixedSecretSet?.comments.length === 1 &&
+      replayMixedSet?.comments.length === 1 &&
+      JSON.stringify(mixedSecretSet.comments) === JSON.stringify(replayMixedSet.comments) &&
+      [mixedSecretSet, replayMixedSet].every(
+        (set) =>
+          set.metadata.degradedWorkers.filter(
+            (d) =>
+              d.kind === "actionable" &&
+              d.topic === "secret-guard" &&
+              d.message.includes("rule github-token"),
+          ).length === 1 &&
+          !set.metadata.degradedWorkers.some(
+            (d) => d.topic === "lane-health" || d.message.includes("invalid"),
+          ),
+      ) &&
+      !mixedSecret.out.includes(fakeToken) &&
+      !replayMixed.out.includes(fakeToken),
+    "mixed replay keeps the same good finding and one guard entry without invalid or lane-health entries",
+  );
+  await assertServeDead("mixed secret guard");
 
   // (a3) the session route 404s: the lane still publishes, trace has no cost.
   const noUsage = runDriver(["--base", "HEAD~1", "--json"], { WARDEN_SMOKE_SESSION_MODE: "404" });
@@ -1579,11 +1652,19 @@ if (mode === "runfail") {
   // ---------------------------------------------------------------------------
   // [8] isNotClean truth table.
   // ---------------------------------------------------------------------------
-  process.stdout.write("\n[8] isNotClean — actionable lane-health/diff-source only\n");
+  process.stdout.write("\n[8] isNotClean — actionable lane-health/diff-source/secret-guard\n");
   const mkSet = (entries: CommentSet["metadata"]["degradedWorkers"]): CommentSet => ({
     comments: [],
     metadata: { durationMs: 0, degradedWorkers: entries },
   });
+  assert(
+    isNotClean(mkSet([{ kind: "actionable", topic: "secret-guard", message: "x" }])) === true,
+    "actionable secret-guard → not clean",
+  );
+  assert(
+    isNotClean(mkSet([{ kind: "warning", topic: "secret-guard", message: "x" }])) === false,
+    "warning secret-guard → clean",
+  );
   assert(
     isNotClean(mkSet([{ kind: "actionable", topic: "lane-health", message: "x" }])) === true,
     "actionable lane-health → not clean",

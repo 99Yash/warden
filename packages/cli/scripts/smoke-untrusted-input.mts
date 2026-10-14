@@ -18,6 +18,7 @@ import {
   assertPlainBaseRef,
   SECRET_FILE_RULE_ID,
   isSecretFilePath,
+  isNotClean,
   resolveDiff,
   runPostPass,
   screenFinding,
@@ -225,6 +226,66 @@ try {
     "the entries name each rule",
   );
   assert(!JSON.stringify(result).includes(token), "the value appears nowhere in the CommentSet");
+  assert(isNotClean(result), "a guard drop is not clean even when a good finding publishes");
+
+  const replay = await runPostPass({
+    repoRoot: TMP,
+    diff,
+    lanes: [
+      {
+        lane: "down",
+        status: "ok",
+        scope: ["a.ts"],
+        findings: [
+          { ...base, claim: "clean finding" },
+          { secretGuard: "aws-access-key-id" },
+          { secretGuard: SECRET_FILE_RULE_ID },
+        ],
+      },
+    ],
+  });
+  const replayEntries = replay.metadata.degradedWorkers.filter((d) => d.topic === "secret-guard");
+  assert(
+    JSON.stringify(replay.comments) === JSON.stringify(result.comments) &&
+      replayEntries.length === guardEntries.length &&
+      replayEntries.every(
+        (d, i) =>
+          d.kind === "actionable" &&
+          d.message.includes(`rule ${i === 0 ? "aws-access-key-id" : SECRET_FILE_RULE_ID}`),
+      ),
+    "replay keeps the clean finding and restores each actionable guard entry",
+  );
+  assert(
+    !replay.metadata.degradedWorkers.some((d) => d.message.includes("invalid")) &&
+      replayEntries.every((d) => !d.message.includes(" at ")) &&
+      isNotClean(replay),
+    "valid placeholders are guard drops without anchors and make replay not clean",
+  );
+
+  const malformed = await runPostPass({
+    repoRoot: TMP,
+    diff,
+    lanes: [
+      {
+        lane: "down",
+        status: "ok",
+        scope: ["a.ts"],
+        findings: [
+          { ...base, claim: "clean finding" },
+          { secretGuard: token },
+          { secretGuard: "unknown-rule" },
+          { secretGuard: 1 },
+          { secretGuard: "github-token", extra: token },
+        ],
+      },
+    ],
+  });
+  assert(
+    malformed.metadata.degradedWorkers.some((d) => d.message.includes("4 invalid")) &&
+      !malformed.metadata.degradedWorkers.some((d) => d.topic === "secret-guard") &&
+      !JSON.stringify(malformed).includes(token),
+    "malformed placeholders stay invalid and never echo arbitrary rule text or extra fields",
+  );
   const anchorLeak = await runPostPass({
     repoRoot: TMP,
     diff,
