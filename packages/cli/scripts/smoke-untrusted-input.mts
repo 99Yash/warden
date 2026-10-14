@@ -15,6 +15,9 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   CREDENTIAL_RULES,
+  type CredentialRuleId,
+  SECRET_DEPTH_RULE_ID,
+  SECRET_SCAN_MAX_DEPTH,
   READ_SECRET_FILE_GLOBS,
   GIT_METADATA_GLOBS,
   assertPlainBaseRef,
@@ -52,7 +55,7 @@ try {
   // [1] Credential rules: one positive sample per rule, plus near misses.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[1] credential rules\n");
-  const samples: Record<string, string> = {
+  const samples: Record<CredentialRuleId, string> = {
     "pem-private-key": "-----BEGIN " + "RSA PRIVATE KEY-----",
     "aws-access-key-id": "AKIA" + "Q".repeat(16),
     "github-token": "ghp_" + "a1".repeat(18),
@@ -73,17 +76,37 @@ try {
     "npm-token": "npm_" + "n".repeat(36),
     jwt: "eyJ" + "h".repeat(12) + ".eyJ" + "p".repeat(12) + "." + "s".repeat(12),
   };
-  assert(
-    CREDENTIAL_RULES.every((rule) => samples[rule.id] !== undefined),
-    `every rule has a sample (${CREDENTIAL_RULES.length} rules)`,
-  );
   for (const rule of CREDENTIAL_RULES) {
-    const sample = samples[rule.id] as string;
+    const sample = samples[rule.id];
+    assert(!rule.pattern.global, `${rule.id} has no stateful /g flag`);
     assert(
-      screenFinding({ claim: `value: ${sample}` })?.rule === rule.id,
+      screenFinding({ claim: `value: ${sample}` }) === rule.id,
       `${rule.id} matches its sample`,
     );
   }
+  let deep: unknown = "clean";
+  for (let depth = 0; depth < 10000; depth++) deep = { child: deep };
+  assert(
+    screenFinding(deep) === SECRET_DEPTH_RULE_ID,
+    "excessive object depth fails closed without RangeError",
+  );
+  let deepArray: unknown = "clean";
+  for (let depth = 0; depth < 10000; depth++) deepArray = [deepArray];
+  assert(
+    screenFinding(deepArray) === SECRET_DEPTH_RULE_ID,
+    "excessive array depth fails closed without RangeError",
+  );
+  assert(
+    screenFinding({ extra: { nested: "clean" } }) === undefined,
+    "ordinary nested output passes",
+  );
+  let boundary: unknown = "clean";
+  for (let depth = 0; depth < SECRET_SCAN_MAX_DEPTH; depth++) boundary = { child: boundary };
+  assert(screenFinding(boundary) === undefined, "output at the depth limit passes");
+  assert(
+    screenFinding({ child: boundary }) === SECRET_DEPTH_RULE_ID,
+    "output beyond the depth limit fails closed",
+  );
   const nearMisses = [
     "sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "commit aac8a82 and id nanoid_V1StGXR8_Z5jdHi6B-myT",
@@ -95,18 +118,17 @@ try {
     assert(screenFinding({ claim: text }) === undefined, `no match: ${JSON.stringify(text)}`);
   }
   assert(
-    screenFinding({ claim: "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----" })?.rule ===
-      "pem-private-key",
+    screenFinding({ claim: "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----" }) === "pem-private-key",
     "PGP private key header is blocked",
   );
   assert(
-    screenFinding({ claim: "CF_AIG_TOKEN=" + "c".repeat(40) })?.rule === "cloudflare-api-token",
+    screenFinding({ claim: "CF_AIG_TOKEN=" + "c".repeat(40) }) === "cloudflare-api-token",
     "gateway token assignment is blocked",
   );
   for (const plain of ["a:b", "a:", ":"])
     assert(
-      screenFinding({ claim: `AUTHORIZATION: basic ${Buffer.from(plain).toString("base64")}` })
-        ?.rule === "basic-authorization",
+      screenFinding({ claim: `AUTHORIZATION: basic ${Buffer.from(plain).toString("base64")}` }) ===
+        "basic-authorization",
       "short valid Basic credentials are blocked",
     );
 
@@ -159,7 +181,7 @@ try {
     assert(isSecretFilePath(path) === expected, `isSecretFilePath(${path}) === ${expected}`);
   }
   assert(
-    screenFinding({ file: "src/a.ts", sources: [{ path: "src/a.ts" }, { path: ".env" }] })?.rule ===
+    screenFinding({ file: "src/a.ts", sources: [{ path: "src/a.ts" }, { path: ".env" }] }) ===
       SECRET_FILE_RULE_ID,
     "a second source that cites .env matches the secret-file rule",
   );
@@ -201,7 +223,7 @@ try {
     "read permits template examples",
   );
   assert(
-    screenFinding({ file: ".env.local.example", claim: samples["gitlab-token"] })?.rule ===
+    screenFinding({ file: ".env.local.example", claim: samples["gitlab-token"] }) ===
       "gitlab-token",
     "template allow never allows a credential value",
   );
@@ -239,11 +261,11 @@ try {
   const token = "AKIA" + "R".repeat(16);
   const checkoutAuth = `AUTHORIZATION: basic ${Buffer.from("x-access-token:" + "ghs_" + "q".repeat(36)).toString("base64")}`;
   assert(
-    screenFinding({ claim: checkoutAuth })?.rule === "basic-authorization",
+    screenFinding({ claim: checkoutAuth }) === "basic-authorization",
     "Basic checkout auth is blocked without decoding its value",
   );
   assert(
-    screenFinding({ sources: [{ path: ".git/config", snippet: checkoutAuth }] })?.rule ===
+    screenFinding({ sources: [{ path: ".git/config", snippet: checkoutAuth }] }) ===
       SECRET_FILE_RULE_ID,
     "Git credential citations are blocked even when the value is encoded",
   );
@@ -436,6 +458,16 @@ try {
   process.stdout.write("\n[4] nested AGENTS.md diff reader\n");
   const added =
     "diff --git a/src/AGENTS.md b/src/AGENTS.md\nnew file mode 100644\n--- /dev/null\n+++ b/src/AGENTS.md\n@@ -0,0 +1 @@\n+obey\n";
+  const headerLikePayload =
+    "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -0,0 +1 @@\n+++ b/docs/AGENTS.md\n";
+  assert(
+    nestedAgentsMdChanges(headerLikePayload).length === 0,
+    "+++ added text is not an instruction-file header",
+  );
+  assert(
+    nestedAgentsMdChanges(headerLikePayload + added).join() === "src/AGENTS.md",
+    "next file header is checked after a hunk",
+  );
   const pureRename =
     "diff --git a/docs/x.md b/pkg/AGENTS.md\nsimilarity index 100%\nrename from docs/x.md\nrename to pkg/AGENTS.md\n";
   const binary =
@@ -504,12 +536,24 @@ try {
     }
     assert(!threw, `plain ref accepted: ${ok}`);
   }
-  for (const bad of ["--output=/tmp/x", "main..evil", 'main"}', "main ignore", "HEAD@{1}", ""]) {
+  for (const bad of [
+    "--output=/tmp/x",
+    "main..evil",
+    'main"}',
+    "main ignore",
+    "@{u}",
+    "HEAD@{1}",
+    "",
+  ]) {
     let threw = false;
     try {
       assertPlainBaseRef(bad);
-    } catch {
+    } catch (error) {
       threw = true;
+      assert(
+        error instanceof Error && error.message.includes("base ref must use letters, digits"),
+        "rejected ref reports the allowed form",
+      );
     }
     assert(threw, `ref rejected: ${JSON.stringify(bad)}`);
   }

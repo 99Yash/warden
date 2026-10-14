@@ -518,7 +518,14 @@ export function laneScopeOverCeiling(scope: string[]): string | undefined {
  */
 export function nestedAgentsMdChanges(diff: string): string[] {
   const targets = new Set<string>();
+  let inHeaders = true;
   for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      inHeaders = true;
+      continue;
+    }
+    if (line.startsWith("@@ ") || line === "GIT binary patch") inHeaders = false;
+    if (!inHeaders) continue;
     let path: string | undefined;
     if (line.startsWith("+++ ")) path = line.slice(4);
     else if (line.startsWith("rename to ")) path = line.slice("rename to ".length);
@@ -549,9 +556,15 @@ export function laneInstructionFileGate(diff: string): string | undefined {
   );
 }
 
+function screenLaneReason(reason: string): string {
+  const rule = screenFinding(reason);
+  return rule === undefined ? reason : `secret guard: dropped lane reason (rule ${rule})`;
+}
+
 function withTail(reason: string, tail: string | undefined): string {
-  if (tail === undefined || tail === "") return reason;
-  return `${reason} (stderr: ${tail})`;
+  return screenLaneReason(
+    tail === undefined || tail === "" ? reason : `${reason} (stderr: ${tail})`,
+  );
 }
 
 export interface McpServerState {
@@ -1016,9 +1029,10 @@ function writeLanesOut(opts: DriveOptions, lanes: LaneOutput[]): void {
   if (opts.lanesOut !== undefined) {
     const screened = lanes.map((lane) => ({
       ...lane,
+      ...(lane.reason !== undefined ? { reason: screenLaneReason(lane.reason) } : {}),
       findings: lane.findings.map((finding) => {
         const secret = screenFinding(finding);
-        return secret === undefined ? finding : { secretGuard: secret.rule };
+        return secret === undefined ? finding : { secretGuard: secret };
       }),
     }));
     writeFileSync(
@@ -1090,15 +1104,16 @@ async function buildFailed(
   resolved: ResolvedDiff,
   scope: string[],
 ): Promise<DriveLaneResult> {
+  const screenedReason = screenLaneReason(reason);
   const lanes: LaneOutput[] = [
-    { lane: DOWN_LANE_SPEC.lane, status: "failed", reason, scope, findings: [] },
+    { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: screenedReason, scope, findings: [] },
   ];
   writeLanesOut(opts, lanes);
   return await buildLaneResult(
     opts,
     resolved,
     lanes,
-    [...(resolved.degraded ?? []), laneTraceEntry("failed", reason, "")],
+    [...(resolved.degraded ?? []), laneTraceEntry("failed", screenedReason, "")],
     { runSpawned: false },
   );
 }

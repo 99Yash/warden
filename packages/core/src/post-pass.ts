@@ -17,6 +17,7 @@ import { CommentSchema, type Comment, type CommentSet, type DegradedEntry } from
 import {
   CREDENTIAL_RULES,
   SECRET_FILE_RULE_ID,
+  SECRET_DEPTH_RULE_ID,
   matchCredential,
   screenFinding,
 } from "./secret-guard.js";
@@ -69,7 +70,12 @@ export const LaneFindingSchema = CommentSchema.omit({ id: true });
 const SecretGuardPlaceholderSchema = z.strictObject({
   secretGuard: z
     .string()
-    .refine((rule) => rule === SECRET_FILE_RULE_ID || CREDENTIAL_RULES.some((r) => r.id === rule)),
+    .refine(
+      (rule) =>
+        rule === SECRET_FILE_RULE_ID ||
+        rule === SECRET_DEPTH_RULE_ID ||
+        CREDENTIAL_RULES.some((r) => r.id === rule),
+    ),
 });
 
 export interface PostPassConfig {
@@ -94,9 +100,8 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
 
   // 1. Per-finding schema validation, then the secret guard (1b). Invalid
   // findings drop, counted per lane. Every id is minted content-addressed
-  // without the lane in the
-  // key, so byte-identical findings (same file, lines, category, and
-  // claim) submitted by two lanes dedupe at step 8.
+  // without the lane in the key, so byte-identical findings (same file,
+  // lines, category, and claim) submitted by two lanes dedupe at step 8.
   const perLane: Comment[][] = [];
   const invalidByLane = new Map<string, number>();
   for (const lane of input.lanes) {
@@ -127,7 +132,7 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
           : matchCredential(rest.file) === undefined
             ? ` at ${rest.file}:${rest.lineStart}`
             : "";
-        postPass.push(secretGuardEntry(lane.lane, secret.rule, anchor));
+        postPass.push(secretGuardEntry(lane.lane, secret, anchor));
         continue;
       }
       kept.push({

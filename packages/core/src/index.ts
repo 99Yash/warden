@@ -201,10 +201,13 @@ export {
   SECRET_FILE_GLOBS,
   GIT_METADATA_GLOBS,
   SECRET_FILE_RULE_ID,
+  SECRET_DEPTH_RULE_ID,
+  SECRET_SCAN_MAX_DEPTH,
   isSecretFilePath,
   matchCredential,
   screenFinding,
   type CredentialRule,
+  type CredentialRuleId,
   type SecretMatch,
 } from "./secret-guard.js";
 export {

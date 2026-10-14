@@ -49,7 +49,9 @@ export interface ResolvedDiff {
 /** ADR-0054 §2(b): validate at the shared CLI/MCP boundary before any Git call. */
 export function assertPlainBaseRef(ref: string): void {
   if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@-]*$/.test(ref) || ref.includes("..")) {
-    throw new Error("warden: base ref is not a plain ref name");
+    throw new Error(
+      "warden: base ref must use letters, digits, '.', '_', '/', '~', '^', '@', or '-' (except a leading '-'); '..', whitespace, and revision expressions such as '@{u}' or 'HEAD@{1}' are not allowed",
+    );
   }
 }
 

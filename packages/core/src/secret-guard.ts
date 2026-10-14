@@ -66,7 +66,7 @@ export interface CredentialRule {
   pattern: RegExp;
 }
 
-export const CREDENTIAL_RULES: readonly CredentialRule[] = [
+export const CREDENTIAL_RULES = [
   { id: "pem-private-key", pattern: /-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----/i },
   { id: "aws-access-key-id", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
   { id: "github-token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/ },
@@ -99,14 +99,20 @@ export const CREDENTIAL_RULES: readonly CredentialRule[] = [
   { id: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}/ },
   { id: "npm-token", pattern: /\bnpm_[A-Za-z0-9]{36}\b/ },
   { id: "jwt", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/ },
-];
+] as const satisfies readonly CredentialRule[];
+
+export type CredentialRuleId = (typeof CREDENTIAL_RULES)[number]["id"];
+
+/** Reject raw output beyond this depth before recursion or serialization can overflow. */
+export const SECRET_SCAN_MAX_DEPTH = 64;
+export const SECRET_DEPTH_RULE_ID = "secret-scan-depth-exceeded";
+export type SecretMatch =
+  | CredentialRuleId
+  | typeof SECRET_FILE_RULE_ID
+  | typeof SECRET_DEPTH_RULE_ID;
 
 /** Keys whose string value is a repo path, checked against the secret-file globs. */
 const PATH_KEYS = new Set(["file", "path"]);
-
-export interface SecretMatch {
-  rule: string;
-}
 
 /** OpenCode `Wildcard.match`: `*` → `.*`, `?` → `.`, anchored, no alternation. */
 function globToRegExp(glob: string): RegExp {
@@ -145,37 +151,38 @@ export function isSecretFilePath(path: string): boolean {
 }
 
 /** The first credential rule that matches `text`, else undefined. */
-export function matchCredential(text: string): string | undefined {
+export function matchCredential(text: string): CredentialRuleId | undefined {
   return CREDENTIAL_RULES.find((rule) => rule.pattern.test(text))?.id;
 }
 
 /**
  * Screens one finding — a validated `Comment` or a raw lane object — by
  * walking every string value. A `file`/`path` value is also checked as a
- * secret-file path. Returns the first match, else undefined.
+ * secret-file path. Returns the first rule ID, else undefined. Output
+ * deeper than SECRET_SCAN_MAX_DEPTH fails closed with a depth rule ID.
  */
 export function screenFinding(value: unknown): SecretMatch | undefined {
-  return walk(value, undefined);
+  return walk(value, undefined, 0);
 }
 
-function walk(value: unknown, key: string | undefined): SecretMatch | undefined {
+function walk(value: unknown, key: string | undefined, depth: number): SecretMatch | undefined {
+  if (depth > SECRET_SCAN_MAX_DEPTH) return SECRET_DEPTH_RULE_ID;
   if (typeof value === "string") {
     if (key !== undefined && PATH_KEYS.has(key) && isSecretFilePath(value)) {
-      return { rule: SECRET_FILE_RULE_ID };
+      return SECRET_FILE_RULE_ID;
     }
-    const rule = matchCredential(value);
-    return rule !== undefined ? { rule } : undefined;
+    return matchCredential(value);
   }
   if (Array.isArray(value)) {
     for (const item of value) {
-      const match = walk(item, undefined);
+      const match = walk(item, undefined, depth + 1);
       if (match !== undefined) return match;
     }
     return undefined;
   }
   if (value !== null && typeof value === "object") {
     for (const [childKey, child] of Object.entries(value)) {
-      const match = walk(child, childKey);
+      const match = walk(child, childKey, depth + 1);
       if (match !== undefined) return match;
     }
   }

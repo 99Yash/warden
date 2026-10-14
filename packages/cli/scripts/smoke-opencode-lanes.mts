@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -49,6 +50,25 @@ import {
 import { isOpencodeCostMeasured } from "./eval/score.mjs";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
+async function withEnv<T>(
+  values: Record<string, string | undefined>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const prior = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    return await run();
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 const TMP_ROOT = mkdtempSync(resolve(tmpdir(), "warden-opencode-lanes-"));
 
 let failed = 0;
@@ -880,7 +900,7 @@ try {
   git(["init"]);
   git(["config", "user.email", "smoke@example.com"]);
   git(["config", "user.name", "smoke"]);
-  execFileSync("mkdir", ["-p", resolve(REPO, "src")]);
+  mkdirSync(resolve(REPO, "src"), { recursive: true });
   writeFileSync(resolve(REPO, SRC), V1);
   git(["add", "-A"]);
   git(["commit", "-m", "v1"]);
@@ -997,8 +1017,12 @@ const block = (findings) => "Triage.\\n" + fence + "json\\n" + JSON.stringify({ 
 if (mode === "runfail") {
   tool("warden_run_det_priors");
   text(block([finding]));
-  process.stderr.write("fake run exploded\\n");
+  process.stderr.write((process.env.WARDEN_SMOKE_STDERR ?? "fake run exploded") + "\\n");
   process.exit(1);
+} else if (mode === "deep") {
+  tool("warden_run_det_priors");
+  const nested = '{"child":'.repeat(10000) + '"clean"' + '}'.repeat(10000);
+  text("Triage.\\n" + fence + "json\\n" + '{"findings":[' + nested + ']}\\n' + fence);
 } else if (mode === "ok" || mode === "notools" || mode === "outofscope") {
   if (mode !== "notools") tool("warden_run_det_priors");
   tool("read");
@@ -1216,19 +1240,22 @@ if (mode === "runfail") {
   // publishes, and --lanes-out keeps the count but not the value. The
   // token is built at run time so the file holds no token-shaped literal.
   const fakeToken = "ghp_" + "Z".repeat(36);
-  process.env.WARDEN_SMOKE_FINDING = JSON.stringify({
-    ...inScopeFinding,
-    claim: `smoke: the config leaks ${fakeToken}`,
-  });
-  process.env.WARDEN_SMOKE_SERVE_PORT = resolve(TMP_ROOT, "fake-serve-port-secret");
-  const leaked = await driveOpencodeLane({
-    repoRoot: REPO,
-    baseRef: "HEAD~1",
-    opencodeBin: fakePath,
-    lanesOut: "lanes-secret.json",
-  });
-  delete process.env.WARDEN_SMOKE_FINDING;
-  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  const leaked = await withEnv(
+    {
+      WARDEN_SMOKE_FINDING: JSON.stringify({
+        ...inScopeFinding,
+        claim: `smoke: the config leaks ${fakeToken}`,
+      }),
+      WARDEN_SMOKE_SERVE_PORT: resolve(TMP_ROOT, "fake-serve-port-secret"),
+    },
+    () =>
+      driveOpencodeLane({
+        repoRoot: REPO,
+        baseRef: "HEAD~1",
+        opencodeBin: fakePath,
+        lanesOut: "lanes-secret.json",
+      }),
+  );
   assert(
     leaked.result.comments.length === 0 && !JSON.stringify(leaked.result).includes(fakeToken),
     "secret guard: the credential finding does not publish and the value is absent",
@@ -1276,6 +1303,43 @@ if (mode === "runfail") {
       ) &&
       !replaySecret.out.includes(fakeToken),
     "secret-only replay restores the guard entry and names the guard in lane health",
+  );
+
+  const deepOutput = runDriver(["--base", "HEAD~1", "--json", "--lanes-out", "lanes-deep.json"], {
+    WARDEN_SMOKE_MODE: "deep",
+  });
+  const deepLanesOut = readFileSync(resolve(REPO, "lanes-deep.json"), "utf8");
+  assert(
+    deepOutput.exit === 1 &&
+      parseOut(deepOutput.out) !== undefined &&
+      deepLanesOut.includes('"secretGuard": "secret-scan-depth-exceeded"'),
+    "deep raw output is dropped before --lanes-out serialization without RangeError",
+  );
+  const deepReplay = runCli("post-pass", [
+    "--base",
+    "HEAD~1",
+    "--json",
+    "--lanes",
+    "lanes-deep.json",
+  ]);
+  assert(
+    parseOut(deepReplay.out)?.metadata.degradedWorkers.some(
+      (d) => d.topic === "secret-guard" && d.message.includes("secret-scan-depth-exceeded"),
+    ),
+    "depth overflow marker restores an actionable guard report on replay",
+  );
+  const secretReason = runDriver(
+    ["--base", "HEAD~1", "--json", "--lanes-out", "lanes-secret-reason.json"],
+    { WARDEN_SMOKE_MODE: "runfail", WARDEN_SMOKE_STDERR: `fake failure: ${fakeToken}` },
+  );
+  const reasonLanesOut = readFileSync(resolve(REPO, "lanes-secret-reason.json"), "utf8");
+  assert(
+    secretReason.exit === 1 &&
+      parseOut(secretReason.out) !== undefined &&
+      !reasonLanesOut.includes(fakeToken) &&
+      !secretReason.out.includes(fakeToken) &&
+      reasonLanesOut.includes("dropped lane reason (rule github-token)"),
+    "stderr credentials are absent from lane reasons and published reports",
   );
 
   const mixedSecret = runDriver(
@@ -1562,7 +1626,7 @@ if (mode === "runfail") {
   bigGit(["init"]);
   bigGit(["config", "user.email", "smoke@example.com"]);
   bigGit(["config", "user.name", "smoke"]);
-  execFileSync("mkdir", ["-p", resolve(BIG, "src")]);
+  mkdirSync(resolve(BIG, "src"), { recursive: true });
   writeFileSync(resolve(BIG, "src/base.ts"), "export const base = 0;\n");
   bigGit(["add", "-A"]);
   bigGit(["commit", "-m", "base"]);
@@ -1636,7 +1700,7 @@ if (mode === "runfail") {
   agentsGit(["init"]);
   agentsGit(["config", "user.email", "smoke@example.com"]);
   agentsGit(["config", "user.name", "smoke"]);
-  execFileSync("mkdir", ["-p", resolve(AGENTS, "src")]);
+  mkdirSync(resolve(AGENTS, "src"), { recursive: true });
   writeFileSync(resolve(AGENTS, "src/a.ts"), "export const a = 0;\n");
   writeFileSync(resolve(AGENTS, "AGENTS.md"), "root instructions\n");
   agentsGit(["add", "-A"]);
@@ -1647,15 +1711,18 @@ if (mode === "runfail") {
   agentsGit(["commit", "-m", "inject"]);
   const agentsRunMarker = resolve(TMP_ROOT, "run-invoked-agents");
   const agentsServePort = resolve(TMP_ROOT, "fake-serve-port-agents");
-  process.env.WARDEN_SMOKE_RUN_MARKER = agentsRunMarker;
-  process.env.WARDEN_SMOKE_SERVE_PORT = agentsServePort;
-  const agents = await driveOpencodeLane({
-    repoRoot: AGENTS,
-    baseRef: "HEAD~1",
-    opencodeBin: fakePath,
-  });
-  delete process.env.WARDEN_SMOKE_RUN_MARKER;
-  delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  const agents = await withEnv(
+    {
+      WARDEN_SMOKE_RUN_MARKER: agentsRunMarker,
+      WARDEN_SMOKE_SERVE_PORT: agentsServePort,
+    },
+    () =>
+      driveOpencodeLane({
+        repoRoot: AGENTS,
+        baseRef: "HEAD~1",
+        opencodeBin: fakePath,
+      }),
+  );
   assert(
     agents.runSpawned === false &&
       agents.lanes[0]?.status === "failed" &&
