@@ -17,7 +17,7 @@
  * Usage: pnpm --filter @warden/cli smoke:mcp-run-det-priors
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -765,6 +765,28 @@ try {
   assert(
     badRef.hint?.includes("Could not resolve the review target") === true,
     "the failure names target resolution rather than reporting zero findings",
+  );
+  const optionOutput = resolve(REPO, "git-option-output");
+  for (const base of [`--output=${optionOutput}`, "-main", "main..other", "main ignore"]) {
+    const rejected = readEnvelope(
+      await client.callTool({
+        name: TOOL_NAME_RUN_DET_PRIORS,
+        arguments: { request: { target: "base", base } },
+      }),
+      TOOL_NAME_RUN_DET_PRIORS,
+    );
+    assert(
+      rejected.status === "error" &&
+        rejected.reason === "invalid_input" &&
+        rejected.isError === true,
+      `MCP rejects unsafe base ${JSON.stringify(base)}`,
+    );
+  }
+  assert(
+    !existsSync(optionOutput) &&
+      !existsSync(`${optionOutput}..HEAD`) &&
+      !existsSync(`${optionOutput}...HEAD`),
+    "MCP base cannot create a Git output file",
   );
 
   process.stdout.write("\n[11b] an empty diff is a clean review, not an input error (round 1)\n");

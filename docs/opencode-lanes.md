@@ -61,8 +61,9 @@ agent rules are appended after global rules so they win:
 | --- | --- |
 | deny `*` / `*` | Closed by default; a `deny *` also removes the tool from the model's view. |
 | allow `read` | Read changed files and their context. |
-| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (unverified in the binary); and `*.env.*` also blocks names such as `src/config.env.ts`. |
-| allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
+| deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (followed after a link-path-only check, verified live 2026-10-14 — the diff symlink gate in ADR-0054 §2(g) is the control); and `*.env.*` also blocks names such as `src/config.env.ts`. |
+| allow `read` on env templates ending in `.example` or `.sample` | Templates such as `.env.sample` and `.env.local.example` stay readable. Credential-format checks still apply to publication. |
+| deny `read` on credential files | `READ_SECRET_FILE_GLOBS` also covers `.npmrc`, `.netrc`, `.dev.vars`, `.envrc`, private-key names, key/certificate bundles, and `.aws/credentials`. Git metadata denies apply after template exceptions. |
 | allow `grep` | Find the one-hop caller or definition site of a changed symbol (the `grepRepo` role in method docs). A grep hit does not count against the per-claim file bound (see the submission contract). |
 | allow `glob` | Locate files by pattern. |
 | allow `warden_run_det_priors` | Phase-1 ground truth; the driver fails the lane on zero completed calls. |
@@ -143,8 +144,9 @@ The driver never uses `run --standalone`. Instead:
 
 1. Spawn `opencode serve --hostname 127.0.0.1 --port <free port>` (flags
    verified against `opencode serve --help`: `--hostname`, `--port`) with
-   the same env as before (`OPENCODE_CONFIG`,
-   `OPENCODE_DISABLE_PROJECT_CONFIG=1`, `OPENCODE_CONFIG_CONTENT`) plus a
+   the driver-owned config env (`OPENCODE_CONFIG`, both project-disable
+   flags set to `1`, the isolated config and discovery-home paths,
+   `OPENCODE_CONFIG_CONTENT`) plus a
    random `OPENCODE_PASSWORD`. The port comes from the OS (listen on port
    0, read the port, close). The serve child reads the env password for
    its API auth (`server-process.ts`: `Env.password`, else a random
@@ -161,7 +163,7 @@ The driver never uses `run --standalone`. Instead:
    `packages/server/src/location.ts`, `Mcp.Server` in
    `packages/schema/src/mcp.ts`) — the driver validates it as untrusted
    JSON. Wait until the **warden** server shows `connected`; other servers
-   (e.g. the user's global config) are ignored. A `failed` warden, or no
+   are ignored. A `failed` warden, or no
    `connected` within 30 s (default, `--mcp-timeout` overrides), fails the
    lane with a reason naming the MCP status — `run` is never spawned.
 3. Wait ~1 s more (`MCP_SETTLE_MS`) for the `mcp.tools.changed`
@@ -186,22 +188,131 @@ model reviews the wrong directory. The operator found this on 2026-10-08:
 the same tracer passed by hand from the repo root and failed through
 `pnpm warden`. `smoke:opencode-lanes` asserts that `PWD` matches the cwd.
 
-## Project config lockout
+## Project and global config lockout
 
 The driver spawns `opencode serve` with
 `OPENCODE_CONFIG=<absolute opencode.json>` and
-`OPENCODE_DISABLE_PROJECT_CONFIG=1`: a private server that inherits the
-driver's env, and the reviewed tree cannot re-grant permissions, add
-plugins, or override the agent. Residual: project `AGENTS.md` intent
+both `OPENCODE_DISABLE_PROJECT_CONFIG=1` and
+`OPENCODE_CONFIG_PROJECT_DISABLE=1`. These override inherited values;
+the newer name wins in the binary. The reviewed tree cannot re-grant
+permissions, add plugins, or override the agent.
+
+Both children also get `OPENCODE_CONFIG_DIR` and `OPENCODE_TEST_HOME`
+pointing to separate empty directories under a private temporary root.
+The config directory excludes global config, plugins, and `AGENTS.md`.
+The discovery-home override excludes home skills, including
+`~/.claude/skills`; the config directory alone does not exclude them.
+Provider credentials and the normal data path for saved auth remain
+available. The driver removes the temporary root after the server stops,
+including failure paths. `smoke:opencode-config-isolation` checks these
+paths with the installed binary and a loopback model stub. This is config
+discovery isolation; files and the session store remain accessible.
+
+Residual: project `AGENTS.md` intent
 context is also disabled on the driven path (there is no per-agent
 opt-out), so the lane reviews without the repo's contributor guidance —
 acceptable for a correctness lane, which needs the code, not the customs.
 
+## Untrusted input (ADR-0054)
+
+The lane reads untrusted text through tools: the diff, the files, and the
+`warden mcp` output. The main attacker supplies third-party text inside a
+trusted PR, such as a vendored file, a dependency update, pasted code, or a
+fetched document. The
+main goal is to suppress findings and obtain a clean result. Runner secrets
+are a separate asset: process environment values, `.git/config`, and files
+written by earlier CI steps. Same-repo-only CI does not remove this attacker;
+an author who can execute a changed workflow is outside Warden's boundary.
+
+Warden does not own the OpenCode tool output. These controls have separate
+limits:
+
+- **Independent integrity signals.** `runInputIntegrity` checks all added
+  diff lines for hidden Unicode (`hidden-unicode`) and commands aimed at an
+  AI reviewer or its instructions (`reviewer-instruction`). The post-pass
+  publishes these as Tier 1 / `security` tool findings, even when the lane
+  submits `[]` or fails. They bypass lane scope, noise pruning, and volume
+  caps. `warden check`, the MCP det-prior bundle, and the legacy review
+  harness also include them. Messages give code points or a rule, without
+  quoting the payload. Valid language, emoji, documentation, and test text
+  can match; check the text's purpose. These rules cover some suppression
+  attacks. Other wording, encodings, unchanged text, and fetched documents
+  can evade them. A clean result does not prove the absence of injection.
+- **Nested `AGENTS.md` gate.** After each `read`, OpenCode loads each
+  `AGENTS.md` between the file and the location root as session
+  instructions. No flag stops it (binary v2.0.25: `uL="AGENTS.md"`,
+  `u.up({targets:[uL],…})`). The project-config lockout above covers only
+  the root file. So if the diff adds, changes, or renames to an
+  `AGENTS.md` below the root, the driver fails the lane before spawn
+  (`laneInstructionFileGate`, known $0, not clean). It reads the diff
+  headers, because a pure rename or a binary file has no `+++` line. A
+  nested `AGENTS.md` that the PR does not touch is base-branch content
+  and loads as usual. Its contents can still contain hostile instructions.
+- **Symlink gate and Git-metadata deny (ADR-0054 §2(g)).** The binary's
+  `read` checks permission on the link path, then follows the link:
+  verified live on 2026-10-14 (v2.0.25) — a committed `src/x` pointing
+  outside the repo returned the outside file, and `src/gc` →
+  `../.git/config` returned the config, while a direct `.git/config`
+  read was denied. So the driver also gates the diff before spawn
+  (`laneSymlinkGate`): a changed symlink (mode 120000, pure renames
+  checked against the live checkout) whose canonical target leaves the
+  repo or enters `.git` fails the lane closed, as does a declared
+  symlink missing or replaced in the checkout. The lane config denies
+  `read` on `.git/*` and `*/.git/*`, and the secret guard drops a
+  finding that cites `.git/config` even when the credential is
+  base64-encoded. A symlink already on the base branch is outside the
+  diff gate and remains readable through its link path; `grep` through
+  a symlink is unverified. In CI (#48), every `actions/checkout` sets
+  `persist-credentials: false` so `.git/config` holds no token.
+- **Base ref.** CLI `--base` and model-chosen MCP bases must be plain ref names (`assertPlainBaseRef` in core `resolveDiff`):
+  no leading `-`, no `..`, no quotes, spaces, or braces. It goes into the
+  lane message and into git argv. Git revision probes and diff argv use `--end-of-options`.
+- **Repo-controlled detector code.** ESLint config and repo-local compiler
+  executables can run arbitrary code. The MCP command starts with
+  `/usr/bin/env -i` and a fixed execution-settings allowlist. Direct
+  `warden mcp` sessions apply that limit and disable Warden env-file loading.
+  All detector children also use the allowlist, including explicit caller
+  envs. Provider keys, CI tokens, custom secrets, config paths, and Node
+  startup hooks are excluded. OpenCode keeps the credentials its model needs.
+  This does not isolate files or other same-user processes. For #48, run
+  det-priors with no secrets; keep credentials outside resources that detector
+  code can access. Fork and hosted review still need runner isolation.
+- **Secret guard, defence in depth.** The post-pass drops a finding that
+  cites a sensitive file (`SECRET_FILE_GLOBS` in `@warden/core`, matched case-insensitively) or holds a known credential format. The read-deny policy is separate (`READ_SECRET_FILE_GLOBS`); publication covers all read-denied paths plus credential JSON files and `.ssh/*`. PGP private-key headers, Slack app tokens and webhooks, GitLab and Hugging Face tokens, Stripe webhook secrets, URL credentials, Basic authorization, and Cloudflare token assignments/headers are included.
+  It adds one `actionable` `secret-guard` entry with the rule and the
+  anchor only when it is in the driver-owned lane scope and has no credential
+  match. An out-of-scope file becomes "an out-of-scope anchor"; the entry
+  never copies its text or the matched value. `--lanes-out` writes such a finding as
+  `{ "secretGuard": "<rule>" }`. On replay, the post-pass restores the
+  actionable `secret-guard` entry with the lane and rule ID. The marker
+  has no anchor, so the restored entry has none. Unknown rule IDs or extra
+  fields fail validation. This is DLP for accidental disclosure into
+  stored output, not containment of an injected model. Arbitrary base64 outside Basic authorization headers, tokens split across fields, spaced tokens,
+  plain passwords, and secret files reached through a symlink with a
+  non-`.env` name can pass (the publication guard sees the link path;
+  the §2(g) diff gate is what blocks adding such a link). Fixed lane
+  configuration does not isolate runner secrets; runner isolation needs a
+  separate design. The model provider and OpenCode session store still
+  see what the lane reads.
+
+- **Independent secret-diff findings.** The driver-owned diff is scanned for credential formats on added lines. Fixed tool findings give the rule and file/line, without values or snippets. A sensitive-file path produces a separate finding; the name alone does not prove that credentials are present. Empty additions, pure renames, and binary changes use a `0:0` file-level anchor rather than a line that does not exist. Credential-bearing filenames are omitted. These Tier 1 security findings survive empty/failed lanes, noise pruning, volume caps, and replay with the same diff. The lane output guard still drops unsafe model findings. Templates remain subject to credential-format checks.
+- **Instruction filename aliases.** The diff gate decodes Git C/octal UTF-8 paths, then uppercases the basename. This catches `AGENTſ.md` on APFS in both default Git output and `core.quotePath=false`. It is not a complete filesystem equivalence check.
+
+`smoke:secret-diff` covers credential findings and replay;
+`probe:instruction-tree` is the S7 investigation described in [probe results](probes/s7-temporary-tree.md).
+
+`smoke:input-integrity` covers detection and publication outside lane discretion;
+`smoke:untrusted-input` covers the guard and authority checks;
+`smoke:opencode-lanes` covers the gate, the `--lanes-out` placeholder, and replay
+end to end. `smoke:secret-isolation` runs repo-controlled ESLint and compiler
+code through real MCP and checks inherited and env-file secrets.
+
 ## Submission contract
 
 The final assistant message ends with exactly one fenced ` ```json `
-block holding `{"findings":[...]}`; `[]` is a clean lane result. The
-driver takes the final message to be the `messageID` of the last
+block holding `{"findings":[...]}`; `[]` means the lane reports no findings.
+The independent integrity signals can still make the final result non-clean.
+The driver takes the final message to be the `messageID` of the last
 `step_start` event, and a stream with no trustworthy identity (a `text`
 part without a `messageID`, a `step_start` without one, a `text` part no
 `step_start` announced, or no `step_start` at all) fails the lane closed.
@@ -267,7 +378,8 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   before parsing and forward `findings: []`. `--lanes-out` writes the
   envelope for audit / replay through `warden post-pass`.
 - Output matches `warden post-pass` exactly; exit 1 when
-  `isNotClean(result)` (actionable `lane-health` / `diff-source`).
+  `isNotClean(result)` (actionable `lane-health` / `diff-source` / `secret-guard`).
+  A guard drop causes exit 1 even when other findings publish.
 - An extra `info` entry, topic `lane-trace`, records the tool-call counts
   (e.g. `warden_run_det_priors×2, warden_lookup_type_def×0, read×7`).
   After the run resolves and before the serve child is killed, the driver

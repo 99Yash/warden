@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LaneFindingSchema } from "@warden/core";
+import { LaneFindingSchema, READ_SECRET_FILE_GLOBS, GIT_METADATA_GLOBS } from "@warden/core";
 
 /**
  * Slice #42 / ADR-0053 §9: the down-lane prompt materializer. Pure —
@@ -219,9 +219,19 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
     // user's global config deny. Deny (not ask): the host enforces a deny
     // before any client reply, while an ask depends on the run client's
     // reply, which is version-dependent.
-    { action: "read", resource: "*.env", effect: "deny" },
-    { action: "read", resource: "*.env.*", effect: "deny" },
-    { action: "read", resource: "*.env.example", effect: "allow" },
+    // Read permissions have their own policy. The publication guard covers
+    // these paths and additional sensitive paths (ADR-0054 §3).
+    ...READ_SECRET_FILE_GLOBS.deny.map((glob) => ({
+      action: "read",
+      resource: glob,
+      effect: "deny",
+    })),
+    ...READ_SECRET_FILE_GLOBS.allow.map((glob) => ({
+      action: "read",
+      resource: glob,
+      effect: "allow",
+    })),
+    ...GIT_METADATA_GLOBS.map((glob) => ({ action: "read", resource: glob, effect: "deny" })),
     ...LANE_MCP_TOOLS.map((tool) => ({ action: tool, resource: "*", effect: "allow" })),
   ];
   const config = {

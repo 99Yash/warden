@@ -5,7 +5,9 @@ export type FindingSeverity = "error" | "warning" | "info";
  * M5 added `jscpd`; M7 (ADR-0021 #1) adds `scalability`, `deadcode`,
  * `consistency` for the three new detector workers. M12 (ADR-0027) adds
  * `leverage` for the bounded stdlib idiom-miss detector. ADR-0046 adds
- * `react-doctor` for the subprocessed `react-doctor` CLI det-prior.
+ * `react-doctor` for the subprocessed `react-doctor` CLI det-prior. ADR-0054
+ * adds `input-integrity` for the two added-line text-pattern checks and
+ * `secret-diff` for safe credential-format and sensitive-file findings.
  *
  * `evidence` is an optional `{path, line, snippet}` triple that snippet-citing
  * detectors (leverage + react-doctor) populate so the global verifier
@@ -21,7 +23,9 @@ export interface ToolFinding {
     | "deadcode"
     | "consistency"
     | "leverage"
-    | "react-doctor";
+    | "react-doctor"
+    | "input-integrity"
+    | "secret-diff";
   file: string;
   line: number;
   column: number;

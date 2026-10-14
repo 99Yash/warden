@@ -2,6 +2,7 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import ts from "typescript";
+import { deterministicProcessEnv } from "@warden/env";
 import type { ChangedFile } from "../diff/index.js";
 import type { DegradedEntry } from "../schema.js";
 
@@ -23,7 +24,7 @@ export function spawnCapture(
 ): Promise<SpawnCaptureResult> {
   const spawnOpts: SpawnOptions = {
     cwd: opts.cwd,
-    env: opts.env ?? process.env,
+    env: deterministicProcessEnv(opts.env),
     stdio: ["ignore", "pipe", "pipe"],
   };
   return new Promise((resolveP) => {

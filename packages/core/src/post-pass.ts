@@ -5,12 +5,22 @@ import { parseUnifiedDiff } from "./diff/index.js";
 import { pruneDiff } from "./diff/prune.js";
 import { verifyCitations } from "./llm/verify-citations.js";
 import { compareByPriority } from "./priority.js";
+import { runInputIntegrity } from "./runners/input-integrity.js";
+import { runSecretDiff } from "./runners/secret-diff.js";
+import { toComment } from "./runners/to-comment.js";
 import {
   anchorInScope,
   commentInScope,
   scopeCommentsToDiff,
 } from "./review-harness/comment-scope.js";
 import { CommentSchema, type Comment, type CommentSet, type DegradedEntry } from "./schema.js";
+import {
+  CREDENTIAL_RULES,
+  SECRET_FILE_RULE_ID,
+  SECRET_DEPTH_RULE_ID,
+  matchCredential,
+  screenFinding,
+} from "./secret-guard.js";
 
 /**
  * Mandatory post-pass outside model discretion (ADR-0053 §4). Publication
@@ -55,6 +65,19 @@ export const PostPassLanesSchema = z.strictObject({
 // key), so a model id can never win dedupe — every id is minted below.
 export const LaneFindingSchema = CommentSchema.omit({ id: true });
 
+// `--lanes-out` replaces guarded findings with this replay marker. Accept
+// only the exact shape and known rule IDs: the rule is published in an entry.
+const SecretGuardPlaceholderSchema = z.strictObject({
+  secretGuard: z
+    .string()
+    .refine(
+      (rule) =>
+        rule === SECRET_FILE_RULE_ID ||
+        rule === SECRET_DEPTH_RULE_ID ||
+        CREDENTIAL_RULES.some((r) => r.id === rule),
+    ),
+});
+
 export interface PostPassConfig {
   verbose?: boolean;
   volumeCap?: number;
@@ -75,21 +98,43 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   const cap = resolveVolumeCap(input.config?.volumeCap);
   const postPass: DegradedEntry[] = [];
 
-  // 1. Per-finding schema validation. Invalid findings drop, counted per
-  // lane. Every id is minted content-addressed without the lane in the
-  // key, so byte-identical findings (same file, lines, category, and
-  // claim) submitted by two lanes dedupe at step 8.
+  // 1. Per-finding schema validation, then the secret guard (1b). Invalid
+  // findings drop, counted per lane. Every id is minted content-addressed
+  // without the lane in the key, so byte-identical findings (same file,
+  // lines, category, and claim) submitted by two lanes dedupe at step 8.
   const perLane: Comment[][] = [];
   const invalidByLane = new Map<string, number>();
   for (const lane of input.lanes) {
+    const scope = new Set(lane.scope.map((p) => p.replace(/\\/g, "/")));
     const kept: Comment[] = [];
     for (const finding of lane.findings) {
+      const placeholder = SecretGuardPlaceholderSchema.safeParse(finding);
+      if (placeholder.success) {
+        // The marker stores no anchor. Restore the actionable guard drop
+        // without treating it as an invalid finding or inventing an anchor.
+        postPass.push(secretGuardEntry(lane.lane, placeholder.data.secretGuard));
+        continue;
+      }
       const result = LaneFindingSchema.safeParse(finding);
       if (!result.success) {
         invalidByLane.set(lane.lane, (invalidByLane.get(lane.lane) ?? 0) + 1);
         continue;
       }
       const rest = result.data;
+      // 1b. Secret guard (ADR-0054 §3): a finding that cites a secret file
+      // or holds a known credential format never publishes. The entry
+      // names the rule and the anchor, never the value — and omits the
+      // anchor when it is outside the trusted scope or matches a credential rule.
+      const secret = screenFinding(rest);
+      if (secret !== undefined) {
+        const anchor = !scope.has(rest.file.replace(/\\/g, "/"))
+          ? " at an out-of-scope anchor"
+          : matchCredential(rest.file) === undefined
+            ? ` at ${rest.file}:${rest.lineStart}`
+            : "";
+        postPass.push(secretGuardEntry(lane.lane, secret, anchor));
+        continue;
+      }
       kept.push({
         ...rest,
         id: stableCommentId(
@@ -134,8 +179,9 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
     scopedKeptByLane.push(keptCount);
   });
   // An `ok` lane with non-empty findings that loses all of them to gates
-  // 1–2 (schema + scope) is unhealthy — including a mis-encoded scope, which
-  // otherwise fails silently. Named per lane for the lane-health entries.
+  // 1, 1b, and 2 (schema + secret guard + scope) is unhealthy — including a
+  // mis-encoded scope, which otherwise fails silently. Named per lane for
+  // the lane-health entries.
   const unhealthy = input.lanes.flatMap((lane, index) =>
     lane.status === "ok" && lane.findings.length > 0 && (scopedKeptByLane[index] ?? 0) === 0
       ? [{ index, lane: lane.lane, count: lane.findings.length }]
@@ -205,7 +251,14 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   }
 
   // 7. Priority sort.
-  const sorted = [...gated].sort(compareByPriority);
+  // ADR-0054: scan driver-owned diff text outside lane discretion. These
+  // tool-authored Tier-1 signals bypass lane scope, noise pruning, and prose
+  // screening (messages contain rule facts, never untrusted payload text).
+  const sorted = [
+    ...gated,
+    ...runInputIntegrity(input.diff).map(toComment),
+    ...runSecretDiff(input.diff).map(toComment),
+  ].sort(compareByPriority);
 
   // 8. Dedupe by id, keeping the first (highest-priority) occurrence.
   const seen = new Set<string>();
@@ -278,14 +331,24 @@ export function deriveLaneScope(diff: string): string[] {
 
 /**
  * Slice #42: the core-owned verdict predicate. True iff any `actionable`
- * entry carries topic `lane-health` or `diff-source` — the no-findings
- * contract: no lanes, every lane failed/unhealthy, or an empty diff is
- * not a clean result.
+ * entry carries topic `lane-health`, `diff-source`, or `secret-guard`.
+ * No lanes, every lane failed/unhealthy, an empty diff, or a guard drop
+ * is not a clean result, even when other findings publish.
  */
 export function isNotClean(result: CommentSet): boolean {
   return result.metadata.degradedWorkers.some(
-    (e) => e.kind === "actionable" && (e.topic === "lane-health" || e.topic === "diff-source"),
+    (e) =>
+      e.kind === "actionable" &&
+      (e.topic === "lane-health" || e.topic === "diff-source" || e.topic === "secret-guard"),
   );
+}
+
+function secretGuardEntry(lane: LaneName, rule: string, anchor = ""): DegradedEntry {
+  return {
+    kind: "actionable",
+    topic: "secret-guard",
+    message: `secret-guard: dropped a ${lane} lane finding${anchor} (rule ${rule}) — the value is not shown`,
+  };
 }
 
 function resolveVolumeCap(volumeCap: number | undefined): number {
@@ -338,7 +401,7 @@ function laneHealthEntries(
       unhealthy
         .map(
           (u) =>
-            `${u.lane}: all ${u.count} ${u.count === 1 ? "finding" : "findings"} dropped by validation/scope`,
+            `${u.lane}: all ${u.count} ${u.count === 1 ? "finding" : "findings"} dropped by validation/secret guard/scope`,
         )
         .join("; "),
     );

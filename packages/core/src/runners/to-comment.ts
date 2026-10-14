@@ -46,6 +46,9 @@ export function toComment(f: ToolFinding): Comment {
 }
 
 export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } {
+  // ADR-0054: deterministic integrity signals must survive curation and caps.
+  if (f.source === "input-integrity" || f.source === "secret-diff")
+    return { tier: 1, category: "security" };
   if (f.source === "tsc") {
     return f.severity === "error"
       ? { tier: 1, category: "correctness" }

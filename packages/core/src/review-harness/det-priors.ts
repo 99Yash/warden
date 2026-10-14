@@ -28,6 +28,8 @@ import { runConsistency } from "../runners/consistency.js";
 import { runDeadcode } from "../runners/deadcode.js";
 import { runEslint } from "../runners/eslint.js";
 import { runEslintSecurity } from "../runners/eslint-security.js";
+import { runInputIntegrity } from "../runners/input-integrity.js";
+import { runSecretDiff } from "../runners/secret-diff.js";
 import { runJscpd } from "../runners/jscpd.js";
 import { leverageRunner } from "../runners/leverage.js";
 import { runReactDoctor } from "../runners/react-doctor.js";
@@ -90,7 +92,7 @@ export interface DetPriors {
   changed: ChangedFile[];
   /** Convenience cache of `changed.map(c => c.path)`. */
   changedPaths: string[];
-  /** Aggregate `ToolFinding[]` from TSC + ESLint + ESLint-security + jscpd + scalability + consistency + deadcode + leverage detectors. */
+  /** Aggregate `ToolFinding[]` from TSC + ESLint + ESLint-security + jscpd + scalability + consistency + deadcode + leverage + input-integrity + secret-diff detectors. */
   findings: ToolFinding[];
   /** Vuln output stays `Comment`-shaped (audit + OSV emit Comments directly). */
   vulnComments: Comment[];
@@ -134,6 +136,8 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
 
   // M9 (ADR-0025): diff-level noise filter. Inlined so the parser's
   // unpruned output is unreferenced after `pruneDiff()` returns.
+  // ADR-0054: integrity checks apply to all added text, including noise.
+  const integrityFindings = [...runInputIntegrity(input.diff), ...runSecretDiff(input.diff)];
   const pruneResult = input.diff ? pruneDiff(parseUnifiedDiff(input.diff)) : undefined;
   const changed = pruneResult?.pruned ?? [];
   environmentalDegraded.push(...(pruneResult?.degraded ?? []));
@@ -502,6 +506,7 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
   }
 
   const findings: ToolFinding[] = [
+    ...integrityFindings,
     ...tscResult.findings,
     ...eslintResult.findings,
     ...eslintSecurityResult.findings,

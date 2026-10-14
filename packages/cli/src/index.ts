@@ -18,6 +18,7 @@ import {
   configuredReviewLlmProviders,
   loadWardenRuntime,
   requireAnyProviderApiKey,
+  restrictProcessToDeterministicEnv,
 } from "@warden/env";
 import { startMcpServer } from "@warden/mcp";
 import { Command } from "commander";
@@ -279,7 +280,8 @@ program
   .description("Start Warden's MCP tool-provider over stdio. Stdout is reserved for JSON-RPC.")
   .action(async () => {
     const repoRoot = findRepoRoot();
-    loadWardenRuntime({ repoRoot });
+    restrictProcessToDeterministicEnv();
+    loadWardenRuntime({ repoRoot, loadEnvFiles: false });
     // Do not use sharedOpts, runReview, or the phase renderer here: stdin and
     // stdout belong exclusively to the MCP transport, not diff input or logs.
     await startMcpServer({ repoRoot });
@@ -512,10 +514,10 @@ async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
     ...(extraDegraded && extraDegraded.length > 0 ? { extraDegraded } : {}),
   });
 
-  // Issue #29 parity: a false-clean (no lanes, every lane failed, or an
-  // empty diff that anchored nothing) must not look like success. Only
-  // `lane-health` and `diff-source` gate the exit — other actionable
-  // entries (e.g. `noise-filter`) fire on normal runs.
+  // Issue #29 parity: a false-clean (no lanes, every lane failed, an
+  // empty diff that anchored nothing, or a secret guard drop) must not look
+  // like success. `lane-health`, `diff-source`, and `secret-guard` gate the
+  // exit — other actionable entries (e.g. `noise-filter`) fire on normal runs.
   if (isNotClean(result)) {
     process.exitCode = 1;
   }
