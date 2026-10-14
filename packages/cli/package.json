@@ -35,6 +35,8 @@
     "smoke:untrusted-input": "node --import tsx/esm scripts/smoke-untrusted-input.mts",
     "smoke:secret-isolation": "node --import tsx/esm scripts/smoke-secret-isolation.mts",
     "smoke:input-integrity": "node --import tsx/esm scripts/smoke-input-integrity.mts",
+    "smoke:secret-diff": "node --import tsx/esm scripts/smoke-secret-diff.mts",
+    "probe:instruction-tree": "node --import tsx/esm scripts/probe-instruction-tree.mts",
     "smoke:eval-opencode": "node --import tsx/esm scripts/smoke-eval-opencode.mts",
     "measure:review-bundle": "node --import tsx/esm scripts/measure-review-bundle.mts",
     "smoke:m11-verifier": "node --import tsx/esm scripts/smoke-m11-verifier.mts",

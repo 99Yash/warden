@@ -62,7 +62,8 @@ agent rules are appended after global rules so they win:
 | deny `*` / `*` | Closed by default; a `deny *` also removes the tool from the model's view. |
 | allow `read` | Read changed files and their context. |
 | deny `read` on `*.env`, `*.env.*` | Secret guard (mirrors the built-in `explore` agent): agent rules append after global rules and the last match wins, so a bare `allow read *` would re-open `.env` files the host default and the user's global config deny. Deny, not ask — the host enforces a deny before any client reply, while an ask depends on the run client's reply, which is version-dependent. Residuals: the `read` deny is the only enforceable guard — no ruleset can path-restrict `grep`, because the host keys grep permission on the search pattern and passes `path` / `include` as un-matched `metadata` (`packages/core/src/tool/plugin/grep.ts:87-99`, `packages/core/src/permission.ts:87-92`; see the ADR-0053 slice #42 amendment), so a `grep` deny rule would be a placebo; `.ENV` case on case-insensitive APFS; a committed symlink to `.env` (followed after a link-path-only check, verified live 2026-10-14 — the diff symlink gate in ADR-0054 §2(g) is the control); and `*.env.*` also blocks names such as `src/config.env.ts`. |
-| allow `read` on `*.env.example` | The carve-out the guard needs: example env files stay readable. |
+| allow `read` on env templates ending in `.example` or `.sample` | Templates such as `.env.sample` and `.env.local.example` stay readable. Credential-format checks still apply to publication. |
+| deny `read` on credential files | `READ_SECRET_FILE_GLOBS` also covers `.npmrc`, `.netrc`, `.dev.vars`, `.envrc`, private-key names, key/certificate bundles, and `.aws/credentials`. Git metadata denies apply after template exceptions. |
 | allow `grep` | Find the one-hop caller or definition site of a changed symbol (the `grepRepo` role in method docs). A grep hit does not count against the per-claim file bound (see the submission contract). |
 | allow `glob` | Locate files by pattern. |
 | allow `warden_run_det_priors` | Phase-1 ground truth; the driver fails the lane on zero completed calls. |
@@ -277,8 +278,7 @@ limits:
   det-priors with no secrets; keep credentials outside resources that detector
   code can access. Fork and hosted review still need runner isolation.
 - **Secret guard, defence in depth.** The post-pass drops a finding that
-  cites a secret file (the `read` deny globs, `SECRET_FILE_GLOBS` in `@warden/core`,
-  matched case-insensitively) or that holds a known credential format.
+  cites a sensitive file (`SECRET_FILE_GLOBS` in `@warden/core`, matched case-insensitively) or holds a known credential format. The read-deny policy is separate (`READ_SECRET_FILE_GLOBS`); publication covers all read-denied paths plus credential JSON files and `.ssh/*`. PGP private-key headers, Slack app tokens and webhooks, GitLab and Hugging Face tokens, Stripe webhook secrets, URL credentials, Basic authorization, and Cloudflare token assignments/headers are included.
   It adds one `actionable` `secret-guard` entry with the rule and the
   anchor only when it is in the driver-owned lane scope and has no credential
   match. An out-of-scope file becomes "an out-of-scope anchor"; the entry
@@ -287,13 +287,19 @@ limits:
   actionable `secret-guard` entry with the lane and rule ID. The marker
   has no anchor, so the restored entry has none. Unknown rule IDs or extra
   fields fail validation. This is DLP for accidental disclosure into
-  stored output, not containment of an injected model. Base64, tokens split across fields, spaced tokens,
+  stored output, not containment of an injected model. Arbitrary base64 outside Basic authorization headers, tokens split across fields, spaced tokens,
   plain passwords, and secret files reached through a symlink with a
   non-`.env` name can pass (the publication guard sees the link path;
   the §2(g) diff gate is what blocks adding such a link). Fixed lane
   configuration does not isolate runner secrets; runner isolation needs a
   separate design. The model provider and OpenCode session store still
   see what the lane reads.
+
+- **Independent secret-diff findings.** The driver-owned diff is scanned for credential formats on added lines. Fixed tool findings give the rule and file/line, without values or snippets. A sensitive-file path produces a separate finding; the name alone does not prove that credentials are present. Empty additions, pure renames, and binary changes use a `0:0` file-level anchor rather than a line that does not exist. Credential-bearing filenames are omitted. These Tier 1 security findings survive empty/failed lanes, noise pruning, volume caps, and replay with the same diff. The lane output guard still drops unsafe model findings. Templates remain subject to credential-format checks.
+- **Instruction filename aliases.** The diff gate decodes Git C/octal UTF-8 paths, then uppercases the basename. This catches `AGENTſ.md` on APFS in both default Git output and `core.quotePath=false`. It is not a complete filesystem equivalence check.
+
+`smoke:secret-diff` covers credential findings and replay;
+`probe:instruction-tree` is the S7 investigation described in [probe results](probes/s7-temporary-tree.md).
 
 `smoke:input-integrity` covers detection and publication outside lane discretion;
 `smoke:untrusted-input` covers the guard and authority checks;

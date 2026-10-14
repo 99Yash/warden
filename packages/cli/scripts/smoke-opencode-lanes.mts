@@ -286,8 +286,8 @@ try {
   const allowed = permissions.filter((p) => p.effect === "allow").map((p) => p.action);
   const wantAllowed = [...DOWN_LANE_SPEC.allowedTools, ...LANE_MCP_TOOLS];
   assert(
-    allowed.length === wantAllowed.length + 1 && wantAllowed.every((t) => allowed.includes(t)),
-    `allows the lane spec tools plus the .env.example carve-out (${allowed.join(",")})`,
+    allowed.length === wantAllowed.length + 4 && wantAllowed.every((t) => allowed.includes(t)),
+    `allows the lane spec tools plus the template exceptions (${allowed.join(",")})`,
   );
   // The `.env` guard sits after `allow read` and before the MCP allows:
   // agent rules append after global rules and the last match wins, so a
@@ -299,9 +299,10 @@ try {
       ruleShape[3] === "allow glob *" &&
       ruleShape[4] === "deny read *.env" &&
       ruleShape[5] === "deny read *.env.*" &&
-      ruleShape[6] === "allow read *.env.example" &&
-      ruleShape[7] === "deny read .git/*" &&
-      ruleShape[8] === "deny read */.git/*",
+      ruleShape.indexOf("deny read .npmrc") > 5 &&
+      ruleShape.indexOf("allow read *.env.example") > ruleShape.indexOf("deny read *.key") &&
+      ruleShape.indexOf("deny read .git/*") > ruleShape.indexOf("allow read *.env.*.example") &&
+      ruleShape.includes("deny read */.git/*"),
     `read allow is followed by the .env deny guard (${ruleShape.slice(1, 7).join(" | ")})`,
   );
   for (const banned of ["shell", "edit", "webfetch", "subagent", "*"]) {

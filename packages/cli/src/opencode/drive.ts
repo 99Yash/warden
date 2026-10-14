@@ -10,6 +10,7 @@ import {
   deriveLaneScope,
   isNotClean,
   resolveDiff,
+  decodeGitPath,
   runPostPass,
   screenFinding,
   type CommentSet,
@@ -511,7 +512,9 @@ export function laneScopeOverCeiling(scope: string[]): string | undefined {
  * the root file). So a nested `AGENTS.md` that the diff adds or changes is
  * PR text with instruction authority. Reads the diff headers, not
  * `parseUnifiedDiff`: a pure rename or a binary file has no `+++` line.
- * Case-insensitive, so a case-insensitive filesystem cannot slip past.
+ * Decode Git C/octal UTF-8 paths before case comparison. Uppercasing
+ * also catches the APFS long-s alias (AGENTſ.md); this is not a complete
+ * filesystem name-equivalence check.
  */
 export function nestedAgentsMdChanges(diff: string): string[] {
   const targets = new Set<string>();
@@ -525,14 +528,13 @@ export function nestedAgentsMdChanges(diff: string): string[] {
       if (binary !== null) path = binary[1];
     }
     if (path === undefined) continue;
-    let target = path.trim();
-    if (target.startsWith('"') && target.endsWith('"')) target = target.slice(1, -1);
-    if (target === "/dev/null") continue;
+    let target = decodeGitPath(path);
+    if (target === undefined) continue;
     if (target.startsWith("b/") && !line.startsWith("rename to ") && !line.startsWith("copy to ")) {
       target = target.slice(2);
     }
     const slash = target.lastIndexOf("/");
-    if (slash > 0 && target.slice(slash + 1).toLowerCase() === "agents.md") targets.add(target);
+    if (slash > 0 && target.slice(slash + 1).toUpperCase() === "AGENTS.MD") targets.add(target);
   }
   return [...targets].sort();
 }

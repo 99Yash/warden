@@ -197,6 +197,7 @@ export {
 } from "./post-pass.js";
 export {
   CREDENTIAL_RULES,
+  READ_SECRET_FILE_GLOBS,
   SECRET_FILE_GLOBS,
   GIT_METADATA_GLOBS,
   SECRET_FILE_RULE_ID,
@@ -424,7 +425,9 @@ async function runCheck(input: ReviewInput): Promise<CommentSet> {
   // findings apply to every language and must still publish (ADR-0054).
   if (!detPriors.ecosystem.hasPackageJson) {
     return {
-      comments: detPriors.findings.filter((f) => f.source === "input-integrity").map(toComment),
+      comments: detPriors.findings
+        .filter((f) => f.source === "input-integrity" || f.source === "secret-diff")
+        .map(toComment),
       metadata: {
         durationMs: Date.now() - startedAt,
         degradedWorkers: [
@@ -563,3 +566,6 @@ function collapseVulnComments(comments: Comment[], lockfile: Lockfile | undefine
   };
   return [summary];
 }
+
+export { decodeGitPath } from "./diff/added-lines.js";
+export { runSecretDiff } from "./runners/secret-diff.js";

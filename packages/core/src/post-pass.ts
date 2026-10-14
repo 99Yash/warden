@@ -6,6 +6,7 @@ import { pruneDiff } from "./diff/prune.js";
 import { verifyCitations } from "./llm/verify-citations.js";
 import { compareByPriority } from "./priority.js";
 import { runInputIntegrity } from "./runners/input-integrity.js";
+import { runSecretDiff } from "./runners/secret-diff.js";
 import { toComment } from "./runners/to-comment.js";
 import {
   anchorInScope,
@@ -248,9 +249,11 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   // ADR-0054: scan driver-owned diff text outside lane discretion. These
   // tool-authored Tier-1 signals bypass lane scope, noise pruning, and prose
   // screening (messages contain rule facts, never untrusted payload text).
-  const sorted = [...gated, ...runInputIntegrity(input.diff).map(toComment)].sort(
-    compareByPriority,
-  );
+  const sorted = [
+    ...gated,
+    ...runInputIntegrity(input.diff).map(toComment),
+    ...runSecretDiff(input.diff).map(toComment),
+  ].sort(compareByPriority);
 
   // 8. Dedupe by id, keeping the first (highest-priority) occurrence.
   const seen = new Set<string>();

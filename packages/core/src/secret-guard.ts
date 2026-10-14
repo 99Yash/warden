@@ -6,7 +6,7 @@
  *
  * Two rule families:
  *  - secret-file citation: a `file` or `path` string names a secret file
- *    (the same globs the lane materializer denies to `read`);
+ *    (a broader policy than the lane's read deny list);
  *  - known credential formats: fixed shapes with a known prefix. No
  *    entropy rule in v0 — code quotes hashes and ids that look random.
  */
@@ -14,12 +14,46 @@
 /**
  * The lane `read` guard globs, in OpenCode wildcard syntax (`*` matches
  * any run of characters, `/` included; anchored). The materializer emits
- * the deny rules in this order, then the allow rules; the post-pass
- * evaluates them with the same last-match-wins semantics.
+ * the deny rules in this order, then the template allow rules and Git
+ * metadata denies. Publication uses a separate, broader policy.
  */
+export const READ_SECRET_FILE_GLOBS = {
+  deny: [
+    "*.env",
+    "*.env.*",
+    ".npmrc",
+    "*/.npmrc",
+    ".netrc",
+    "*/.netrc",
+    ".dev.vars",
+    "*/.dev.vars",
+    ".dev.vars.*",
+    "*/.dev.vars.*",
+    ".envrc",
+    "*/.envrc",
+    "id_rsa",
+    "*/id_rsa",
+    "id_ed25519",
+    "*/id_ed25519",
+    "id_dsa",
+    "*/id_dsa",
+    "id_ecdsa",
+    "*/id_ecdsa",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    ".aws/credentials",
+    "*/.aws/credentials",
+  ],
+  allow: ["*.env.example", "*.env.sample", "*.env.*.example", "*.env.*.sample"],
+} as const;
+
+/** Publication may drop more findings than read permissions block files. */
+const PUBLICATION_ONLY_GLOBS = ["*.credentials.json", ".ssh/*", "*/.ssh/*"] as const;
 export const SECRET_FILE_GLOBS = {
-  deny: ["*.env", "*.env.*"],
-  allow: ["*.env.example"],
+  deny: [...READ_SECRET_FILE_GLOBS.deny, ...PUBLICATION_ONLY_GLOBS],
+  allow: [...READ_SECRET_FILE_GLOBS.allow],
 } as const;
 
 /** Denied after env-example allows: Git metadata can contain checkout credentials. */
@@ -33,7 +67,7 @@ export interface CredentialRule {
 }
 
 export const CREDENTIAL_RULES: readonly CredentialRule[] = [
-  { id: "pem-private-key", pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/ },
+  { id: "pem-private-key", pattern: /-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----/i },
   { id: "aws-access-key-id", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
   { id: "github-token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/ },
   { id: "anthropic-api-key", pattern: /\bsk-ant-[A-Za-z0-9_-]{20,}/ },
@@ -43,6 +77,24 @@ export const CREDENTIAL_RULES: readonly CredentialRule[] = [
       /\bsk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})/,
   },
   { id: "slack-token", pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
+  { id: "slack-app-token", pattern: /\bxapp-\d-[A-Za-z0-9]+-\d+-[A-Za-z0-9]+/i },
+  {
+    id: "slack-webhook",
+    pattern: /https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9]+\/[A-Za-z0-9]+\/[A-Za-z0-9]+/i,
+  },
+  { id: "gitlab-token", pattern: /\bglpat-[A-Za-z0-9_-]{20,}/ },
+  { id: "huggingface-token", pattern: /\bhf_[A-Za-z0-9]{20,}/ },
+  { id: "stripe-webhook-secret", pattern: /\bwhsec_[A-Za-z0-9]{20,}/ },
+  { id: "url-credentials", pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i },
+  {
+    id: "basic-authorization",
+    pattern: /\bauthorization["']?\s*:\s*["']?basic\s+[A-Za-z0-9+/]{2,}={0,2}/i,
+  },
+  {
+    id: "cloudflare-api-token",
+    pattern:
+      /(?:\b(?:CF_AIG_TOKEN|CLOUDFLARE_API_TOKEN)["']?\s*[:=]\s*["']?|\bcf-aig-authorization["']?\s*:\s*["']?(?:Bearer\s+)?)[A-Za-z0-9_-]{20,}/i,
+  },
   { id: "stripe-live-key", pattern: /\b[rs]k_live_[A-Za-z0-9]{16,}/ },
   { id: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}/ },
   { id: "npm-token", pattern: /\bnpm_[A-Za-z0-9]{36}\b/ },
@@ -72,11 +124,13 @@ function globToRegExp(glob: string): RegExp {
 const SECRET_FILE_RULES = [
   ...SECRET_FILE_GLOBS.deny.map((glob) => ({ re: globToRegExp(glob), deny: true })),
   ...SECRET_FILE_GLOBS.allow.map((glob) => ({ re: globToRegExp(glob), deny: false })),
+  // Template exceptions apply to env files, not private credential directories.
+  ...PUBLICATION_ONLY_GLOBS.map((glob) => ({ re: globToRegExp(glob), deny: true })),
   ...GIT_METADATA_GLOBS.map((glob) => ({ re: globToRegExp(glob), deny: true })),
 ];
 
 /**
- * True iff the lane `read` guard would deny this path (last match wins).
+ * True iff the publication guard denies this path (last match wins).
  * Case-insensitive, unlike the host's matcher: `.ENV` on a
  * case-insensitive filesystem is the same file, and a broader match here
  * only drops more findings.

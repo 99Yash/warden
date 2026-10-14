@@ -111,7 +111,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   // ADR-0054: these signals are published independently of model output,
   // including no-package and all-pruned early returns.
   const integrityComments = detPriors.findings
-    .filter((f) => f.source === "input-integrity")
+    .filter((f) => f.source === "input-integrity" || f.source === "secret-diff")
     .map(toComment);
 
   // No package.json → skip the model, but keep language-independent signals.
@@ -371,11 +371,7 @@ function recordReviewRun(input: {
   // row is the durable identity + a coarse cost/usage summary.
   let inputTokens = 0;
   let outputTokens = 0;
-  for (const block of [
-    input.tokenUsage?.opus,
-    input.tokenUsage?.sonnet,
-    input.tokenUsage?.haiku,
-  ]) {
+  for (const block of [input.tokenUsage?.opus, input.tokenUsage?.sonnet, input.tokenUsage?.haiku]) {
     if (!block) continue;
     inputTokens += block.inputTokens;
     outputTokens += block.outputTokens;

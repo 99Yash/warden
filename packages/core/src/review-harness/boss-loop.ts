@@ -255,6 +255,7 @@ function routeFindingToConcern(finding: ToolFinding | undefined): Concern {
   if (!finding) return "correctness";
   switch (finding.source) {
     case "input-integrity":
+    case "secret-diff":
       return "security";
     case "scalability":
       return "scalability";

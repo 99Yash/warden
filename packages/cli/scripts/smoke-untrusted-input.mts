@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   CREDENTIAL_RULES,
+  READ_SECRET_FILE_GLOBS,
+  GIT_METADATA_GLOBS,
   assertPlainBaseRef,
   SECRET_FILE_RULE_ID,
   isSecretFilePath,
@@ -57,6 +59,15 @@ try {
     "anthropic-api-key": "sk-" + "ant-" + "x".repeat(24),
     "openai-api-key": "sk-" + "proj-" + "y".repeat(24),
     "slack-token": "xox" + "b-" + "1".repeat(12),
+    "slack-app-token": "xapp-" + "1-ABC-123-" + "s".repeat(24),
+    "slack-webhook": "https://hooks.slack.com/" + "services/T123/B456/" + "s".repeat(24),
+    "gitlab-token": "glpat-" + "g".repeat(24),
+    "huggingface-token": "hf_" + "h".repeat(24),
+    "stripe-webhook-secret": "whsec_" + "s".repeat(24),
+    "url-credentials": "postgres://" + "user:password@localhost/db",
+    "basic-authorization":
+      "AUTHORIZATION: basic " + Buffer.from("user:password").toString("base64"),
+    "cloudflare-api-token": "cf-aig-authorization: Bearer " + "c".repeat(40),
     "stripe-live-key": "sk" + "_live_" + "z".repeat(20),
     "google-api-key": "AIza" + "w".repeat(35),
     "npm-token": "npm_" + "n".repeat(36),
@@ -83,6 +94,21 @@ try {
   for (const text of nearMisses) {
     assert(screenFinding({ claim: text }) === undefined, `no match: ${JSON.stringify(text)}`);
   }
+  assert(
+    screenFinding({ claim: "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----" })?.rule ===
+      "pem-private-key",
+    "PGP private key header is blocked",
+  );
+  assert(
+    screenFinding({ claim: "CF_AIG_TOKEN=" + "c".repeat(40) })?.rule === "cloudflare-api-token",
+    "gateway token assignment is blocked",
+  );
+  for (const plain of ["a:b", "a:", ":"])
+    assert(
+      screenFinding({ claim: `AUTHORIZATION: basic ${Buffer.from(plain).toString("base64")}` })
+        ?.rule === "basic-authorization",
+      "short valid Basic credentials are blocked",
+    );
 
   // ---------------------------------------------------------------------------
   // [2] Secret-file paths: the same globs the materializer denies to `read`.
@@ -96,6 +122,9 @@ try {
     ["config/prod.env", true],
     ["src/config.env.ts", true], // over-block, fail closed (#52 comment §2)
     [".env.example", false],
+    [".env.sample", false],
+    [".env.local.example", false],
+    ["packages/api/.env.local.sample", false],
     ["apps/web/.env.example", false],
     ["src/env.ts", false],
     ["docs/environment.md", false],
@@ -106,6 +135,25 @@ try {
     ["/repo/.git/config", true],
     ["nested\\.git\\config", true],
     ["src/git/config.ts", false],
+    [".npmrc", true],
+    ["pkg/.npmrc", true],
+    [".dev.vars", true],
+    ["pkg/.dev.vars.preview", true],
+    [".envrc", true],
+    ["pkg/.envrc", true],
+    ["id_rsa", true],
+    ["keys/id_ed25519", true],
+    ["cert.pem", true],
+    ["cert.key", true],
+    ["cert.p12", true],
+    ["cert.pfx", true],
+    [".aws/credentials", true],
+    [".netrc", true],
+    ["service.credentials.json", true],
+    [".ssh/config", true],
+    [".ssh/.env.sample", true],
+    ["package.json", false],
+    ["src/key.ts", false],
   ];
   for (const [path, expected] of pathCases) {
     assert(isSecretFilePath(path) === expected, `isSecretFilePath(${path}) === ${expected}`);
@@ -128,14 +176,49 @@ try {
   const readRules = (config.agents[DOWN_LANE_SPEC.agentId]?.permissions ?? []).filter(
     (r) => r["action"] === "read" && r["resource"] !== "*",
   );
+  function readDenied(path: string): boolean {
+    let denied = false;
+    for (const rule of readRules) {
+      const pattern = rule["resource"]!.split("*")
+        .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*");
+      if (new RegExp(`^${pattern}$`).test(path)) denied = rule["effect"] === "deny";
+    }
+    return denied;
+  }
+  for (const [path] of pathCases) {
+    assert(
+      !readDenied(path) || isSecretFilePath(path),
+      `publication covers read-denied path ${path}`,
+    );
+  }
+  assert(
+    !readDenied("service.credentials.json") && isSecretFilePath("service.credentials.json"),
+    "publication policy is broader than read deny",
+  );
+  assert(
+    !readDenied(".env.sample") && !readDenied(".env.local.example"),
+    "read permits template examples",
+  );
+  assert(
+    screenFinding({ file: ".env.local.example", claim: samples["gitlab-token"] })?.rule ===
+      "gitlab-token",
+    "template allow never allows a credential value",
+  );
   assert(
     JSON.stringify(readRules) ===
       JSON.stringify([
-        { action: "read", resource: "*.env", effect: "deny" },
-        { action: "read", resource: "*.env.*", effect: "deny" },
-        { action: "read", resource: "*.env.example", effect: "allow" },
-        { action: "read", resource: ".git/*", effect: "deny" },
-        { action: "read", resource: "*/.git/*", effect: "deny" },
+        ...READ_SECRET_FILE_GLOBS.deny.map((resource) => ({
+          action: "read",
+          resource,
+          effect: "deny",
+        })),
+        ...READ_SECRET_FILE_GLOBS.allow.map((resource) => ({
+          action: "read",
+          resource,
+          effect: "allow",
+        })),
+        ...GIT_METADATA_GLOBS.map((resource) => ({ action: "read", resource, effect: "deny" })),
       ]),
     "the materializer emits the shared globs in the same order",
   );
@@ -156,8 +239,8 @@ try {
   const token = "AKIA" + "R".repeat(16);
   const checkoutAuth = `AUTHORIZATION: basic ${Buffer.from("x-access-token:" + "ghs_" + "q".repeat(36)).toString("base64")}`;
   assert(
-    screenFinding({ claim: checkoutAuth }) === undefined,
-    "encoded checkout auth is outside literal credential rules",
+    screenFinding({ claim: checkoutAuth })?.rule === "basic-authorization",
+    "Basic checkout auth is blocked without decoding its value",
   );
   assert(
     screenFinding({ sources: [{ path: ".git/config", snippet: checkoutAuth }] })?.rule ===
@@ -369,6 +452,17 @@ try {
   assert(nestedAgentsMdChanges(pureRename).join() === "pkg/AGENTS.md", "pure rename (no +++ line)");
   assert(nestedAgentsMdChanges(binary).join() === "lib/agents.md", "binary file, lower case");
   assert(nestedAgentsMdChanges(quoted).join() === "s p/AGENTS.md", "quoted path");
+  for (const header of [
+    "+++ b/src/AGENTſ.md",
+    '+++ "b/src/AGENT\\305\\277.md"',
+    'rename to "src/AGENT\\305\\277.md"',
+    'copy to "src/AGENT\\305\\277.md"',
+    'Binary files /dev/null and "b/src/AGENT\\305\\277.md" differ',
+  ])
+    assert(
+      nestedAgentsMdChanges(header).join() === "src/AGENTſ.md",
+      "long-s alias is gated after Git path decoding",
+    );
   assert(
     nestedAgentsMdChanges(root).length === 0,
     "root AGENTS.md is out of scope (project config off)",
@@ -380,6 +474,22 @@ try {
     "the gate reason names each file, sorted",
   );
   assert(laneInstructionFileGate(root) === undefined, "no gate for the root file");
+  const aliasRepo = resolve(TMP, "alias-repo");
+  mkdirSync(resolve(aliasRepo, "src"), { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: aliasRepo });
+  writeFileSync(resolve(aliasRepo, "src/AGENTſ.md"), "alias guidance\n");
+  execFileSync("git", ["add", "."], { cwd: aliasRepo });
+  for (const quotePath of ["true", "false"]) {
+    const actualDiff = execFileSync(
+      "git",
+      ["-c", `core.quotePath=${quotePath}`, "diff", "--cached"],
+      { cwd: aliasRepo, encoding: "utf8" },
+    );
+    assert(
+      nestedAgentsMdChanges(actualDiff).join() === "src/AGENTſ.md",
+      `real Git quotePath=${quotePath} gates the alias`,
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // [5] Base ref and lane message: driver-owned values only.
