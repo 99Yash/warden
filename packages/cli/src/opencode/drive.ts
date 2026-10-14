@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deterministicProcessEnv } from "@warden/env";
@@ -33,6 +34,9 @@ import { formatCommentSet } from "../format.js";
 
 export const OPENCODE_AGENT_ENV = "OPENCODE_CONFIG";
 export const OPENCODE_PROJECT_DISABLE_ENV = "OPENCODE_DISABLE_PROJECT_CONFIG";
+export const OPENCODE_PROJECT_DISABLE_NEW_ENV = "OPENCODE_CONFIG_PROJECT_DISABLE";
+export const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
+export const OPENCODE_DISCOVERY_HOME_ENV = "OPENCODE_TEST_HOME";
 export const OPENCODE_CONTENT_ENV = "OPENCODE_CONFIG_CONTENT";
 export const OPENCODE_PASSWORD_ENV = "OPENCODE_PASSWORD";
 export const DEFAULT_LANE_TIMEOUT_SECS = 900;
@@ -73,6 +77,33 @@ export const DOWN_LANE_MAX_SCOPE_FILES = DOWN_LANE_SPEC.steps - 2;
 const SERVE_KILL_GRACE_MS = 2000;
 /** Rejection reason when the MCP wait stops because the serve child failed to start. */
 const MCP_WAIT_ABORTED = "MCP wait aborted: opencode serve failed to start";
+
+/** Isolate config and home discovery without changing saved provider auth paths. */
+export function createOpencodeIsolation(): {
+  env: Record<string, string>;
+  cleanup: () => void;
+} {
+  const root = mkdtempSync(resolve(tmpdir(), "warden-opencode-"));
+  const cleanup = () => rmSync(root, { recursive: true, force: true });
+  try {
+    const config = resolve(root, "config");
+    const home = resolve(root, "home");
+    mkdirSync(config);
+    mkdirSync(home);
+    return {
+      env: {
+        [OPENCODE_PROJECT_DISABLE_ENV]: "1",
+        [OPENCODE_PROJECT_DISABLE_NEW_ENV]: "1",
+        [OPENCODE_CONFIG_DIR_ENV]: config,
+        [OPENCODE_DISCOVERY_HOME_ENV]: home,
+      },
+      cleanup,
+    };
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
+}
 
 export interface OpencodeCommand {
   /** Binary to spawn (`opencode` on PATH, or a fake in the smoke). */
@@ -859,106 +890,116 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   // `opencode:<password>` (`server-connection.ts`), so both children share
   // it. It never leaves loopback.
   const password = randomPassword();
-  const childEnv: Record<string, string | undefined> = {
-    ...process.env,
-    [OPENCODE_AGENT_ENV]: configPath,
-    [OPENCODE_PROJECT_DISABLE_ENV]: "1",
-    [OPENCODE_CONTENT_ENV]: buildMcpConfigContent({
-      command: resolveWardenMcpCommand(),
-      cwd: opts.repoRoot,
-      ...(process.env["ANTHROPIC_BASE_URL"]
-        ? { anthropicBaseUrl: process.env["ANTHROPIC_BASE_URL"] }
-        : {}),
-    }),
-    [OPENCODE_PASSWORD_ENV]: password,
-    // opencode resolves its location from PWD, not the process cwd. Under
-    // `pnpm --filter` PWD is the package dir, so `run` opened a second,
-    // cold location: the MCP race again, and the wrong directory.
-    PWD: opts.repoRoot,
-  };
-
-  // Warm-server sequence (operator amendment 2026-10-08): the shipped
-  // binary snapshots session tools before slow MCP servers connect, so a
-  // cold `run --standalone` never sees `warden_run_det_priors`. Serve
-  // first, wait for the warden server to connect, settle past the
-  // `mcp.tools.changed` debounces, then run against the warm server.
-  const port = await allocFreePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const serveCommand = buildOpencodeServeCommand({
-    port,
-    ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
-  });
-  const serve = spawn(serveCommand.bin, serveCommand.argv, {
-    cwd: opts.repoRoot,
-    env: childEnv,
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let serveStderr = "";
-  serve.stderr?.on("data", (d: Buffer) => {
-    serveStderr += d.toString();
-    if (serveStderr.length > STDERR_TAIL_BYTES) serveStderr = serveStderr.slice(-STDERR_TAIL_BYTES);
-  });
-  // A missing `opencode` binary throws an unhandled 'error' event without
-  // this listener — and the poll below would wait out the full MCP timeout
-  // on a serve that never started. Reject at once with a lane reason.
-  const serveSpawnFailed = new Promise<never>((_resolve, reject) => {
-    serve.once("error", (err) => {
-      reject(
-        new Error(`opencode not runnable: ${err instanceof Error ? err.message : String(err)}`),
-      );
-    });
-  });
-  // A leaked `opencode serve` is a bug: the child dies on every path below.
-  // The abort stops a still-pending MCP wait at once (a spawn error would
-  // otherwise leave its loop and timers alive for the full MCP timeout).
-  const mcpAbort = new AbortController();
+  // Global config and home skill discovery are separate sources in
+  // OpenCode v2.0.25. Redirect both, but retain provider credentials and
+  // the normal data path (saved auth) for the model. Remove after serve
+  // stops, including warmup, spawn, and lane failure paths.
+  const isolation = createOpencodeIsolation();
   try {
+    const childEnv: Record<string, string | undefined> = {
+      ...process.env,
+      ...isolation.env,
+      [OPENCODE_AGENT_ENV]: configPath,
+      [OPENCODE_CONTENT_ENV]: buildMcpConfigContent({
+        command: resolveWardenMcpCommand(),
+        cwd: opts.repoRoot,
+        ...(process.env["ANTHROPIC_BASE_URL"]
+          ? { anthropicBaseUrl: process.env["ANTHROPIC_BASE_URL"] }
+          : {}),
+      }),
+      [OPENCODE_PASSWORD_ENV]: password,
+      // opencode resolves its location from PWD, not the process cwd. Under
+      // `pnpm --filter` PWD is the package dir, so `run` opened a second,
+      // cold location: the MCP race again, and the wrong directory.
+      PWD: opts.repoRoot,
+    };
+
+    // Warm-server sequence (operator amendment 2026-10-08): the shipped
+    // binary snapshots session tools before slow MCP servers connect, so a
+    // cold `run --standalone` never sees `warden_run_det_priors`. Serve
+    // first, wait for the warden server to connect, settle past the
+    // `mcp.tools.changed` debounces, then run against the warm server.
+    const port = await allocFreePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const serveCommand = buildOpencodeServeCommand({
+      port,
+      ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
+    });
+    const serve = spawn(serveCommand.bin, serveCommand.argv, {
+      cwd: opts.repoRoot,
+      env: childEnv,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let serveStderr = "";
+    serve.stderr?.on("data", (d: Buffer) => {
+      serveStderr += d.toString();
+      if (serveStderr.length > STDERR_TAIL_BYTES)
+        serveStderr = serveStderr.slice(-STDERR_TAIL_BYTES);
+    });
+    // A missing `opencode` binary throws an unhandled 'error' event without
+    // this listener — and the poll below would wait out the full MCP timeout
+    // on a serve that never started. Reject at once with a lane reason.
+    const serveSpawnFailed = new Promise<never>((_resolve, reject) => {
+      serve.once("error", (err) => {
+        reject(
+          new Error(`opencode not runnable: ${err instanceof Error ? err.message : String(err)}`),
+        );
+      });
+    });
+    // A leaked `opencode serve` is a bug: the child dies on every path below.
+    // The abort stops a still-pending MCP wait at once (a spawn error would
+    // otherwise leave its loop and timers alive for the full MCP timeout).
+    const mcpAbort = new AbortController();
     try {
-      await Promise.race([
-        waitForWardenMcp({
+      try {
+        await Promise.race([
+          waitForWardenMcp({
+            baseUrl,
+            password,
+            directory: opts.repoRoot,
+            timeoutMs: mcpTimeoutMs,
+            signal: mcpAbort.signal,
+          }),
+          serveSpawnFailed,
+        ]);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return await buildFailed(
+          `mcp not ready: ${detail}${tailSuffix(serveStderr)}`,
+          opts,
+          resolved,
+          scope,
+        );
+      }
+      await sleep(settleMs);
+
+      const command = buildOpencodeCommand({
+        serverUrl: baseUrl,
+        model,
+        message: buildLaneMessage(baseRef),
+        ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
+      });
+      const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
+      // The serve child is still alive here (killed in `finally` below),
+      // so the session total can be read before it goes away.
+      let usage: SessionUsage | undefined;
+      const sessionId = parseLaneEvents(processResult.stdout).sessionId;
+      if (sessionId !== undefined) {
+        usage = await fetchSessionUsage({
           baseUrl,
           password,
           directory: opts.repoRoot,
-          timeoutMs: mcpTimeoutMs,
-          signal: mcpAbort.signal,
-        }),
-        serveSpawnFailed,
-      ]);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      return await buildFailed(
-        `mcp not ready: ${detail}${tailSuffix(serveStderr)}`,
-        opts,
-        resolved,
-        scope,
-      );
+          sessionId,
+          timeoutMs: Math.min(mcpTimeoutMs, 10000),
+        });
+      }
+      return await buildVerdict(processResult, opts, resolved, scope, usage);
+    } finally {
+      mcpAbort.abort();
+      await killServe(serve);
     }
-    await sleep(settleMs);
-
-    const command = buildOpencodeCommand({
-      serverUrl: baseUrl,
-      model,
-      message: buildLaneMessage(baseRef),
-      ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
-    });
-    const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
-    // The serve child is still alive here (killed in `finally` below),
-    // so the session total can be read before it goes away.
-    let usage: SessionUsage | undefined;
-    const sessionId = parseLaneEvents(processResult.stdout).sessionId;
-    if (sessionId !== undefined) {
-      usage = await fetchSessionUsage({
-        baseUrl,
-        password,
-        directory: opts.repoRoot,
-        sessionId,
-        timeoutMs: Math.min(mcpTimeoutMs, 10000),
-      });
-    }
-    return await buildVerdict(processResult, opts, resolved, scope, usage);
   } finally {
-    mcpAbort.abort();
-    await killServe(serve);
+    isolation.cleanup();
   }
 }
 

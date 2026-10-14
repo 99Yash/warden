@@ -19,6 +19,7 @@ import {
   SECRET_FILE_RULE_ID,
   isSecretFilePath,
   isNotClean,
+  parseUnifiedDiff,
   resolveDiff,
   runPostPass,
   screenFinding,
@@ -461,6 +462,66 @@ try {
     tree.diff.includes("+export const a = 2;") && !tree.degraded,
     "Git option delimiter preserves tree-base diffs",
   );
+
+  // Operator Git settings must not change the paths consumed by the gates.
+  mkdirSync(resolve(TMP, "b"));
+  writeFileSync(resolve(TMP, "AGENTS.md"), "root guidance\n");
+  writeFileSync(resolve(TMP, "b/AGENTS.md"), "nested guidance\n");
+  execFileSync("git", ["add", "AGENTS.md", "b/AGENTS.md"], { cwd: TMP });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=smoke",
+      "-c",
+      "user.email=smoke@example.invalid",
+      "commit",
+      "-qm",
+      "guidance",
+    ],
+    { cwd: TMP },
+  );
+  const externalMarker = resolve(TMP, "external-diff-ran");
+  const externalDiff = resolve(TMP, "external-diff");
+  writeFileSync(externalDiff, `#!/bin/sh\ntouch '${externalMarker}'\nprintf 'external diff\\n'\n`, {
+    mode: 0o755,
+  });
+  for (const config of ["diff.noprefix", "diff.mnemonicPrefix"]) {
+    execFileSync("git", ["config", config, "true"], { cwd: TMP });
+    const pinned = await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: "HEAD~1" });
+    assert(
+      nestedAgentsMdChanges(pinned.diff).join() === "b/AGENTS.md",
+      `${config}: gate detects the nested b/AGENTS.md and excludes the root file`,
+    );
+    assert(
+      parseUnifiedDiff(pinned.diff)
+        .map((file) => file.path)
+        .sort()
+        .join() === "AGENTS.md,b/AGENTS.md",
+      `${config}: parser receives canonical paths`,
+    );
+    const gated = await driveOpencodeLane({
+      repoRoot: TMP,
+      baseRef: "HEAD~1",
+      opencodeBin: resolve(TMP, "must-not-start"),
+    });
+    assert(
+      !gated.runSpawned && gated.lanes[0]?.reason?.startsWith("untrusted instruction file:"),
+      `${config}: driver blocks before OpenCode starts`,
+    );
+    execFileSync("git", ["config", "--unset", config], { cwd: TMP });
+  }
+  execFileSync("git", ["config", "color.ui", "always"], { cwd: TMP });
+  const noColor = await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: "HEAD~1" });
+  assert(!noColor.diff.includes("\u001b"), "diff has no color codes with color.ui=always");
+  execFileSync("git", ["config", "diff.external", externalDiff], { cwd: TMP });
+  const noExternal = await resolveDiff({ repoRoot: TMP, mode: "review", baseRef: "HEAD~1" });
+  assert(
+    noExternal.diff.includes("+++ b/b/AGENTS.md"),
+    "external diff config cannot replace canonical diff headers",
+  );
+  assert(!existsSync(externalMarker), "operator external diff command never runs");
+  execFileSync("git", ["config", "--unset", "diff.external"], { cwd: TMP });
 
   // Real Git modes + real filesystem links: include aliases and pure renames.
   process.stdout.write("\n[6] unsafe symlink gate\n");

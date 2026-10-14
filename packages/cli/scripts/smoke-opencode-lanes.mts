@@ -7,7 +7,15 @@
  * Usage: pnpm --filter @warden/cli smoke:opencode-lanes
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -887,7 +895,7 @@ try {
   writeFileSync(
     fakePath,
     `#!/usr/bin/env node
-import { existsSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 const argv = process.argv.slice(2);
 const fail = (msg) => { process.stderr.write("fake opencode: " + msg + "\\n"); process.exit(3); };
@@ -898,6 +906,12 @@ const has = (flag, value) => {
 const checkSharedEnv = () => {
   if (!existsSync(process.env.OPENCODE_CONFIG ?? "")) fail("OPENCODE_CONFIG does not exist");
   if (process.env.OPENCODE_DISABLE_PROJECT_CONFIG !== "1") fail("project config not disabled");
+  if (process.env.OPENCODE_CONFIG_PROJECT_DISABLE !== "1") fail("new project config flag not disabled");
+  const configDir = process.env.OPENCODE_CONFIG_DIR;
+  const home = process.env.OPENCODE_TEST_HOME;
+  if (!configDir || !existsSync(configDir) || readdirSync(configDir).length !== 0) fail("config dir must be empty");
+  if (!home || !existsSync(home) || readdirSync(home).length !== 0) fail("discovery home must be empty");
+  if (process.env.WARDEN_SMOKE_CONFIG_PATH) writeFileSync(process.env.WARDEN_SMOKE_CONFIG_PATH, configDir);
   let content;
   try {
     content = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? "");
@@ -1042,6 +1056,11 @@ if (mode === "runfail") {
             PATH: `${FAKE_BIN}:${process.env["PATH"] ?? ""}`,
             WARDEN_SMOKE_FINDING: JSON.stringify(inScopeFinding),
             WARDEN_SMOKE_SERVE_PORT: resolve(TMP_ROOT, "fake-serve-port"),
+            WARDEN_SMOKE_CONFIG_PATH: resolve(TMP_ROOT, "fake-config-path"),
+            OPENCODE_CONFIG_PROJECT_DISABLE: "0",
+            OPENCODE_DISABLE_PROJECT_CONFIG: "0",
+            OPENCODE_CONFIG_DIR: REPO,
+            OPENCODE_TEST_HOME: REPO,
             ...extraEnv,
           },
           encoding: "utf8",
@@ -1083,6 +1102,8 @@ if (mode === "runfail") {
       reachable = false;
     }
     assert(!reachable, `${label}: no serve process left (port ${port} closed)`);
+    const configPath = readFileSync(resolve(TMP_ROOT, "fake-config-path"), "utf8");
+    assert(!existsSync(resolve(configPath, "..")), `${label}: temporary config and home removed`);
   };
 
   const parseOut = (out: string): CommentSet | undefined => {

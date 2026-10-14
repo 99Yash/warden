@@ -143,8 +143,9 @@ The driver never uses `run --standalone`. Instead:
 
 1. Spawn `opencode serve --hostname 127.0.0.1 --port <free port>` (flags
    verified against `opencode serve --help`: `--hostname`, `--port`) with
-   the same env as before (`OPENCODE_CONFIG`,
-   `OPENCODE_DISABLE_PROJECT_CONFIG=1`, `OPENCODE_CONFIG_CONTENT`) plus a
+   the driver-owned config env (`OPENCODE_CONFIG`, both project-disable
+   flags set to `1`, the isolated config and discovery-home paths,
+   `OPENCODE_CONFIG_CONTENT`) plus a
    random `OPENCODE_PASSWORD`. The port comes from the OS (listen on port
    0, read the port, close). The serve child reads the env password for
    its API auth (`server-process.ts`: `Env.password`, else a random
@@ -161,7 +162,7 @@ The driver never uses `run --standalone`. Instead:
    `packages/server/src/location.ts`, `Mcp.Server` in
    `packages/schema/src/mcp.ts`) — the driver validates it as untrusted
    JSON. Wait until the **warden** server shows `connected`; other servers
-   (e.g. the user's global config) are ignored. A `failed` warden, or no
+   are ignored. A `failed` warden, or no
    `connected` within 30 s (default, `--mcp-timeout` overrides), fails the
    lane with a reason naming the MCP status — `run` is never spawned.
 3. Wait ~1 s more (`MCP_SETTLE_MS`) for the `mcp.tools.changed`
@@ -186,13 +187,27 @@ model reviews the wrong directory. The operator found this on 2026-10-08:
 the same tracer passed by hand from the repo root and failed through
 `pnpm warden`. `smoke:opencode-lanes` asserts that `PWD` matches the cwd.
 
-## Project config lockout
+## Project and global config lockout
 
 The driver spawns `opencode serve` with
 `OPENCODE_CONFIG=<absolute opencode.json>` and
-`OPENCODE_DISABLE_PROJECT_CONFIG=1`: a private server that inherits the
-driver's env, and the reviewed tree cannot re-grant permissions, add
-plugins, or override the agent. Residual: project `AGENTS.md` intent
+both `OPENCODE_DISABLE_PROJECT_CONFIG=1` and
+`OPENCODE_CONFIG_PROJECT_DISABLE=1`. These override inherited values;
+the newer name wins in the binary. The reviewed tree cannot re-grant
+permissions, add plugins, or override the agent.
+
+Both children also get `OPENCODE_CONFIG_DIR` and `OPENCODE_TEST_HOME`
+pointing to separate empty directories under a private temporary root.
+The config directory excludes global config, plugins, and `AGENTS.md`.
+The discovery-home override excludes home skills, including
+`~/.claude/skills`; the config directory alone does not exclude them.
+Provider credentials and the normal data path for saved auth remain
+available. The driver removes the temporary root after the server stops,
+including failure paths. `smoke:opencode-config-isolation` checks these
+paths with the installed binary and a loopback model stub. This is config
+discovery isolation; files and the session store remain accessible.
+
+Residual: project `AGENTS.md` intent
 context is also disabled on the driven path (there is no per-agent
 opt-out), so the lane reviews without the repo's contributor guidance —
 acceptable for a correctness lane, which needs the code, not the customs.

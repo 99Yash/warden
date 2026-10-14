@@ -146,7 +146,17 @@ async function runGitDiff(
   repoRoot: string,
   args: string[],
 ): Promise<{ diff: string; degraded?: DegradedEntry }> {
-  const result = await runGit(repoRoot, ["diff", "--end-of-options", ...args]);
+  // The parsers and preflight gates consume canonical, uncolored Git
+  // headers. Operator config must not change prefixes or run diff code.
+  const result = await runGit(repoRoot, [
+    "diff",
+    "--no-ext-diff",
+    "--no-color",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--end-of-options",
+    ...args,
+  ]);
   if (!result.ok) {
     const stderrSummary = result.stderr.trim().split("\n").slice(0, 2).join(" ").slice(0, 200);
     return {
