@@ -287,6 +287,14 @@ export interface LaneProcessResult {
 export interface ToolCallCount {
   name: string;
   completed: number;
+  /**
+   * Sum of `state.time.end - state.time.start` over the completed parts
+   * that carry both (the v2.0.25 binary sets them on each completed
+   * `tool_use` part; the start is when the model begins the tool input,
+   * so the sum includes argument generation). Telemetry only; absent
+   * when no part has a time.
+   */
+  durationMs?: number;
 }
 
 export interface SessionUsage {
@@ -349,6 +357,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
   let parseError: string | undefined;
   const completedByTool = new Map<string, number>();
   const seenByTool = new Map<string, number>();
+  const durationByTool = new Map<string, number>();
   const errors: string[] = [];
   let sessionId: string | undefined;
   for (const line of stdout.split("\n")) {
@@ -394,19 +403,29 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       const name = part?.["tool"] ?? part?.["name"];
       if (typeof name !== "string" || name === "") continue;
       seenByTool.set(name, (seenByTool.get(name) ?? 0) + 1);
-      const status = (part?.["state"] as Record<string, unknown> | undefined)?.["status"];
-      if (status === "completed") {
+      const state = part?.["state"] as Record<string, unknown> | undefined;
+      if (state?.["status"] === "completed") {
         completedByTool.set(name, (completedByTool.get(name) ?? 0) + 1);
+        const time = state["time"] as Record<string, unknown> | undefined;
+        const start = time?.["start"];
+        const end = time?.["end"];
+        if (typeof start === "number" && typeof end === "number" && end >= start) {
+          durationByTool.set(name, (durationByTool.get(name) ?? 0) + (end - start));
+        }
       }
     } else if (record["type"] === "error") {
       const message = (record["error"] as Record<string, unknown> | undefined)?.["message"];
       errors.push(typeof message === "string" && message !== "" ? message : "unknown error event");
     }
   }
-  const toolCalls: ToolCallCount[] = [...seenByTool.keys()].map((name) => ({
-    name,
-    completed: completedByTool.get(name) ?? 0,
-  }));
+  const toolCalls: ToolCallCount[] = [...seenByTool.keys()].map((name) => {
+    const durationMs = durationByTool.get(name);
+    return {
+      name,
+      completed: completedByTool.get(name) ?? 0,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
+  });
   toolCalls.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   if (parseError === undefined) {
     for (const id of textsById.keys()) {
@@ -802,6 +821,71 @@ export interface DriveOptions {
   mcpSettleMs?: number;
   /** Override for the smoke's fake executable. */
   opencodeBin?: string;
+  /** Write the phase timings JSON here (CI step timings, #48). */
+  timingsOut?: string;
+}
+
+/** Driver phases, in run order. A phase that did not run has no entry. */
+export type DrivePhase =
+  | "resolveDiff"
+  | "gates"
+  | "mcpReady"
+  | "settle"
+  | "lane"
+  | "usage"
+  | "postPass";
+
+export interface DriveTimings {
+  /** Wall-clock milliseconds per phase that ran. */
+  phases: Partial<Record<DrivePhase, number>>;
+  /**
+   * Per-tool time inside the lane, from the event stream. Phase 1 is the
+   * `warden_run_det_priors` entry (its first call runs the detectors).
+   */
+  tools: { name: string; completed: number; durationMs?: number }[];
+  /** From the driver start to the end of the post-pass; excludes the serve shutdown. */
+  totalMs: number;
+}
+
+/** Wall-clock phase timer for one driver run. Telemetry only. */
+class PhaseTimer {
+  private readonly start = performance.now();
+  private readonly phases: Partial<Record<DrivePhase, number>> = {};
+
+  /** Records the phase even when `fn` throws. */
+  async time<T>(phase: DrivePhase, fn: () => Promise<T>): Promise<T> {
+    const t0 = performance.now();
+    try {
+      return await fn();
+    } finally {
+      this.phases[phase] = Math.round(performance.now() - t0);
+    }
+  }
+
+  timeSync<T>(phase: DrivePhase, fn: () => T): T {
+    const t0 = performance.now();
+    try {
+      return fn();
+    } finally {
+      this.phases[phase] = Math.round(performance.now() - t0);
+    }
+  }
+
+  finish(toolCalls: ToolCallCount[]): DriveTimings {
+    return {
+      phases: { ...this.phases },
+      tools: toolCalls.map((t) => ({ ...t })),
+      totalMs: Math.round(performance.now() - this.start),
+    };
+  }
+}
+
+function writeTimingsOut(
+  path: string,
+  repoRoot: string,
+  record: { timings: DriveTimings; runSpawned: boolean; model: string; usage?: SessionUsage },
+): void {
+  writeFileSync(resolve(repoRoot, path), JSON.stringify({ version: 1, ...record }, null, 2) + "\n");
 }
 
 export interface DriveLaneResult {
@@ -817,6 +901,8 @@ export interface DriveLaneResult {
   runSpawned: boolean;
   /** The requested model: `opts.model`, else `DOWN_LANE_SPEC.defaultModel`. */
   model: string;
+  /** Phase timings. Optional so other lane drivers (the eval Claude Code lane) can omit them. */
+  timings?: DriveTimings;
 }
 
 /**
@@ -839,58 +925,41 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   // stdout and setting `process.exitCode`. It still writes `--lanes-out`
   // (part of the driver contract). The eval runner calls this directly so
   // the scored output is the same published `CommentSet` a user gets.
-  const resolved = await resolveDiff({
-    repoRoot: opts.repoRoot,
-    mode: "review",
-    baseRef: opts.baseRef,
-  });
+  const timer = new PhaseTimer();
+  const resolved = await timer.time("resolveDiff", () =>
+    resolveDiff({
+      repoRoot: opts.repoRoot,
+      mode: "review",
+      baseRef: opts.baseRef,
+    }),
+  );
   const scope = deriveLaneScope(resolved.diff);
   const timeoutSecs = opts.timeoutSecs ?? DEFAULT_LANE_TIMEOUT_SECS;
 
-  // Empty scope: do not spawn OpenCode — the lane is failed so the
-  // existing fail-closed entries fire (plus the post-pass diff-source
-  // entry on the empty diff).
-  if (scope.length === 0) {
+  // A preflight gate fails the lane before spawn, at a known $0.
+  const gateReason = timer.timeSync("gates", () => {
+    // Empty scope: the lane is failed so the existing fail-closed entries
+    // fire (plus the post-pass diff-source entry on the empty diff).
+    if (scope.length === 0) return "empty review target";
+    // Scope over the ceiling: the step cap cannot fund one read per
+    // changed file, so a run would only spend its timeout. The reason
+    // names the numbers.
+    // A nested AGENTS.md the diff changes would reach the lane as
+    // instructions.
+    return (
+      laneScopeOverCeiling(scope) ??
+      laneInstructionFileGate(resolved.diff) ??
+      laneSymlinkGate(resolved.diff, opts.repoRoot)
+    );
+  });
+  if (gateReason !== undefined) {
     const lanes: LaneOutput[] = [
-      {
-        lane: DOWN_LANE_SPEC.lane,
-        status: "failed",
-        reason: "empty review target",
-        scope,
-        findings: [],
-      },
+      { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: gateReason, scope, findings: [] },
     ];
     writeLanesOut(opts, lanes);
     return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
       runSpawned: false,
-    });
-  }
-
-  // Scope over the ceiling: do not spawn OpenCode — the step cap cannot
-  // fund one read per changed file, so a run would only spend its timeout.
-  // The lane is failed with the numbers, at a known $0.
-  const overCeiling = laneScopeOverCeiling(scope);
-  if (overCeiling !== undefined) {
-    const lanes: LaneOutput[] = [
-      { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: overCeiling, scope, findings: [] },
-    ];
-    writeLanesOut(opts, lanes);
-    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
-      runSpawned: false,
-    });
-  }
-
-  // A nested AGENTS.md the diff changes would reach the lane as
-  // instructions: fail the lane before spawn, at a known $0.
-  const instructionFile =
-    laneInstructionFileGate(resolved.diff) ?? laneSymlinkGate(resolved.diff, opts.repoRoot);
-  if (instructionFile !== undefined) {
-    const lanes: LaneOutput[] = [
-      { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: instructionFile, scope, findings: [] },
-    ];
-    writeLanesOut(opts, lanes);
-    return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
-      runSpawned: false,
+      timer,
     });
   }
 
@@ -967,16 +1036,19 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
     const mcpAbort = new AbortController();
     try {
       try {
-        await Promise.race([
-          waitForWardenMcp({
-            baseUrl,
-            password,
-            directory: opts.repoRoot,
-            timeoutMs: mcpTimeoutMs,
-            signal: mcpAbort.signal,
-          }),
-          serveSpawnFailed,
-        ]);
+        // Includes the serve boot: the poll starts before serve listens.
+        await timer.time("mcpReady", () =>
+          Promise.race([
+            waitForWardenMcp({
+              baseUrl,
+              password,
+              directory: opts.repoRoot,
+              timeoutMs: mcpTimeoutMs,
+              signal: mcpAbort.signal,
+            }),
+            serveSpawnFailed,
+          ]),
+        );
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         return await buildFailed(
@@ -984,9 +1056,10 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
           opts,
           resolved,
           scope,
+          timer,
         );
       }
-      await sleep(settleMs);
+      await timer.time("settle", () => sleep(settleMs));
 
       const command = buildOpencodeCommand({
         serverUrl: baseUrl,
@@ -994,21 +1067,25 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
         message: buildLaneMessage(baseRef),
         ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
       });
-      const processResult = await spawnLane(command, opts.repoRoot, childEnv, timeoutSecs);
+      const processResult = await timer.time("lane", () =>
+        spawnLane(command, opts.repoRoot, childEnv, timeoutSecs),
+      );
       // The serve child is still alive here (killed in `finally` below),
       // so the session total can be read before it goes away.
       let usage: SessionUsage | undefined;
       const sessionId = parseLaneEvents(processResult.stdout).sessionId;
       if (sessionId !== undefined) {
-        usage = await fetchSessionUsage({
-          baseUrl,
-          password,
-          directory: opts.repoRoot,
-          sessionId,
-          timeoutMs: Math.min(mcpTimeoutMs, 10000),
-        });
+        usage = await timer.time("usage", () =>
+          fetchSessionUsage({
+            baseUrl,
+            password,
+            directory: opts.repoRoot,
+            sessionId,
+            timeoutMs: Math.min(mcpTimeoutMs, 10000),
+          }),
+        );
       }
-      return await buildVerdict(processResult, opts, resolved, scope, usage);
+      return await buildVerdict(processResult, opts, resolved, scope, timer, usage);
     } finally {
       mcpAbort.abort();
       await killServe(serve);
@@ -1075,24 +1152,41 @@ async function buildLaneResult(
   resolved: ResolvedDiff,
   lanes: LaneOutput[],
   extraDegraded: DegradedEntry[],
-  facts: { runSpawned: boolean; usage?: SessionUsage },
+  facts: {
+    runSpawned: boolean;
+    timer: PhaseTimer;
+    usage?: SessionUsage;
+    toolCalls?: ToolCallCount[];
+  },
 ): Promise<DriveLaneResult> {
   const verbose = opts.verbose === true;
-  const result = await runPostPass({
-    repoRoot: opts.repoRoot,
-    diff: resolved.diff,
-    lanes,
-    config: {
-      verbose,
-      ...(opts.volumeCap !== undefined ? { volumeCap: opts.volumeCap } : {}),
-    },
-    ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
-  });
+  const result = await facts.timer.time("postPass", () =>
+    runPostPass({
+      repoRoot: opts.repoRoot,
+      diff: resolved.diff,
+      lanes,
+      config: {
+        verbose,
+        ...(opts.volumeCap !== undefined ? { volumeCap: opts.volumeCap } : {}),
+      },
+      ...(extraDegraded.length > 0 ? { extraDegraded } : {}),
+    }),
+  );
+  const timings = facts.timer.finish(facts.toolCalls ?? []);
+  if (opts.timingsOut !== undefined) {
+    writeTimingsOut(opts.timingsOut, opts.repoRoot, {
+      timings,
+      runSpawned: facts.runSpawned,
+      model: requestedModel(opts),
+      ...(facts.usage !== undefined ? { usage: facts.usage } : {}),
+    });
+  }
   return {
     result,
     lanes,
     runSpawned: facts.runSpawned,
     model: requestedModel(opts),
+    timings,
     ...(facts.usage !== undefined ? { usage: facts.usage } : {}),
   };
 }
@@ -1103,6 +1197,7 @@ async function buildFailed(
   opts: DriveOptions,
   resolved: ResolvedDiff,
   scope: string[],
+  timer: PhaseTimer,
 ): Promise<DriveLaneResult> {
   const screenedReason = screenLaneReason(reason);
   const lanes: LaneOutput[] = [
@@ -1114,7 +1209,7 @@ async function buildFailed(
     resolved,
     lanes,
     [...(resolved.degraded ?? []), laneTraceEntry("failed", screenedReason, "")],
-    { runSpawned: false },
+    { runSpawned: false, timer },
   );
 }
 
@@ -1123,6 +1218,7 @@ async function buildVerdict(
   opts: DriveOptions,
   resolved: ResolvedDiff,
   scope: string[],
+  timer: PhaseTimer,
   usage?: SessionUsage,
 ): Promise<DriveLaneResult> {
   const verdict = evaluateLane(parseLaneEvents(processResult.stdout), processResult);
@@ -1145,7 +1241,12 @@ async function buildVerdict(
       ...(resolved.degraded ?? []),
       laneTraceEntry(verdict.status, verdict.reason, traceCounts, usage),
     ],
-    { runSpawned: true, ...(usage !== undefined ? { usage } : {}) },
+    {
+      runSpawned: true,
+      timer,
+      toolCalls: verdict.toolCalls,
+      ...(usage !== undefined ? { usage } : {}),
+    },
   );
 }
 

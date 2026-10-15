@@ -404,6 +404,37 @@ try {
     okVerdict.toolCalls.some((t) => t.name === "warden_run_det_priors" && t.completed === 1),
     "tool-call counts record completed det-priors calls",
   );
+  // The v2.0.25 binary puts `time.start`/`time.end` on the completed
+  // part's `state`; the parser sums them per tool (CI step timings, #48).
+  const timedTool = (name: string, start: number, end: number): string =>
+    JSON.stringify({
+      type: "tool_use",
+      timestamp: 1,
+      sessionID: "s",
+      part: {
+        type: "tool",
+        id: `t-${start}`,
+        tool: name,
+        messageID: "m-time",
+        state: { status: "completed", time: { start, end } },
+      },
+    });
+  const timedEvents = parseLaneEvents(
+    [
+      stepEvent("m-time"),
+      timedTool("warden_run_det_priors", 1000, 4500),
+      timedTool("warden_run_det_priors", 5000, 5200),
+      timedTool("read", 6000, 6010),
+      toolEvent("grep", "completed", "m-time"),
+    ].join("\n"),
+  );
+  const timedTools = new Map(timedEvents.toolCalls.map((t) => [t.name, t]));
+  assert(
+    timedTools.get("warden_run_det_priors")?.durationMs === 3700 &&
+      timedTools.get("read")?.durationMs === 10 &&
+      timedTools.get("grep")?.durationMs === undefined,
+    "parser sums state.time per tool and omits a duration for parts without one",
+  );
 
   // Two blocks in the final message fail: the submission must end with
   // exactly one fenced block, so a quoted example can never win over (or
@@ -1201,13 +1232,35 @@ if (mode === "runfail") {
   process.env.WARDEN_SMOKE_SERVE_PORT = resolve(TMP_ROOT, "fake-serve-port-core");
   delete process.env.WARDEN_SMOKE_MODE;
   delete process.env.WARDEN_SMOKE_SESSION_MODE;
+  const timingsPath = resolve(TMP_ROOT, "timings.json");
   const driven = await driveOpencodeLane({
     repoRoot: REPO,
     baseRef: "HEAD~1",
     opencodeBin: fakePath,
+    timingsOut: timingsPath,
   });
   delete process.env.WARDEN_SMOKE_FINDING;
   delete process.env.WARDEN_SMOKE_SERVE_PORT;
+  const timingsFile = JSON.parse(readFileSync(timingsPath, "utf8")) as {
+    version: number;
+    runSpawned: boolean;
+    timings: { phases: Record<string, number>; tools: { name: string }[]; totalMs: number };
+    usage?: { costUsd: number };
+  };
+  const spawnedPhases = ["resolveDiff", "gates", "mcpReady", "settle", "lane", "usage", "postPass"];
+  assert(
+    timingsFile.version === 1 &&
+      timingsFile.runSpawned === true &&
+      timingsFile.usage?.costUsd === 0.0123 &&
+      spawnedPhases.every((p) => typeof timingsFile.timings.phases[p] === "number") &&
+      timingsFile.timings.tools.some((t) => t.name === "warden_run_det_priors") &&
+      timingsFile.timings.totalMs >= timingsFile.timings.phases["lane"]!,
+    "--timings-out records every phase of a spawned run, the tool list, and the session cost",
+  );
+  assert(
+    JSON.stringify(driven.timings) === JSON.stringify(timingsFile.timings),
+    "the returning core carries the same timings it writes",
+  );
   // Key order differs across the CLI JSON round-trip, so canonicalize
   // (sorted keys) before comparing.
   const canonical = (value: unknown): unknown => {
@@ -1462,6 +1515,15 @@ if (mode === "runfail") {
     driven.model === DOWN_LANE_SPEC.defaultModel &&
       warmupFailed.model === DOWN_LANE_SPEC.defaultModel,
     "the returning core reports the resolved requested model (the driver default) on every path",
+  );
+  const warmupPhases = warmupFailed.timings?.phases;
+  assert(
+    warmupPhases !== undefined &&
+      typeof warmupPhases.mcpReady === "number" &&
+      typeof warmupPhases.postPass === "number" &&
+      warmupPhases.lane === undefined &&
+      warmupPhases.settle === undefined,
+    "MCP warmup failure times the MCP wait and the post-pass, with no lane phase",
   );
   assert(
     !isOpencodeCostMeasured(true, undefined),
