@@ -1,0 +1,173 @@
+# Tracer for #48: run `warden opencode-review` on a same-repo PR and record
+# the time of each step.
+#
+# - The result goes to the job summary and an artifact. Nothing is posted to
+#   the PR yet, and the job passes on every review verdict.
+# - Opt in per PR with the `warden-review` label: each run spends model credit.
+# - Secrets: ANTHROPIC_API_KEY (or the Cloudflare AI Gateway token) and,
+#   optionally, ANTHROPIC_BASE_URL. Only the review step receives them.
+# - Variable: WARDEN_LANE_MODEL overrides the lane model (optional).
+#
+# ADR-0054 §Ripple (#48): same-repo PRs only, never `pull_request_target`, and
+# `persist-credentials: false` so no token sits in `.git/config`.
+
+name: warden review (tracer)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warden-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'warden-review') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'warden-review')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      # Pinned: OpenCode updates itself and the driver depends on binary
+      # behavior (.lessons/opencode-binary-differs-from-source.md).
+      OPENCODE_VERSION: 2.0.25
+    steps:
+      - name: Start the clock
+        run: echo "start $(date +%s%3N)" >> "$RUNNER_TEMP/marks"
+
+      - name: Check out the PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # tsc and the detectors read the working tree, so check out the head,
+          # not the merge commit. Merge-base resolution needs the full history.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: |
+          echo "toolchain $(date +%s%3N)" >> "$RUNNER_TEMP/marks"
+          pnpm install --frozen-lockfile
+          echo "dependencies $(date +%s%3N)" >> "$RUNNER_TEMP/marks"
+
+      - name: Install OpenCode
+        run: |
+          npm install --global "@opencode/cli@$OPENCODE_VERSION"
+          installed="$(opencode --version)"
+          if [ "$installed" != "opencode v$OPENCODE_VERSION" ]; then
+            echo "::error::expected opencode v$OPENCODE_VERSION, got $installed"
+            exit 1
+          fi
+          echo "opencode $(date +%s%3N)" >> "$RUNNER_TEMP/marks"
+
+      - name: Review
+        id: review
+        working-directory: packages/cli
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          WARDEN_LANE_MODEL: ${{ vars.WARDEN_LANE_MODEL }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::set the ANTHROPIC_API_KEY repository secret"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/warden"
+          mkdir -p "$out"
+          set +e
+          node --import tsx/esm src/index.ts opencode-review \
+            --base "origin/$BASE_REF" \
+            --json \
+            ${WARDEN_LANE_MODEL:+--model "$WARDEN_LANE_MODEL"} \
+            --lanes-out "$out/lanes.json" \
+            --timings-out "$out/timings.json" \
+            > "$out/commentset.json" 2> "$RUNNER_TEMP/review-stderr.log"
+          code=$?
+          set -e
+          echo "review $(date +%s%3N)" >> "$RUNNER_TEMP/marks"
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          # Stderr goes to the masked job log, not to the artifact.
+          echo "::group::review stderr"
+          cat "$RUNNER_TEMP/review-stderr.log"
+          echo "::endgroup::"
+
+      - name: Write the job summary
+        if: always()
+        env:
+          REVIEW_EXIT: ${{ steps.review.outputs.exit }}
+        run: |
+          out="$RUNNER_TEMP/warden"
+          {
+            echo "## Warden review (tracer)"
+            echo
+            echo "Review exit code: ${REVIEW_EXIT:-not run}. Code 1 means a finding or a failed lane. The job passes on purpose."
+            echo
+            echo "### Job steps"
+            echo
+            echo "The runner queue time and the job setup are not included."
+            echo
+            echo "| Step | Seconds |"
+            echo "| --- | ---: |"
+            awk 'NR == 1 { first = $2 } NR > 1 { printf "| %s | %.1f |\n", $1, ($2 - prev) / 1000 } { prev = $2 } END { if (NR > 1) printf "| **total** | %.1f |\n", (prev - first) / 1000 }' "$RUNNER_TEMP/marks"
+            if [ -s "$out/timings.json" ]; then
+              echo
+              echo "### Driver phases"
+              echo
+              echo "| Phase | Seconds |"
+              echo "| --- | ---: |"
+              jq -r '.timings.phases | to_entries[] | "| \(.key) | \(.value / 1000) |"' "$out/timings.json"
+              jq -r '"| **total** | \(.timings.totalMs / 1000) |"' "$out/timings.json"
+              echo
+              echo "Lane model: \`$(jq -r '.model' "$out/timings.json")\`. Session cost: $(jq -r 'if .usage then "$\(.usage.costUsd)" else "not measured" end' "$out/timings.json")."
+              if [ "$(jq '.timings.tools | length' "$out/timings.json")" != "0" ]; then
+                echo
+                echo "### Tool time inside the lane"
+                echo
+                echo "Phase 1 runs in the first \`warden_run_det_priors\` call. Later calls only read result pages. Some tool parts have no time (n/a)."
+                echo
+                echo "| Tool | Completed calls | Seconds |"
+                echo "| --- | ---: | ---: |"
+                jq -r '.timings.tools[] | "| `\(.name)` | \(.completed) | \(if .durationMs then (.durationMs / 1000 | tostring) else "n/a" end) |"' "$out/timings.json"
+              fi
+            fi
+            if [ -s "$out/commentset.json" ] && jq -e . "$out/commentset.json" > /dev/null 2>&1; then
+              echo
+              echo "### Findings ($(jq '.comments | length' "$out/commentset.json"))"
+              echo
+              if [ "$(jq '.comments | length' "$out/commentset.json")" != "0" ]; then
+                echo "| Location | Category | Kind | Claim |"
+                echo "| --- | --- | --- | --- |"
+                jq -r '.comments[] | "| `\(.file):\(.lineStart)` | \(.category) | \(.kind) | \(.claim | gsub("[|\r\n]"; " ")) |"' "$out/commentset.json"
+              fi
+              if [ "$(jq '.metadata.degradedWorkers | length' "$out/commentset.json")" != "0" ]; then
+                echo
+                echo "### Degraded entries"
+                echo
+                jq -r '.metadata.degradedWorkers[] | "- **\(.kind)** `\(.topic)`: \(.message | gsub("[\r\n]"; " "))"' "$out/commentset.json"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the review output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: warden-review-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/warden/
+          if-no-files-found: ignore
+          retention-days: 14
