@@ -342,7 +342,7 @@ tells the down lane not to restate them.
 ```
 warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   [--json] [--verbose] [--volume-cap <n>] [--lanes-out <path>]
-  [--timeout <seconds>] [--mcp-timeout <seconds>]
+  [--timings-out <path>] [--timeout <seconds>] [--mcp-timeout <seconds>]
 ```
 
 - Resolves the diff exactly like `warden post-pass` (`resolveDiff`,
@@ -390,3 +390,42 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   entry as it was — usage is telemetry and never fails the lane. The
   MCP-warmup failure, empty-scope, and scope-over-ceiling paths have no
   run and no usage.
+- `--timings-out <path>` writes the phase timings as JSON:
+  `{version: 1, timings, runSpawned, model, usage?}`. The driver
+  records the wall-clock time of each phase that runs: `resolveDiff`,
+  `gates`, `mcpReady` (this includes the serve boot), `settle`, `lane`,
+  `usage`, and `postPass`. A phase that does not run has no entry.
+  `timings.tools` gives the completed calls for each tool and their sum
+  of `state.time.end - state.time.start`. The v2.0.25 binary sets these
+  two values on each completed `tool_use` part. The start is the time
+  when the model starts to write the tool input, so the sum also includes
+  the time to write the arguments. Phase 1 runs in the first
+  `warden_run_det_priors` call. `totalMs` stops at the end of the
+  post-pass, so it does not include the serve shutdown. The timings are
+  telemetry: they never change the verdict.
+
+## CI tracer workflow (issue #48)
+
+`.github/workflows/warden-review.yml` runs `warden opencode-review` on a
+pull request and records the time of each step. It is a tracer, not the
+#48 runner:
+
+- It runs only for a same-repo PR that has the `warden-review` label.
+  Each run spends model credit, so the label is an opt-in.
+- It checks out the PR head with `fetch-depth: 0` and
+  `persist-credentials: false` (ADR-0054 §Ripple). It never uses
+  `pull_request_target`.
+- It installs the pinned OpenCode version (`OPENCODE_VERSION`) and stops
+  if `opencode --version` shows a different version.
+- Only the review step gets the `ANTHROPIC_API_KEY` and
+  `ANTHROPIC_BASE_URL` secrets. The `WARDEN_LANE_MODEL` repository
+  variable can change the lane model.
+- The job summary shows the job step times, the driver phases, the tool
+  time in the lane, the session cost, the findings, and the degraded
+  entries. The artifact holds the `CommentSet`, the `--lanes-out`
+  envelope, and the timings. The review stderr goes only to the masked
+  job log.
+- The job passes on each review verdict. It posts nothing to the PR.
+
+These #48 items are still open: the index cache (#45), a hard cost
+limit, and a PR review with the `CommentSet`.

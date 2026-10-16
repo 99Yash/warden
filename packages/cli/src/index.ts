@@ -266,6 +266,10 @@ program
     "--lanes-out <path>",
     "Write the lane envelope JSON here (audit / replay through warden post-pass).",
   )
+  .option(
+    "--timings-out <path>",
+    "Write the driver phase timings JSON here (resolve, gates, MCP, lane, post-pass).",
+  )
   .option("--timeout <seconds>", "Kill the OpenCode child after N seconds. Default 900.")
   .option(
     "--mcp-timeout <seconds>",
@@ -379,6 +383,7 @@ interface OpencodeReviewOpts {
   verbose?: boolean;
   volumeCap?: string;
   lanesOut?: string;
+  timingsOut?: string;
   timeout?: string;
   mcpTimeout?: string;
 }
@@ -430,6 +435,7 @@ async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void>
     ...(opts.verbose !== undefined ? { verbose: opts.verbose } : {}),
     ...(volumeCap !== undefined ? { volumeCap } : {}),
     ...(opts.lanesOut !== undefined ? { lanesOut: opts.lanesOut } : {}),
+    ...(opts.timingsOut !== undefined ? { timingsOut: opts.timingsOut } : {}),
     ...(timeoutSecs !== undefined ? { timeoutSecs } : {}),
     ...(mcpTimeoutSecs !== undefined ? { mcpTimeoutSecs } : {}),
   });
