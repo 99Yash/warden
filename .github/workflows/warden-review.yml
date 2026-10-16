@@ -20,16 +20,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: warden-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       contains(github.event.pull_request.labels.*.name, 'warden-review') &&
       (github.event.action != 'labeled' || github.event.label.name == 'warden-review')
+    concurrency:
+      group: warden-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -81,8 +80,14 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
           WARDEN_LANE_MODEL: ${{ vars.WARDEN_LANE_MODEL }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          # The full checkout must contain the event's base. Do not spend model
+          # credit if a history rewrite has made that commit unavailable.
+          if ! git cat-file -e "$BASE_SHA^{commit}"; then
+            echo "::error::the event base commit is unavailable in the checkout"
+            exit 1
+          fi
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::error::set the ANTHROPIC_API_KEY repository secret"
             exit 1
@@ -91,7 +96,7 @@ jobs:
           mkdir -p "$out"
           set +e
           node --import tsx/esm src/index.ts opencode-review \
-            --base "origin/$BASE_REF" \
+            --base "$BASE_SHA" \
             --json \
             ${WARDEN_LANE_MODEL:+--model "$WARDEN_LANE_MODEL"} \
             --lanes-out "$out/lanes.json" \
@@ -105,6 +110,22 @@ jobs:
           echo "::group::review stderr"
           cat "$RUNNER_TEMP/review-stderr.log"
           echo "::endgroup::"
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then
+            echo "::error::review command failed with exit code $code"
+            exit "$code"
+          fi
+          # Exit 1 can mean a valid review verdict or a command failure. Check
+          # the result with the owning schema before accepting either verdict.
+          node --import tsx/esm --input-type=module - "$out/commentset.json" <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { CommentSetSchema } from "@warden/core";
+          try {
+            CommentSetSchema.parse(JSON.parse(readFileSync(process.argv[2], "utf8")));
+          } catch {
+            console.error("::error::review did not produce a valid CommentSet");
+            process.exitCode = 1;
+          }
+          NODE
 
       - name: Write the job summary
         if: always()
@@ -115,7 +136,7 @@ jobs:
           {
             echo "## Warden review (tracer)"
             echo
-            echo "Review exit code: ${REVIEW_EXIT:-not run}. Code 1 means a finding or a failed lane. The job passes on purpose."
+            echo "Review exit code: ${REVIEW_EXIT:-not run}. Valid review verdicts do not fail the job. Command or output errors fail the job."
             echo
             echo "### Job steps"
             echo
