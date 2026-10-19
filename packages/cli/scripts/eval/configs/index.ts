@@ -20,7 +20,7 @@
 
 import type { EvalConfig } from "../types.js";
 
-export const baseline: EvalConfig = {
+const baseline: EvalConfig = {
   name: "baseline",
   description: "Pre-M15 baseline — programmatic dispatch OFF, rules prompt.",
   // Explicit opt-out: post-ADR-0031 close-out, the harness defaults to
@@ -34,7 +34,7 @@ export const baseline: EvalConfig = {
   },
 };
 
-export const programmaticDispatch: EvalConfig = {
+const programmaticDispatch: EvalConfig = {
   name: "programmatic-dispatch",
   description:
     "Programmatic Round 0 fan-out ON, single-routed-concern-per-file, rules-based prompt. ADR-0031 Config B.",
@@ -48,7 +48,7 @@ export const programmaticDispatch: EvalConfig = {
   },
 };
 
-export const programmaticDispatchExamplesFirst: EvalConfig = {
+const programmaticDispatchExamplesFirst: EvalConfig = {
   name: "programmatic-dispatch-examples-first",
   description: "Programmatic Round 0 + examples-first prompt variant. ADR-0031 Config C.",
   bossLoop: {
@@ -67,7 +67,7 @@ export const programmaticDispatchExamplesFirst: EvalConfig = {
  * dispatch guarantee. Roughly 2× the worker count of plain PD; cost
  * stays within budget (observed ~$0.04–0.10 per fixture).
  */
-export const programmaticDispatchMulti: EvalConfig = {
+const programmaticDispatchMulti: EvalConfig = {
   name: "programmatic-dispatch-multi",
   description:
     "Programmatic Round 0 + correctness-on-every-file extra dispatch. ADR-0031 follow-up.",
@@ -95,7 +95,7 @@ export const programmaticDispatchMulti: EvalConfig = {
  * than substrate-limited (would need a new `SourceType`) or thinking-
  * limited (would need more boss rounds or apex model).
  */
-export const sentryBorrow: EvalConfig = {
+const sentryBorrow: EvalConfig = {
   name: "sentry-borrow",
   description:
     "PD-multi + workerPromptVariant='sentry-borrow' — borrows adversarial voice + 7-step investigation + category×trigger table + severity tie-breaker into 4 of 6 worker prompts. Probes whether prompt craft closes the M6/alfred recall gap.",
@@ -124,7 +124,7 @@ export const sentryBorrow: EvalConfig = {
  * BOUND that can include correctly-placed-but-unverified locators; read it next
  * to the clean-fixture precision gate (c), not on its own.
  */
-export const reasonedAssertions: EvalConfig = {
+const reasonedAssertions: EvalConfig = {
   name: "reasoned-assertions",
   description:
     "PD-multi + reasonedFindingMode='allow-empty-sources' — ADR-0044 recall probe before the public evidence/sources schema migration.",
@@ -150,7 +150,7 @@ export const reasonedAssertions: EvalConfig = {
  * `alfred-pr235-misses` and `alfred-pr14-misses` real-PR fixtures; watch the
  * clean-fixture precision gate for new false positives from harder looking.
  */
-export const diligent: EvalConfig = {
+const diligent: EvalConfig = {
   name: "diligent",
   description:
     "PD-multi + workerPromptVariant='diligent' — composes an investigation-protocol preamble onto every worker. Probes the cross-file recall gap (PR#235).",
@@ -177,7 +177,7 @@ export const ALL_CONFIGS: EvalConfig[] = [
  * for OpenCode runs. Reach it via `--parity <reference> opencode-down`
  * (or `--config opencode-down`).
  */
-export const opencodeDown: EvalConfig = {
+const opencodeDown: EvalConfig = {
   name: "opencode-down",
   description: "OpenCode down lane via driveOpencodeLane (same path as warden opencode-review).",
   runtime: "opencode",
@@ -189,7 +189,7 @@ export const opencodeDown: EvalConfig = {
  * API spend. Measures the method on another MCP client; it does not stand
  * in for the OpenCode go/no-go.
  */
-export const claudeCodeDown: EvalConfig = {
+const claudeCodeDown: EvalConfig = {
   name: "claude-code-down",
   description: "Down lane via claude -p (subscription login), same prompt, tools, and post-pass.",
   runtime: "claude-code",

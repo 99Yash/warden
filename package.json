@@ -11,7 +11,8 @@
     "format": "oxfmt --write --ignore-path .gitignore apps packages scripts .claude package.json pnpm-workspace.yaml turbo.json .oxlintrc.json .oxfmtrc.json",
     "format:check": "oxfmt --check --ignore-path .gitignore apps packages scripts .claude package.json pnpm-workspace.yaml turbo.json .oxlintrc.json .oxfmtrc.json",
     "check:oxlint-plugin": "node scripts/check-oxlint-plugin.mjs",
-    "check": "pnpm check:oxlint-plugin && pnpm lint && pnpm format:check",
+    "knip": "knip --treat-config-hints-as-errors",
+    "check": "pnpm check:oxlint-plugin && pnpm knip && pnpm lint && pnpm format:check",
     "verify": "pnpm check && pnpm check-types",
     "db:generate": "turbo run db:generate --filter=@warden/db",
     "db:migrate": "turbo run db:migrate --filter=@warden/db",
@@ -23,11 +24,11 @@
   },
   "devDependencies": {
     "@oxlint/plugins": "^1.82.0",
-    "@types/node": "^22.13.11",
+    "@types/node": "catalog:",
+    "knip": "^6.42.0",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.82.0",
     "oxlint-tsgolint": "7.0.2004",
-    "tsdown": "^0.15.5",
     "turbo": "^2.8.10",
     "typescript": "catalog:"
   },

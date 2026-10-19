@@ -76,6 +76,12 @@ A suppression is a claim that this line is the one exception.
 - **oxfmt owns formatting.** Run `pnpm format`. _Gate: `pnpm format:check`._
 - **LLM prompts and eval fixtures are not formatted.** `packages/core/src/review-harness/prompts/**` and `packages/cli/scripts/eval/fixtures/**` are in `.oxfmtrc.json`'s `ignorePatterns`, because a reformatted prompt is a different prompt.
 
+## 11. Exports and dependencies
+
+- **Export only what another module imports.** A symbol used only in its own file stays unexported. The type of a public function's argument or result is re-exported from the package's `index.ts` next to the function. _Gate: `pnpm knip`._
+- **Declare what you import, and nothing else.** A package loaded by a string specifier (`createRequire` in `runners/eslint-security.ts`) or a binary spawned from `PATH` (`opencode`) is a knip blind spot: add it to `knip.jsonc` with the reason, not to a silent ignore. _Gate: `pnpm knip`._
+- **Cross-package exports of `ai`, `core`, `db`, and `env` are not checked.** Their `"./*"` export map makes every `src/` file public API, so knip reports an unused export only in `cli`, `mcp`, and scripts. _Review._
+
 ---
 
 ## Review hit-list

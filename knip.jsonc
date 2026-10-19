@@ -1,0 +1,73 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // `pnpm knip` runs in `pnpm check` (so in `pnpm verify` and CI) and must stay at
+  // zero. It reports knip's default issue types: unused files, dependencies,
+  // unlisted dependencies and binaries, unresolved imports, exports, types, enum
+  // and namespace members, and catalog entries. A configuration hint (a stale
+  // `entry` / `ignore*` row) also fails the gate, through
+  // `--treat-config-hints-as-errors` in the script, so a blind spot cannot outlive
+  // the code it covered. Mirrors alfred's `knip.json`.
+  //
+  // Every `ignore*` row below is a knip blind spot or a recorded decision, not dead
+  // code. Verify before removing one.
+  //
+  // What this does NOT see: `@warden/ai`, `core`, `db` and `env` export `"./*":
+  // "./src/*.ts"`, so every file under their `src/` is a package entry and its
+  // exports count as public API. An export no workspace imports is reported only in
+  // `cli` and `mcp` (which export `"."` alone) and in scripts. Measuring the
+  // packages' public surface is `knip --include-entry-exports`, not this gate.
+  "ignore": [
+    // Unregistered: `.claude/settings.json` wires only `lint-on-edit.mjs`. Whether to
+    // register the `.lessons/` recall hook or delete it is the user's decision, so
+    // it is ignored here rather than listed as an entry.
+    ".claude/hooks/recall.mjs",
+    // Vendored upstream type file (eslint-stylistic). Its unused type exports are
+    // upstream's surface; un-exporting them would fork the copy.
+    "scripts/oxlint/anti-slop/vendor/eslint-stylistic/padding-line-options.d.ts",
+  ],
+  "ignoreBinaries": [
+    // The OpenCode CLI. Scripts (`probe-instruction-tree.mts`, the opencode smokes,
+    // `scripts/eval/run.mts`) spawn the operator's installed `opencode`; it is a
+    // system tool, not an npm dependency (ADR-0053).
+    "opencode",
+    // `apps/web/scripts/gen-fixtures.mjs` spawns `pnpm warden` with `cwd` at the repo
+    // root, which runs the root `warden` script. Knip reads it as a `warden` binary.
+    "warden",
+  ],
+  "workspaces": {
+    ".": {
+      // knip's oxlint plugin reads `jsPlugins` in `.oxlintrc.json`, so the
+      // `scripts/oxlint/*/index.ts` plugins are entries without a row here. The
+      // `*.rule-test.ts` fixtures hang off nothing; `pnpm check:oxlint-plugin` runs
+      // them. Hooks are listed one by one: a hook is live only once
+      // `.claude/settings.json` registers it.
+      "entry": ["scripts/oxlint/*/rules/*.rule-test.ts", ".claude/hooks/lint-on-edit.mjs"],
+    },
+    "packages/cli": {
+      // Smoke, probe, measure and eval scripts are hand-run entry points. Most are
+      // also `package.json` scripts, which knip already follows; the glob keeps a
+      // script that has no `package.json` row from reading as an unused file.
+      "entry": ["scripts/*.mts", "scripts/eval/*.mts"],
+    },
+    "packages/core": {
+      "ignoreDependencies": [
+        // `runners/eslint-security.ts` loads these through `createRequire` with a
+        // string specifier, so they must resolve from core's own dependencies (not
+        // the reviewed repo's). Knip cannot follow a `require` built by
+        // `createRequire`.
+        "eslint",
+        "eslint-plugin-security",
+        "eslint-plugin-no-secrets",
+        "@typescript-eslint/parser",
+        // Same blind spot: `runners/jscpd.ts` loads jscpd's CJS build through
+        // `createRequire`, because its ESM build cannot import `colors/safe`.
+        "jscpd",
+      ],
+    },
+    "packages/mcp": {
+      // Compile-only regression: `@ts-expect-error` directives that fail `tsc` if the
+      // tool envelope type loosens. Nothing imports it; `pnpm check-types` runs it.
+      "entry": ["src/envelope.typecheck.ts"],
+    },
+  },
+}

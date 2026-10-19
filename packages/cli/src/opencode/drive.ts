@@ -33,17 +33,17 @@ import { formatCommentSet } from "../format.js";
  * smoke can test them without OpenCode.
  */
 
-export const OPENCODE_AGENT_ENV = "OPENCODE_CONFIG";
-export const OPENCODE_PROJECT_DISABLE_ENV = "OPENCODE_DISABLE_PROJECT_CONFIG";
-export const OPENCODE_PROJECT_DISABLE_NEW_ENV = "OPENCODE_CONFIG_PROJECT_DISABLE";
-export const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
-export const OPENCODE_DISCOVERY_HOME_ENV = "OPENCODE_TEST_HOME";
-export const OPENCODE_CONTENT_ENV = "OPENCODE_CONFIG_CONTENT";
-export const OPENCODE_PASSWORD_ENV = "OPENCODE_PASSWORD";
+const OPENCODE_AGENT_ENV = "OPENCODE_CONFIG";
+const OPENCODE_PROJECT_DISABLE_ENV = "OPENCODE_DISABLE_PROJECT_CONFIG";
+const OPENCODE_PROJECT_DISABLE_NEW_ENV = "OPENCODE_CONFIG_PROJECT_DISABLE";
+const OPENCODE_CONFIG_DIR_ENV = "OPENCODE_CONFIG_DIR";
+const OPENCODE_DISCOVERY_HOME_ENV = "OPENCODE_TEST_HOME";
+const OPENCODE_CONTENT_ENV = "OPENCODE_CONFIG_CONTENT";
+const OPENCODE_PASSWORD_ENV = "OPENCODE_PASSWORD";
 export const DEFAULT_LANE_TIMEOUT_SECS = 900;
 /** Bounded wait for the warden MCP server to connect (covers serve boot). */
-export const DEFAULT_MCP_TIMEOUT_SECS = 30;
-export const MCP_POLL_INTERVAL_MS = 500;
+const DEFAULT_MCP_TIMEOUT_SECS = 30;
+const MCP_POLL_INTERVAL_MS = 500;
 /**
  * Settle delay after `connected` before spawning `run`: a late server fires
  * `mcp.tools.changed` and the tools register after short debounces
@@ -53,7 +53,7 @@ export const MCP_POLL_INTERVAL_MS = 500;
  * shipped binary v2.0.25; the `v2` source checkout still waits, so the
  * source does not match the binary here — trust the binary).
  */
-export const MCP_SETTLE_MS = 1000;
+const MCP_SETTLE_MS = 1000;
 /** Bounded stderr tail kept for failed-lane diagnostics. */
 export const STDERR_TAIL_BYTES = 2048;
 /**
@@ -189,7 +189,7 @@ export function resolveLaneConfigPath(): string {
 }
 
 /** Absolute path of this warden install's CLI entry (dev source or bundled dist). */
-export function resolveCliEntry(): string {
+function resolveCliEntry(): string {
   const dev = resolve(DIR, "../index.ts");
   if (existsSync(dev)) return dev;
   const argvEntry = process.argv[1];
@@ -701,7 +701,7 @@ export function parseSessionUsage(body: unknown, expectedId?: string): SessionUs
  * Read one session total from the serve API. Usage is telemetry — any
  * failure returns `undefined` and never fails the lane.
  */
-export async function fetchSessionUsage(opts: {
+async function fetchSessionUsage(opts: {
   baseUrl: string;
   password: string;
   directory: string;
@@ -826,16 +826,9 @@ export interface DriveOptions {
 }
 
 /** Driver phases, in run order. A phase that did not run has no entry. */
-export type DrivePhase =
-  | "resolveDiff"
-  | "gates"
-  | "mcpReady"
-  | "settle"
-  | "lane"
-  | "usage"
-  | "postPass";
+type DrivePhase = "resolveDiff" | "gates" | "mcpReady" | "settle" | "lane" | "usage" | "postPass";
 
-export interface DriveTimings {
+interface DriveTimings {
   /** Wall-clock milliseconds per phase that ran. */
   phases: Partial<Record<DrivePhase, number>>;
   /**

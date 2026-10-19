@@ -91,7 +91,6 @@
     "@warden/mcp": "workspace:*",
     "commander": "catalog:",
     "log-update": "catalog:",
-    "ora": "catalog:",
     "picocolors": "catalog:"
   },
   "devDependencies": {
