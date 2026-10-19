@@ -131,7 +131,7 @@ function buildFixtureRepo(): string {
 
 const FIXTURE_DIFF = buildFixtureRepo();
 
-/** Minimal structural reads off a validated envelope, without a second schema. */
+/** A validated envelope, its `ok` data parsed as the core `ReviewBundlePage` schema. */
 interface Envelope {
   status: string;
   data?: ReviewBundlePage;
@@ -158,7 +158,7 @@ function readEnvelope(result: unknown, tool: string): Envelope {
   return {
     status: envelope.status,
     ...(envelope.status === "ok"
-      ? { data: envelope.data as unknown as ReviewBundlePage }
+      ? { data: ReviewBundlePageSchema.parse(envelope.data) }
       : { reason: envelope.reason, hint: envelope.hint }),
     isError: parsed.isError ?? false,
   };
@@ -858,9 +858,10 @@ try {
     !ReviewBundlePageSchema.safeParse(brokenTriple).success,
     "the bound core schema rejects a citation whose triple lost its snippet",
   );
-  const brokenCategory = structuredClone(triplePage) as unknown as Record<string, unknown>;
-  (brokenCategory["findings"] as Array<Record<string, unknown>>)[0]!["category"] =
-    "not-a-real-category";
+  const brokenCategory = {
+    ...triplePage,
+    findings: triplePage.findings.map((f) => ({ ...f, category: "not-a-real-category" })),
+  };
   assert(
     !ReviewBundlePageSchema.safeParse(brokenCategory).success,
     "the bound core schema rejects a category outside CategoryEnum",

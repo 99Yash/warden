@@ -1,4 +1,5 @@
 import { createId, db, eq, externalKnowledge } from "@warden/db";
+import type { ZodType } from "zod";
 import type { SourceType } from "../schema.js";
 
 /**
@@ -11,6 +12,10 @@ import type { SourceType } from "../schema.js";
  * Implementation note — better-sqlite3 is synchronous; the API mirrors that
  * (`getCached` returns directly, no Promise) which keeps the call sites in the
  * pipeline straightforward.
+ *
+ * A cached payload is read back through the caller's schema: the row is JSON
+ * an older warden (or a hand edit) wrote, so it is not trusted as `T`. A row
+ * that fails the schema is a miss, and the caller's refetch overwrites it.
  */
 
 export interface CachedEntry<T> {
@@ -18,7 +23,7 @@ export interface CachedEntry<T> {
   retrievedAt: Date;
 }
 
-export function getCached<T>(queryKey: string): CachedEntry<T> | undefined {
+export function getCached<T>(queryKey: string, schema: ZodType<T>): CachedEntry<T> | undefined {
   const row = db()
     .select({
       payload: externalKnowledge.payload,
@@ -31,7 +36,9 @@ export function getCached<T>(queryKey: string): CachedEntry<T> | undefined {
 
   if (!row) return undefined;
   if (row.ttlExpiresAt.getTime() <= Date.now()) return undefined;
-  return { payload: row.payload as T, retrievedAt: row.retrievedAt };
+  const parsed = schema.safeParse(row.payload);
+  if (!parsed.success) return undefined;
+  return { payload: parsed.data, retrievedAt: row.retrievedAt };
 }
 
 /**

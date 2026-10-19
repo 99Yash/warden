@@ -24,9 +24,9 @@
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/no-object-parameters": "error",
     "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-chained-type-assertions": "error",
     // Ratchet queue — counts measured 2026-10-18 as product src / scripts. Each moves to
     // "error" in its own change once the tree is at zero. See docs/gate-design.md.
-    "anti-slop/no-chained-type-assertions": "off", // 10 / 2, 9 of them in ai/src/schema-adapters/gemini.ts
     "anti-slop/no-unknown-returns": "off", // 6 / 3
     "anti-slop/no-known-value-widening": "off", // 42 / 18
     "anti-slop/no-unsafe-dictionary-type": "off", // 50 / 32
