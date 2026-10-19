@@ -18,6 +18,7 @@
     "smoke:import-graph-freshness": "node --import tsx/esm scripts/smoke-import-graph-freshness.mts",
     "smoke:m5-jscpd": "node --import tsx/esm scripts/smoke-m5-jscpd.mts",
     "smoke:auto-migrate": "node --import tsx/esm scripts/smoke-auto-migrate.mts",
+    "smoke:osv-cache": "node --import tsx/esm scripts/smoke-osv-cache.mts",
     "smoke:m7": "node --import tsx/esm scripts/smoke-m7-init.mts",
     "smoke:m7-detectors": "node --import tsx/esm scripts/smoke-m7-detectors.mts",
     "smoke:m9-catastrophic": "node --import tsx/esm scripts/smoke-m9-catastrophic.mts",

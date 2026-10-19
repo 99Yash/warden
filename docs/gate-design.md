@@ -9,6 +9,7 @@ A rule that only a reviewer enforces is missed the first time the reviewer is ti
 | Script                     | What it proves                                                                                                                                                         |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm check:oxlint-plugin` | Each vendored or first-party rule in `scripts/oxlint/` has passing fixtures, is registered, and is listed in `.oxlintrc.json`. Each `"error"` rule is driven through the root config. |
+| `pnpm check:osv-cache` | OSV cache reads use a real temporary SQLite database; malformed JSON, invalid records and expired rows refetch, and valid rows reuse the cache. No network calls. |
 | `pnpm knip`                | No unused file, export, dependency, or catalog entry, and no unlisted one. `knip.jsonc` declares each blind spot with its reason; a stale entry fails as a hint.       |
 | `pnpm lint`                | oxlint with the root `.oxlintrc.json`, type-aware through tsgolint, `--deny-warnings`.                                                                                 |
 | `pnpm format:check`        | oxfmt over code and config. LLM prompts and eval fixtures are excluded, because reformatting them changes what the model reads.                                        |

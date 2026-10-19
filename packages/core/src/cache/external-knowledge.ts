@@ -1,4 +1,4 @@
-import { createId, db, eq, externalKnowledge } from "@warden/db";
+import { createId, db, eq, externalKnowledge, sql } from "@warden/db";
 import type { ZodType } from "zod";
 import type { SourceType } from "../schema.js";
 
@@ -26,7 +26,9 @@ export interface CachedEntry<T> {
 export function getCached<T>(queryKey: string, schema: ZodType<T>): CachedEntry<T> | undefined {
   const row = db()
     .select({
-      payload: externalKnowledge.payload,
+      // Read text without the JSON column's decoder: malformed JSON must be
+      // a cache miss, not an exception thrown before the schema can run.
+      payload: sql<unknown>`${externalKnowledge.payload}`,
       retrievedAt: externalKnowledge.retrievedAt,
       ttlExpiresAt: externalKnowledge.ttlExpiresAt,
     })
@@ -35,8 +37,21 @@ export function getCached<T>(queryKey: string, schema: ZodType<T>): CachedEntry<
     .get();
 
   if (!row) return undefined;
-  if (row.ttlExpiresAt.getTime() <= Date.now()) return undefined;
-  const parsed = schema.safeParse(row.payload);
+  const expiresAt = row.ttlExpiresAt.getTime();
+  if (
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= Date.now() ||
+    !Number.isFinite(row.retrievedAt.getTime()) ||
+    typeof row.payload !== "string"
+  )
+    return undefined;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {
+    return undefined;
+  }
+  const parsed = schema.safeParse(payload);
   if (!parsed.success) return undefined;
   return { payload: parsed.data, retrievedAt: row.retrievedAt };
 }
