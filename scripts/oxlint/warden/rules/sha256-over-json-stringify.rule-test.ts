@@ -20,6 +20,29 @@ const inFunction = (body: string) => `async function fixture() {\n${body}\n}`;
 tester.run("warden/sha256-over-json-stringify", sha256OverJsonStringifyRule, {
   valid: [
     {
+      name: "canonical JSON of a JSON round-trip is independent of object key order",
+      code: `import { canonicalJson, sha256Hex } from "@warden/core/hash";
+const data = JSON.parse(JSON.stringify(config));
+const key = sha256Hex(canonicalJson(data));`,
+    },
+    {
+      name: "canonicalization follows renamed imports and serialized local bindings",
+      code: `import { canonicalJson as canonical, sha256Hex } from "@warden/core/hash";
+const encoded = JSON.stringify(config);
+const data = JSON.parse(encoded);
+const key = sha256Hex(canonical(data));`,
+    },
+    {
+      name: "canonicalization through the owner namespace handles an inline round-trip",
+      code: `import * as hashes from "@warden/core/hash";
+const key = hashes.sha256Hex(hashes.canonicalJson(JSON.parse(JSON.stringify(config))));`,
+    },
+    {
+      name: "a local binding that shadows createHash is not a crypto hasher",
+      code: `const createHash = (algorithm: string) => cache.get(algorithm);
+createHash("key").update(JSON.stringify(config));`,
+    },
+    {
       name: "a Web Crypto digest over encoded raw text",
       code: inFunction(`  const bytes = new TextEncoder().encode(rawBody);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -270,6 +293,48 @@ function run(sha256Hex: (text: string) => string) {
     },
   ],
   invalid: [
+    {
+      name: "a local JSON.parse method is not the built-in decoder",
+      code: `import { canonicalJson, sha256Hex } from "@warden/core/hash";
+const JSON = { stringify: encode, parse: (text: string) => text };
+const key = sha256Hex(canonicalJson(JSON.parse(JSON.stringify(config))));`,
+      errors: [helperError("sha256Hex")],
+    },
+    {
+      name: "a renamed crypto import still hashes JSON directly and through a helper",
+      code: `import { createHash as nodeHash } from "node:crypto";
+const direct = nodeHash("sha256").update(JSON.stringify(config)).digest("hex");
+function hash(text: string) { return nodeHash("sha256").update(text).digest("hex"); }
+const key = hash(JSON.stringify(config));`,
+      errors: [error, helperError("hash")],
+    },
+    {
+      name: "canonicalizing a JSON string still preserves its insertion order",
+      code: `import { canonicalJson, sha256Hex } from "@warden/core/hash";
+const key = sha256Hex(canonicalJson(JSON.stringify(config)));`,
+      errors: [helperError("sha256Hex")],
+    },
+    {
+      name: "a JSON round-trip does not repair nested serialized strings",
+      code: `import { canonicalJson, sha256Hex } from "@warden/core/hash";
+const data = JSON.parse(JSON.stringify({ body: JSON.stringify(config) }));
+const key = sha256Hex(canonicalJson(data));`,
+      errors: [helperError("sha256Hex")],
+    },
+    {
+      name: "a local canonicalJson function is not the owner serializer",
+      code: `import { sha256Hex } from "@warden/core/hash";
+const canonicalJson = (value: unknown) => value;
+const key = sha256Hex(canonicalJson(JSON.parse(JSON.stringify(config))));`,
+      errors: [helperError("sha256Hex")],
+    },
+    {
+      name: "a raw JSON branch is still reported beside a canonicalized branch",
+      code: `import { canonicalJson, sha256Hex } from "@warden/core/hash";
+const encoded = JSON.stringify(config);
+const key = sha256Hex(canonicalJson(JSON.parse(encoded)) + encoded);`,
+      errors: [helperError("sha256Hex")],
+    },
     {
       // warden: \`review-harness/harness.ts\` \`computeInputHash\` before the owner. The
       // resume key hashed JSON.stringify of the resolved config.

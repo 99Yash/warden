@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
  *
  * `string` is a hasher of text or bytes (`sha256Hex`): the one SHA-256 helper,
  * hex out. A structured value is hashed as `sha256Hex(canonicalJson(value))`;
- * `canonicalJson` returns a string and digests nothing, so it is not listed.
+ * `canonicalJson` returns a string and digests nothing, so it is listed only
+ * as a canonicalizer, not a hasher.
  * Alfred's owner also has a `canonical` kind (`sha256Canonical`, which
  * canonicalizes first). Warden has no such helper; the kind stays in the type
  * so this copy diffs cleanly against alfred's.
@@ -23,10 +24,12 @@ export const HASH_OWNERS = [
   {
     module: "packages/core/src/hash.ts",
     hashers: new Map([["sha256Hex", "string"]]),
+    canonicalizers: new Set(["canonicalJson"]),
   },
 ] as const satisfies readonly Readonly<{
   module: string;
   hashers: ReadonlyMap<string, "string" | "canonical">;
+  canonicalizers: ReadonlySet<string>;
 }>[];
 
 export type HashOwner = (typeof HASH_OWNERS)[number];

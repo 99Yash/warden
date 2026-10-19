@@ -2,7 +2,13 @@ import { defineRule } from "@oxlint/plugins";
 
 import type { ESTree, SourceCode, Variable } from "@oxlint/plugins";
 
-import { createDigestFlow, digestSinkOf, ownerImportsOf, unwrap } from "../shared/digest-flow.ts";
+import {
+  createDigestFlow,
+  digestSinkOf,
+  ownerHasherOf,
+  ownerImportsOf,
+  unwrap,
+} from "../shared/digest-flow.ts";
 import type { FunctionNode, OwnerImports, Sink } from "../shared/digest-flow.ts";
 import { HASH_OWNERS, isOwnerModule, ownerOfSpecifier } from "../shared/hash-owners.ts";
 import { inGateScope } from "../shared/scope.ts";
@@ -46,6 +52,7 @@ import { inGateScope } from "../shared/scope.ts";
  * `export { sha256Hex } from "@warden/core/hash"`, `export * from` an owner
  * module, and an export of a local import of an owner hasher (`export {
  * sha256Hex }`, `export default sha256Hex`, `export const h = sha256Hex`).
+ * Exporting an owner namespace or its hasher member is the same re-export.
  *
  * Out of reach. A function that passes its parameter to an owner hasher
  * (`stableCommentId(key)` in `packages/core/src/comment-id.ts`, `taskIdFor` in
@@ -209,9 +216,14 @@ function hashingFunctions(sourceCode: SourceCode, sinks: readonly Sink[]): Set<F
   return found;
 }
 
-/** The owner hasher that an exported local binding holds (`import { sha256Hex }` re-exported), or null. */
+/** The owner hasher exposed by an imported name, namespace, or namespace member. */
 function heldHasher(imports: OwnerImports, identifier: ESTree.Node): string | null {
-  return imports.named.get(identifier) ?? null;
+  const namespace = imports.namespaces.get(identifier);
+  if (namespace !== undefined) return [...namespace.keys()].join(", ");
+  if (identifier.type === "Identifier") return imports.named.get(identifier) ?? null;
+  return identifier.type === "MemberExpression"
+    ? (ownerHasherOf(imports, identifier)?.name ?? null)
+    : null;
 }
 
 export const noExportedHasherRule = defineRule({
@@ -228,7 +240,11 @@ export const noExportedHasherRule = defineRule({
   },
   createOnce(context) {
     let sinks: Sink[] = [];
-    let ownerImports: OwnerImports = { named: new Map(), namespaces: new Map() };
+    let ownerImports: OwnerImports = {
+      named: new Map(),
+      namespaces: new Map(),
+      canonicalizers: new Set(),
+    };
 
     return {
       before() {
@@ -290,8 +306,13 @@ export const noExportedHasherRule = defineRule({
       ExportDefaultDeclaration(node) {
         const declaration = node.declaration;
 
-        if (declaration.type !== "Identifier") return;
-        const name = heldHasher(ownerImports, declaration);
+        if (
+          declaration.type === "FunctionDeclaration" ||
+          declaration.type === "ClassDeclaration" ||
+          declaration.type === "TSInterfaceDeclaration"
+        )
+          return;
+        const name = heldHasher(ownerImports, unwrap(declaration));
 
         if (name !== null) context.report({ node, messageId: "reexportedHasher", data: { name } });
       },

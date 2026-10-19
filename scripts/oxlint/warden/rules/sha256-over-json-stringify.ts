@@ -8,8 +8,9 @@ import {
   isJsonStringify,
   ownerImportsOf,
   ownerSinkOf,
+  unwrap,
 } from "../shared/digest-flow.ts";
-import type { OwnerImports, Sink } from "../shared/digest-flow.ts";
+import type { JsonTransform, OwnerImports, Sink } from "../shared/digest-flow.ts";
 import { inGateScope } from "../shared/scope.ts";
 
 // A content hash whose pre-image is `JSON.stringify` output depends on object key
@@ -26,6 +27,7 @@ import { inGateScope } from "../shared/scope.ts";
 // - `h.update(data)`, where `h` resolves to a binding whose value is a hasher. A
 //   receiver that is not a hasher (Drizzle `db.update(table)`, a cache entry) is
 //   never a sink;
+//   ESM crypto imports resolve by binding, including `createHash as nodeHash`;
 // - `subtle.digest(alg, data)` and `crypto.subtle.digest(alg, data)`;
 // - `sha256Hex(data)`: a call of an owner hasher (the closed list in
 //   `shared/hash-owners.ts`) through an import of the owner module, named, renamed
@@ -44,6 +46,9 @@ import { inGateScope } from "../shared/scope.ts";
 // binding whose value carries JSON. Names resolve through scope analysis, so a
 // parameter, a destructured binding, a `catch` binding or an inner callback parameter
 // of the same name is its own binding and never inherits another one.
+// Parsing a JSON round-trip and then calling the owner's `canonicalJson`
+// removes the outer serialization's key order. Nested serialized strings still
+// carry JSON; canonicalizing a string does not sort the keys encoded in it.
 //
 // Value of a binding:
 // - `const`: its initializer.
@@ -136,12 +141,18 @@ export const sha256OverJsonStringifyRule = defineRule({
   createOnce(context) {
     let sinks: Sink[] = [];
     let jsonCalls: ESTree.CallExpression[] = [];
-    let ownerImports: OwnerImports = { named: new Map(), namespaces: new Map() };
+    let transforms: JsonTransform[] = [];
+    let ownerImports: OwnerImports = {
+      named: new Map(),
+      namespaces: new Map(),
+      canonicalizers: new Set(),
+    };
 
     return {
       before() {
         sinks = [];
         jsonCalls = [];
+        transforms = [];
 
         return inGateScope(context.filename, context.cwd);
       },
@@ -149,6 +160,19 @@ export const sha256OverJsonStringifyRule = defineRule({
         ownerImports = ownerImportsOf(context.sourceCode, program, context.filename, context.cwd);
       },
       CallExpression(node) {
+        const callee = unwrap(node.callee);
+        if (ownerImports.canonicalizers.has(callee)) {
+          transforms.push({ call: node, kind: "canonical" });
+        } else if (
+          callee.type === "MemberExpression" &&
+          !callee.computed &&
+          callee.object.type === "Identifier" &&
+          callee.object.name === "JSON" &&
+          callee.property.type === "Identifier" &&
+          callee.property.name === "parse"
+        ) {
+          transforms.push({ call: node, kind: "parse" });
+        }
         if (isJsonStringify(node)) {
           jsonCalls.push(node);
 
@@ -161,7 +185,7 @@ export const sha256OverJsonStringifyRule = defineRule({
       },
       "Program:exit"() {
         if (sinks.length === 0 || jsonCalls.length === 0) return;
-        const flow = createDigestFlow(context.sourceCode, jsonCalls);
+        const flow = createDigestFlow(context.sourceCode, jsonCalls, transforms);
 
         for (const { node, helper } of jsonFindings(flow, sinks)) {
           if (helper === null) context.report({ node, messageId: "jsonPreimage" });

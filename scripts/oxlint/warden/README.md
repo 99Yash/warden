@@ -18,8 +18,9 @@ hasher names and the fix text name warden's owner (`packages/core/src/hash.ts`,
 `@warden/core/hash`), the fixtures gained warden's own sites (marked
 `warden:`), and `shared/scope.ts` holds the file-scope predicate that alfred
 reads from its regex-rule table, which warden does not have. The flow analysis
-in `shared/digest-flow.ts` is alfred's unchanged, so a fix in either copy ports
-as a plain diff.
+in `shared/digest-flow.ts` started as alfred's copy. Warden now resolves renamed
+crypto imports and follows JSON parsing through owner canonicalizers. Port fixes
+with those local changes in mind.
 
 ## Layout
 

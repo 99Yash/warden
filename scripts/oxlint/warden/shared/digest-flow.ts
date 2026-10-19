@@ -74,12 +74,6 @@ export function isJsonStringify(call: ESTree.CallExpression): boolean {
   );
 }
 
-function isCreateHash(callee: ESTree.Expression): boolean {
-  if (callee.type === "Identifier") return callee.name === "createHash";
-
-  return staticMember(callee)?.name === "createHash";
-}
-
 /** `subtle`, `crypto.subtle`, `globalThis.crypto.subtle`. */
 function isSubtle(expression: ESTree.Expression): boolean {
   if (expression.type === "Identifier") return expression.name === "subtle";
@@ -131,10 +125,12 @@ function importedName(specifier: ESTree.ImportSpecifier): string {
  * export name. `namespaces` holds each reference to a namespace import of an
  * owner module, mapped to that owner's hashers. The references come from the
  * scope manager, so a local binding that shadows the import is not one of them.
+ * `canonicalizers` contains the named and namespace callees of owner serializers.
  */
 export type OwnerImports = Readonly<{
   named: ReadonlyMap<ESTree.Node, string>;
   namespaces: ReadonlyMap<ESTree.Node, ReadonlyMap<string, string>>;
+  canonicalizers: ReadonlySet<ESTree.Node>;
 }>;
 
 export function ownerImportsOf(
@@ -145,6 +141,7 @@ export function ownerImportsOf(
 ): OwnerImports {
   const named = new Map<ESTree.Node, string>();
   const namespaces = new Map<ESTree.Node, ReadonlyMap<string, string>>();
+  const canonicalizers = new Set<ESTree.Node>();
 
   for (const statement of program.body) {
     if (statement.type !== "ImportDeclaration" || statement.importKind === "type") continue;
@@ -161,6 +158,15 @@ export function ownerImportsOf(
       if (specifier.type === "ImportNamespaceSpecifier") {
         for (const reference of variable.references) {
           namespaces.set(reference.identifier, owner.hashers);
+          const member = reference.identifier.parent;
+          if (
+            member.type === "MemberExpression" &&
+            !member.computed &&
+            member.object === reference.identifier &&
+            member.property.type === "Identifier" &&
+            owner.canonicalizers.has(member.property.name)
+          )
+            canonicalizers.add(member);
         }
 
         continue;
@@ -169,17 +175,20 @@ export function ownerImportsOf(
       if (specifier.type !== "ImportSpecifier") continue;
       const name = importedName(specifier);
 
+      if (owner.canonicalizers.has(name)) {
+        for (const reference of variable.references) canonicalizers.add(reference.identifier);
+      }
       if (!owner.hashers.has(name)) continue;
 
       for (const reference of variable.references) named.set(reference.identifier, name);
     }
   }
 
-  return { named, namespaces };
+  return { named, namespaces, canonicalizers };
 }
 
 /** The owner hasher that `callee` names, as `{ export name, callee text }`, or null. */
-function ownerHasherOf(
+export function ownerHasherOf(
   imports: OwnerImports,
   callee: ESTree.Expression,
 ): Readonly<{ name: string; text: string }> | null {
@@ -211,11 +220,21 @@ export function ownerSinkOf(imports: OwnerImports, call: ESTree.CallExpression):
   return { call, data: first, receiver: null, helper: hasher.text };
 }
 
+/** An owner serializer or JSON.parse call that can change serialized key order. */
+export type JsonTransform = Readonly<{
+  call: ESTree.CallExpression;
+  kind: "canonical" | "parse";
+}>;
+
 /**
  * One file's flow analysis. `jsonCalls` are the `JSON.stringify` calls of the
  * file; pass none to follow every parameter without stopping at JSON.
  */
-export function createDigestFlow(sourceCode: SourceCode, jsonCalls: readonly Ranged[]) {
+export function createDigestFlow(
+  sourceCode: SourceCode,
+  jsonCalls: readonly ESTree.CallExpression[],
+  transforms: readonly JsonTransform[] = [],
+) {
   const references: Reference[] = sourceCode.scopeManager.scopes.flatMap(
     (scope: Scope) => scope.references,
   );
@@ -223,6 +242,30 @@ export function createDigestFlow(sourceCode: SourceCode, jsonCalls: readonly Ran
   const referenceOf = new Map<ESTree.Node, Reference>();
 
   for (const reference of references) referenceOf.set(reference.identifier, reference);
+
+  function isCreateHash(callee: ESTree.Expression): boolean {
+    const node = unwrap(callee);
+    const member = staticMember(node);
+    const identifier = node.type === "Identifier" ? node : member?.object;
+    if (identifier?.type !== "Identifier") return member?.name === "createHash";
+    const variable = referenceOf.get(identifier)?.resolved;
+    if (variable == null)
+      return node.type === "Identifier"
+        ? node.name === "createHash"
+        : member?.name === "createHash";
+    return variable.defs.some((definition) => {
+      if (definition.type !== "ImportBinding" || definition.parent?.type !== "ImportDeclaration")
+        return false;
+      const source = definition.parent.source.value;
+      if (source !== "node:crypto" && source !== "crypto") return false;
+      return node.type === "Identifier"
+        ? definition.node.type === "ImportSpecifier" &&
+            importedName(definition.node) === "createHash"
+        : member?.name === "createHash" &&
+            (definition.node.type === "ImportNamespaceSpecifier" ||
+              definition.node.type === "ImportDefaultSpecifier");
+    });
+  }
 
   function writeOf(reference: Reference): Write {
     const identifier = reference.identifier;
@@ -350,20 +393,63 @@ export function createDigestFlow(sourceCode: SourceCode, jsonCalls: readonly Ran
     return null;
   }
 
-  function collect(expression: Ranged, flow: Flow, seen: Set<Reference>): void {
+  function collect(
+    expression: Ranged,
+    flow: Flow,
+    seen: Set<string>,
+    canonicalizing = false,
+    decoded = false,
+  ): void {
     if (flow.json) return;
 
-    if (jsonCalls.some((call) => within(call, expression))) {
+    // Parsing removes a stringify's outer key order only when the resulting
+    // value is canonicalized. Follow the stringify's input in that case, so
+    // nested JSON strings remain order-dependent and are still reported.
+    const candidates = [
+      ...transforms.filter(({ kind, call }) => {
+        if (kind === "canonical") return true;
+        if (!canonicalizing) return false;
+        const callee = staticMember(unwrap(call.callee));
+        return (
+          callee?.object.type === "Identifier" &&
+          (referenceOf.get(callee.object)?.resolved?.defs.length ?? 0) === 0
+        );
+      }),
+      ...(decoded ? jsonCalls.map((call) => ({ call, kind: "stringify" as const })) : []),
+    ].filter(
+      ({ call }) =>
+        within(call, expression) &&
+        call.arguments.length === 1 &&
+        call.arguments[0]?.type !== "SpreadElement",
+    );
+    const outer = candidates.filter(
+      ({ call }) => !candidates.some((other) => other.call !== call && within(call, other.call)),
+    );
+    const transformed = (node: Ranged) => outer.some(({ call }) => within(node, call));
+    for (const { call, kind } of outer) {
+      const argument = call.arguments[0];
+      if (argument !== undefined && argument.type !== "SpreadElement") {
+        collect(argument, flow, seen, true, kind === "parse");
+      }
+    }
+
+    if (jsonCalls.some((call) => within(call, expression) && !transformed(call))) {
       flow.json = true;
 
       return;
     }
 
     for (const reference of references) {
-      if (!within(reference.identifier, expression) || seen.has(reference)) continue;
+      const key = `${reference.identifier.start}:${canonicalizing}:${decoded}`;
+      if (
+        !within(reference.identifier, expression) ||
+        transformed(reference.identifier) ||
+        seen.has(key)
+      )
+        continue;
 
       if (!reference.isRead() || reference.resolved === null) continue;
-      seen.add(reference);
+      seen.add(key);
       const variable = reference.resolved;
 
       if (parameterSlot(variable) !== null) {
@@ -373,7 +459,7 @@ export function createDigestFlow(sourceCode: SourceCode, jsonCalls: readonly Ran
 
       for (const value of reachingValues(variable, reference)) {
         if (isFunctionNode(unwrap(value))) continue;
-        collect(value, flow, seen);
+        collect(value, flow, seen, canonicalizing, decoded);
 
         if (flow.json) return;
       }

@@ -24,6 +24,16 @@ const reexported = (name: string) => ({ messageId: "reexportedHasher", data: { n
 tester.run("warden/no-exported-hasher", noExportedHasherRule, {
   valid: [
     {
+      name: "a namespace's serializer is not a hasher export",
+      code: `import * as hashes from "@warden/core/hash";
+export const serialize = hashes.canonicalJson;`,
+    },
+    {
+      name: "a local createHash binding is not the crypto import it shadows",
+      code: `function createHash(algorithm: string) { return cache.get(algorithm); }
+export function save(text: string) { return createHash("key").update(text); }`,
+    },
+    {
       // The owner module defines and exports the hasher.
       name: "the owner module exports its hasher",
       filename: "packages/core/src/hash.ts",
@@ -139,6 +149,29 @@ export function sha256(text: string): string {
     },
   ],
   invalid: [
+    {
+      name: "namespace imports cannot expose the owner through another module",
+      code: `import * as hashes from "@warden/core/hash";
+export { hashes };
+export const owner = hashes;
+export const digest = hashes.sha256Hex;
+export default hashes;`,
+      errors: Array.from({ length: 4 }, () => reexported("sha256Hex")),
+    },
+    {
+      name: "a namespace member cannot be the default export",
+      code: `import * as hashes from "@warden/core/hash";
+export default hashes.sha256Hex;`,
+      errors: [reexported("sha256Hex")],
+    },
+    {
+      name: "a renamed crypto import still creates an exported raw hasher",
+      code: `import { createHash as nodeHash } from "node:crypto";
+export function hash(text: string) {
+  return nodeHash("sha256").update(text).digest("hex");
+}`,
+      errors: [exported("hash")],
+    },
     {
       // warden: \`packages/core/src/context/chunker.ts\` before the owner.
       name: "an exported function declaration",
