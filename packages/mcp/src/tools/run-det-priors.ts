@@ -205,7 +205,12 @@ export async function runRunDetPriors(
     };
   }
 
-  const det = await runDetPriors({ diff: diffText, repoRoot, mode: args.mode, diffBase });
+  const det = await runDetPriors({
+    diff: diffText,
+    repoRoot,
+    mode: args.mode,
+    ...(diffBase !== undefined ? { diffBase } : {}),
+  });
   // One handle per completed run. Not derived from the target: two runs of the
   // same diff are two results, and keying on the request would let a later run
   // silently replace the pages of a review already in progress.

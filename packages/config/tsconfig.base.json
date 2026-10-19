@@ -14,9 +14,19 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["node"]
+    "types": ["node"],
+    // code-chunk's `exports.types` points at its raw `src/*.ts`, which
+    // `skipLibCheck` does not skip, so every program that reaches it through
+    // `@warden/core` type-checked a dependency's source under our flags (it
+    // fails `exactOptionalPropertyTypes`). Point the types at its shipped
+    // `.d.ts` instead. Extensionless on purpose: tsc picks `index.d.ts`, and
+    // tsdown, which also reads `paths`, picks the same `index.js` the
+    // `import` condition does, so the bundles are unchanged. Relative to
+    // this file; code-chunk is a dependency of `@warden/core` only.
+    "paths": { "code-chunk": ["../core/node_modules/code-chunk/dist/index"] }
   }
 }

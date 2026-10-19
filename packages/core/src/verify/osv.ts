@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getCached, putCached } from "../cache/external-knowledge.js";
 
 /**
@@ -19,16 +20,21 @@ const OSV_VULN_ENDPOINT = "https://api.osv.dev/v1/vulns/";
 const OSV_TTL_MS = 24 * 60 * 60 * 1000;
 const OSV_TIMEOUT_MS = 5_000;
 
-export interface OsvRecord {
-  id: string;
+/**
+ * The fields of an OSV record that warden reads (`vuln/index.ts` cites the
+ * summary, details and CVE aliases). OSV's full schema is not modelled; unknown
+ * keys are stripped, so the cached payload holds only these. A response or
+ * cache row that does not match is unverified: the advisory is dropped.
+ */
+const OsvRecordSchema = z.object({
+  id: z.string(),
   /** CVE / GHSA aliases. The OSV record for a GHSA usually aliases a CVE. */
-  aliases?: string[];
-  summary?: string;
-  details?: string;
-  modified?: string;
-  published?: string;
-  references?: { type: string; url: string }[];
-}
+  aliases: z.array(z.string()).optional(),
+  summary: z.string().optional(),
+  details: z.string().optional(),
+});
+
+export type OsvRecord = z.infer<typeof OsvRecordSchema>;
 
 export interface VerifiedAdvisory {
   ghsaId: string;
@@ -40,7 +46,7 @@ export interface VerifiedAdvisory {
 export async function verifyOsv(ghsaId: string): Promise<VerifiedAdvisory | undefined> {
   const queryKey = `osv:${ghsaId}`;
 
-  const cached = getCached<OsvRecord>(queryKey);
+  const cached = getCached(queryKey, OsvRecordSchema);
   if (cached) {
     return { ghsaId, record: cached.payload, retrievedAt: cached.retrievedAt.toISOString() };
   }
@@ -52,7 +58,7 @@ export async function verifyOsv(ghsaId: string): Promise<VerifiedAdvisory | unde
     queryKey,
     sourceType: "advisory",
     sourceUrl: `${OSV_VULN_ENDPOINT}${ghsaId}`,
-    payload: record as unknown as Record<string, unknown>,
+    payload: record,
     ttlMs: OSV_TTL_MS,
   });
 
@@ -69,9 +75,8 @@ async function fetchOsv(ghsaId: string): Promise<OsvRecord | undefined> {
     });
     if (res.status === 404) return undefined;
     if (!res.ok) return undefined;
-    const json = (await res.json()) as OsvRecord;
-    if (!json || typeof json !== "object" || typeof json.id !== "string") return undefined;
-    return json;
+    const parsed = OsvRecordSchema.safeParse(await res.json());
+    return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   } finally {

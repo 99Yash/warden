@@ -1,0 +1,49 @@
+# The code-quality gate: `pnpm verify` (docs/gate-design.md).
+#
+# - check:oxlint-plugin  the vendored lint rules are tested, registered, and
+#                        driven through the root config at "error"
+# - check:osv-cache      real SQLite cache regression checks, with no network
+# - lint                 oxlint with the root config, type-aware, --deny-warnings
+# - format:check         oxfmt over code and config
+# - check-types          tsc across every workspace plus scripts/tsconfig.json
+#
+# No secrets and no model calls. Same-repo and fork PRs both run it.
+
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: pnpm verify

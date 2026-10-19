@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { db, eq, inArray, jobs as jobsTable } from "@warden/db";
+import { canonicalJson, sha256Hex } from "../hash.js";
 import type { JobRunResult, JobRunner, JobRunnerProgress, Task } from "./interfaces.js";
 
 /**
@@ -162,20 +162,11 @@ export class SyncJobRunner implements JobRunner {
 
 /**
  * Compute the content-addressed task id for `(kind, input)`. Sort key order
- * for inputs so JSON canonicalization is stable across runs.
+ * for inputs so JSON canonicalization is stable across runs. Persisted as
+ * `jobs.task_id`, so its output must not change (see `canonicalJson`).
  */
 export function taskIdFor(kind: string, input: unknown): string {
-  const json = canonicalJson(input);
-  return createHash("sha256").update(`${kind}:${json}`, "utf8").digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  return sha256Hex(`${kind}:${canonicalJson(input)}`);
 }
 
 function readJobRows(

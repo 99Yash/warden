@@ -185,6 +185,7 @@ function runGit(repoRoot: string, args: string[]): Promise<GitResult> {
   return new Promise((resolveP) => {
     const child = spawn("git", args, {
       cwd: repoRoot,
+      // oxlint-disable-next-line node/no-process-env -- open question, queued in docs/gate-design.md: git reads the user's own config and credentials, but ADR-0054 gives other tools only deterministicProcessEnv()
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });

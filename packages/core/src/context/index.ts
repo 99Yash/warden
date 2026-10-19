@@ -66,7 +66,6 @@ export { candidatesToRetrievedContext } from "./prompt.js";
 export {
   CodeChunkAdapter,
   SUPPORTED_LANGUAGES,
-  sha256Hex,
   type ChunkRecord,
   type Chunker,
   type SupportedLanguage,

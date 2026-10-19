@@ -1,4 +1,5 @@
-import { createId, db, eq, externalKnowledge } from "@warden/db";
+import { createId, db, eq, externalKnowledge, sql } from "@warden/db";
+import type { ZodType } from "zod";
 import type { SourceType } from "../schema.js";
 
 /**
@@ -11,6 +12,10 @@ import type { SourceType } from "../schema.js";
  * Implementation note — better-sqlite3 is synchronous; the API mirrors that
  * (`getCached` returns directly, no Promise) which keeps the call sites in the
  * pipeline straightforward.
+ *
+ * A cached payload is read back through the caller's schema: the row is JSON
+ * an older warden (or a hand edit) wrote, so it is not trusted as `T`. A row
+ * that fails the schema is a miss, and the caller's refetch overwrites it.
  */
 
 export interface CachedEntry<T> {
@@ -18,10 +23,12 @@ export interface CachedEntry<T> {
   retrievedAt: Date;
 }
 
-export function getCached<T>(queryKey: string): CachedEntry<T> | undefined {
+export function getCached<T>(queryKey: string, schema: ZodType<T>): CachedEntry<T> | undefined {
   const row = db()
     .select({
-      payload: externalKnowledge.payload,
+      // Read text without the JSON column's decoder: malformed JSON must be
+      // a cache miss, not an exception thrown before the schema can run.
+      payload: sql<unknown>`${externalKnowledge.payload}`,
       retrievedAt: externalKnowledge.retrievedAt,
       ttlExpiresAt: externalKnowledge.ttlExpiresAt,
     })
@@ -30,8 +37,23 @@ export function getCached<T>(queryKey: string): CachedEntry<T> | undefined {
     .get();
 
   if (!row) return undefined;
-  if (row.ttlExpiresAt.getTime() <= Date.now()) return undefined;
-  return { payload: row.payload as T, retrievedAt: row.retrievedAt };
+  const expiresAt = row.ttlExpiresAt.getTime();
+  if (
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= Date.now() ||
+    !Number.isFinite(row.retrievedAt.getTime()) ||
+    typeof row.payload !== "string"
+  )
+    return undefined;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {
+    return undefined;
+  }
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) return undefined;
+  return { payload: parsed.data, retrievedAt: row.retrievedAt };
 }
 
 /**

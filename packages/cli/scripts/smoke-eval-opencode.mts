@@ -130,7 +130,13 @@ function loadFixtures(): LoadedFixture[] {
           how = "sparse fallback (malformed meta.json)";
         }
       }
-      out.push({ fixture, sections, how, worktreeBefore, repoPath });
+      out.push({
+        fixture,
+        sections,
+        how,
+        ...(worktreeBefore !== undefined ? { worktreeBefore } : {}),
+        ...(repoPath !== undefined ? { repoPath } : {}),
+      });
     }
   }
   return out;

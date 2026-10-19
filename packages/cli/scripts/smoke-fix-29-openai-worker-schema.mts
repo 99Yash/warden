@@ -141,7 +141,10 @@ assert(result.failed !== true, `worker did NOT fail on the output schema`);
 const failureEntries = result.degraded.filter(
   (d) => d.kind === "warning" && d.topic.startsWith("worker-"),
 );
-assert(failureEntries.length === 0, `no worker-failure degraded entries (got ${failureEntries.length})`);
+assert(
+  failureEntries.length === 0,
+  `no worker-failure degraded entries (got ${failureEntries.length})`,
+);
 
 // If the worker found something (it usually does on this fixture), the shape
 // should still validate — proving the schema round-tripped under strict:false.

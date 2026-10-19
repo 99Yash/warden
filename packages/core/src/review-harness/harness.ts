@@ -7,8 +7,8 @@ import {
 } from "@warden/ai";
 import { createId, db, eq, reviewRuns } from "@warden/db";
 import { wardenEnv } from "@warden/env";
-import { createHash } from "node:crypto";
 import type { ContextSelector } from "../context/index.js";
+import { canonicalJson, sha256Hex } from "../hash.js";
 import type { FormatterListener } from "../llm/index.js";
 import { verifyCitations } from "../llm/verify-citations.js";
 import { Semaphore } from "../orchestration/semaphore.js";
@@ -104,8 +104,8 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     diff: input.diff,
     repoRoot: input.repoRoot,
     mode: input.config.mode,
-    selector: input.selector,
-    retrievedContext: input.retrievedContext,
+    ...(input.selector !== undefined ? { selector: input.selector } : {}),
+    ...(input.retrievedContext !== undefined ? { retrievedContext: input.retrievedContext } : {}),
     ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
   // ADR-0054: these signals are published independently of model output,
@@ -326,6 +326,11 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
  * confidence floor) and the diff base ref so two materially different reviews
  * never alias to the same resume key. Hashing the actual prompt-file
  * *contents* (vs. the variant selector) is deferred to the resume pass (#33).
+ *
+ * The pre-image is `canonicalJson`, not `JSON.stringify`, so the key does not
+ * depend on the order the config objects' keys were inserted in. Keys written before 2026-10-18
+ * hashed `JSON.stringify` and do not match keys written after; nothing reads
+ * `input_hash` yet (resume is deferred), so an older row is only a miss.
  */
 function computeInputHash(
   input: ReviewHarnessInput,
@@ -349,12 +354,9 @@ function computeInputHash(
     diffBase: input.diffBase?.baseRef ?? null,
   };
   const modelSet = [modelLabels.opus, modelLabels.sonnet, modelLabels.haiku].sort();
-  const payload = JSON.stringify({
-    diff: createHash("sha256").update(input.diff).digest("hex"),
-    config: resolvedConfig,
-    models: modelSet,
-  });
-  return createHash("sha256").update(payload).digest("hex");
+  return sha256Hex(
+    canonicalJson({ diff: sha256Hex(input.diff), config: resolvedConfig, models: modelSet }),
+  );
 }
 
 function recordReviewRun(input: {

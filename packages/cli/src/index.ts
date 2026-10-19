@@ -131,7 +131,7 @@ async function runReview(mode: ReviewConfig["mode"], opts: CommonOpts): Promise<
       verbose: opts.verbose === true,
       ...(mode === "review" && opts.deep === true ? { deep: true } : {}),
     },
-    emit,
+    ...(emit !== undefined ? { emit } : {}),
     ...(diffDegraded && diffDegraded.length > 0 ? { extraDegraded: diffDegraded } : {}),
     // ADR-0046: forward the resolved base so the react-doctor det-prior can
     // drive its `--scope changed` delta against the same base warden diffed.
@@ -168,7 +168,11 @@ async function acquireDiff(
     const diff = await readAllStdin();
     return { diff, description: "stdin" };
   }
-  return resolveDiff({ repoRoot, mode, baseRef: opts.base });
+  return resolveDiff({
+    repoRoot,
+    mode,
+    ...(opts.base !== undefined ? { baseRef: opts.base } : {}),
+  });
 }
 
 function readAllStdin(): Promise<string> {
@@ -492,7 +496,11 @@ async function runPostPassCommand(opts: PostPassOpts): Promise<void> {
   if (opts.diffFile !== undefined) {
     diff = readFileSync(resolve(repoRoot, opts.diffFile), "utf8");
   } else {
-    const resolved = await resolveDiff({ repoRoot, mode: "review", baseRef: opts.base });
+    const resolved = await resolveDiff({
+      repoRoot,
+      mode: "review",
+      ...(opts.base !== undefined ? { baseRef: opts.base } : {}),
+    });
     diff = resolved.diff;
     extraDegraded = resolved.degraded;
   }

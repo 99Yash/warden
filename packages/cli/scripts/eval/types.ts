@@ -148,7 +148,7 @@ export interface FixtureSample {
   sessionModel?: string;
 }
 
-export interface EvalCommentSummary {
+interface EvalCommentSummary {
   id: string;
   file: string;
   lineStart: number;

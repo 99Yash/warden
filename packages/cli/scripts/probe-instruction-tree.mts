@@ -36,6 +36,7 @@ const paths = [
 ];
 let requests: Array<Record<string, unknown>> = [];
 let step = 0;
+// oxlint-disable-next-line typescript/no-misused-promises -- a rejected handler crashes the probe, which is the loud failure a smoke run wants
 const provider = createServer(async (req, res) => {
   let body = "";
   for await (const chunk of req) body += chunk.toString();

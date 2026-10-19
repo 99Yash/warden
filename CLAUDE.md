@@ -6,12 +6,14 @@ Read [`decisions.md`](./decisions.md) before proposing architectural changes —
 
 ## Where to look next
 
-| Topic                                                          | File                                             |
-| -------------------------------------------------------------- | ------------------------------------------------ |
-| Monorepo layout, package boundaries, how the pieces coordinate | [`docs/architecture.md`](./docs/architecture.md) |
-| TypeScript / AI SDK / Database rules — do's and don'ts         | [`docs/conventions.md`](./docs/conventions.md)   |
-| Environment variable table + workflow for adding one           | [`docs/environment.md`](./docs/environment.md)   |
-| Milestone status (M1–M17 shipped, M18+ deferred)               | [`docs/milestones.md`](./docs/milestones.md)     |
+| Topic                                                               | File                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------ |
+| Monorepo layout, package boundaries, how the pieces coordinate      | [`docs/architecture.md`](./docs/architecture.md) |
+| TypeScript / AI SDK / Database rules — do's and don'ts              | [`docs/conventions.md`](./docs/conventions.md)   |
+| Environment variable table + workflow for adding one                | [`docs/environment.md`](./docs/environment.md)   |
+| Milestone status (M1–M17 shipped, M18+ deferred)                    | [`docs/milestones.md`](./docs/milestones.md)     |
+| Code style and review checklist, each rule tagged with its gate     | [`docs/code-style.md`](./docs/code-style.md)     |
+| Which check a new rule gets; the measured queue of unenforced rules | [`docs/gate-design.md`](./docs/gate-design.md)   |
 
 `AGENTS.md` is a symlink to this file.
 
@@ -20,8 +22,11 @@ Read [`decisions.md`](./decisions.md) before proposing architectural changes —
 ```bash
 pnpm dev             # watch all packages
 pnpm build           # build all packages
-pnpm check-types     # tsc across all packages
-pnpm lint            # oxlint
+pnpm verify          # the whole gate CI runs: check + check-types
+pnpm check           # plugin-rule proof, lint, format check
+pnpm check-types     # tsc across all packages and scripts/
+pnpm lint            # oxlint, type-aware, root .oxlintrc.json
+pnpm format          # oxfmt
 pnpm db:generate     # generate Drizzle migration from schema diff
 pnpm db:migrate      # apply pending migrations to .warden/cache.sqlite
 pnpm db:studio       # Drizzle Studio GUI
@@ -29,6 +34,8 @@ pnpm warden <cmd>    # run the CLI from the workspace
 ```
 
 Workspace packages export TS source directly (`./src/index.ts`), so `pnpm check-types` works on a fresh tree without a prior build. **Never `db:push` outside local exploration** — always `db:generate` → `db:migrate`. See [`docs/conventions.md`](./docs/conventions.md) for the full schema-change workflow.
+
+Run `pnpm verify` before you call a change done. You do not need to memorize what `.oxlintrc.json` enforces: `.claude/hooks/lint-on-edit.mjs` reports it on each file you write. Spend review attention on the rules that [`docs/code-style.md`](./docs/code-style.md) tags _Review_. A lint exception takes `// oxlint-disable-next-line <rule> -- <reason>`. A new rule goes to `"error"` only when the tree is at zero for it ([`docs/gate-design.md`](./docs/gate-design.md)).
 
 <!-- effect-solutions:start -->
 

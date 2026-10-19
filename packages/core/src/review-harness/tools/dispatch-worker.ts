@@ -264,8 +264,8 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       repoRoot: opts.repoRoot,
       files: args.files,
       concern: args.concern,
-      tier: args.tier,
-      focus: args.focus,
+      ...(args.tier !== undefined ? { tier: args.tier } : {}),
+      ...(args.focus !== undefined ? { focus: args.focus } : {}),
       phase: args.phase,
     };
 

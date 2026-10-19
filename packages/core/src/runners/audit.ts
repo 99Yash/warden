@@ -115,7 +115,7 @@ function parsePnpmShape(advisories: Record<string, unknown>): AuditAdvisory[] {
       severity: normalizeSeverity(a.severity),
       title: a.title ?? a.module_name,
       url: a.url ?? `https://github.com/advisories/${ghsaId}`,
-      vulnerableRange: a.vulnerable_versions,
+      ...(a.vulnerable_versions !== undefined ? { vulnerableRange: a.vulnerable_versions } : {}),
     });
   }
   return dedupeByGhsa(out);
@@ -150,7 +150,7 @@ function parseNpmShape(vulns: Record<string, unknown>): AuditAdvisory[] {
         severity: normalizeSeverity(adv.severity),
         title: adv.title ?? adv.name,
         url: adv.url ?? `https://github.com/advisories/${ghsaId}`,
-        vulnerableRange: adv.range,
+        ...(adv.range !== undefined ? { vulnerableRange: adv.range } : {}),
       });
     }
   }

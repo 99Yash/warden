@@ -1,3 +1,9 @@
 {
-  "ignorePatterns": ["dist/**", "**/migrations/**", "packages/cli/opencode/**"]
+  "ignorePatterns": [
+    "dist/**",
+    "**/migrations/**",
+    "packages/cli/opencode/**",
+    "packages/core/src/review-harness/prompts/**",
+    "packages/cli/scripts/eval/fixtures/**"
+  ]
 }

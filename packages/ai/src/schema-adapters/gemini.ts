@@ -146,13 +146,13 @@ function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): Zo
         newShape[key] = transformed;
         if (transformed !== child) changed = true;
       }
-      return changed ? (z.object(newShape) as unknown as ZodType) : schema;
+      return changed ? z.object(newShape) : schema;
     }
     case "array": {
       if (def.element) {
         const transformed = walk(def.element, [...currentPath, { kind: "index" }], paths);
         if (transformed !== def.element) {
-          return z.array(transformed) as unknown as ZodType;
+          return z.array(transformed);
         }
       }
       return schema;
@@ -161,7 +161,7 @@ function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): Zo
       if (def.innerType) {
         const transformed = walk(def.innerType, currentPath, paths);
         if (transformed !== def.innerType) {
-          return transformed.optional() as unknown as ZodType;
+          return transformed.optional();
         }
       }
       return schema;
@@ -170,7 +170,7 @@ function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): Zo
       if (def.innerType) {
         const transformed = walk(def.innerType, currentPath, paths);
         if (transformed !== def.innerType) {
-          return transformed.nullable() as unknown as ZodType;
+          return transformed.nullable();
         }
       }
       return schema;
@@ -186,7 +186,7 @@ function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): Zo
           // default keeps the request schema parsable on the wire. If a
           // future schema needs default-preserving transform, lift the
           // default into responseTransform.
-          return transformed as unknown as ZodType;
+          return transformed;
         }
       }
       return schema;
@@ -195,7 +195,7 @@ function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): Zo
       if (def.innerType) {
         const transformed = walk(def.innerType, currentPath, paths);
         if (transformed !== def.innerType) {
-          return transformed as unknown as ZodType;
+          return transformed;
         }
       }
       return schema;
@@ -228,18 +228,16 @@ function isNumericLiteralUnion(def: ZodDef): boolean {
 
 function numericLiteralUnionToString(def: ZodDef): ZodType {
   const options = def.options ?? [];
-  const stringLiterals = options.flatMap((opt) => {
+  const [first, second, ...rest] = options.flatMap((opt) => {
     const values = defOf(opt)?.values ?? [];
     return values
       .filter((v): v is number => typeof v === "number")
       .map((v) => z.literal(String(v)));
   });
-  if (stringLiterals.length === 1) {
-    return stringLiterals[0] as unknown as ZodType;
-  }
-  return z.union(
-    stringLiterals as unknown as [ZodType, ZodType, ...ZodType[]],
-  ) as unknown as ZodType;
+  // Unreachable: `isNumericLiteralUnion` guarantees at least one literal.
+  if (first === undefined) return z.never();
+  if (second === undefined) return first;
+  return z.union([first, second, ...rest]);
 }
 
 /**

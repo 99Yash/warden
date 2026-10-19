@@ -5,10 +5,16 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "check-types": "turbo run check-types",
-    "check": "oxlint && oxfmt --write",
-    "lint": "oxlint",
-    "format": "oxfmt --write",
+    "check-types": "turbo run check-types && tsc -p scripts/tsconfig.json",
+    "lint": "oxlint --config .oxlintrc.json --deny-warnings",
+    "lint:fix": "oxlint --config .oxlintrc.json --fix",
+    "format": "oxfmt --write --ignore-path .gitignore apps packages scripts .claude package.json pnpm-workspace.yaml turbo.json .oxlintrc.json .oxfmtrc.json",
+    "format:check": "oxfmt --check --ignore-path .gitignore apps packages scripts .claude package.json pnpm-workspace.yaml turbo.json .oxlintrc.json .oxfmtrc.json",
+    "check:oxlint-plugin": "node scripts/check-oxlint-plugin.mjs",
+    "check:osv-cache": "pnpm --filter @warden/cli smoke:osv-cache",
+    "knip": "knip --treat-config-hints-as-errors",
+    "check": "pnpm check:oxlint-plugin && pnpm check:osv-cache && pnpm knip && pnpm lint && pnpm format:check",
+    "verify": "pnpm check && pnpm check-types",
     "db:generate": "turbo run db:generate --filter=@warden/db",
     "db:migrate": "turbo run db:migrate --filter=@warden/db",
     "db:studio": "turbo run db:studio --filter=@warden/db",
@@ -18,11 +24,17 @@
     "lanes:check": "pnpm --filter @warden/cli lanes:check"
   },
   "devDependencies": {
-    "@types/node": "^22.13.11",
+    "@oxlint/plugins": "^1.82.0",
+    "@types/node": "catalog:",
+    "knip": "^6.42.0",
     "oxfmt": "^0.26.0",
-    "oxlint": "^1.62.0",
-    "tsdown": "^0.15.5",
-    "turbo": "^2.8.10"
+    "oxlint": "^1.82.0",
+    "oxlint-tsgolint": "7.0.2004",
+    "turbo": "^2.8.10",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   },
   "packageManager": "pnpm@10.20.0",
   "pnpm": {

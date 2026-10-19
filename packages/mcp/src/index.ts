@@ -11,6 +11,7 @@ export {
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
   createMcpServer,
+  type WardenMcpServer,
   startMcpServer,
   type StartMcpServerOptions,
 } from "./server.js";

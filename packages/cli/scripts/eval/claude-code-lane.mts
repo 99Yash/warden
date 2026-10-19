@@ -33,8 +33,8 @@ import { DOWN_LANE_SPEC, PROMPT_FILENAME } from "../../src/opencode/materialize.
  * the engine; this lane only measures the same method on another client.
  */
 
-export const CLAUDE_CODE_DEFAULT_MODEL = "claude-opus-5-5";
-export const CLAUDE_CODE_DEFAULT_EFFORT = "high";
+const CLAUDE_CODE_DEFAULT_MODEL = "claude-opus-5-5";
+const CLAUDE_CODE_DEFAULT_EFFORT = "high";
 /** Claude Code names MCP tools `mcp__<server>__<tool>`; OpenCode names them `<server>_<tool>`. */
 const MCP_PREFIX = "mcp__warden__";
 const MCP_TOOLS = ["run_det_priors", "lookup_type_def"] as const;
@@ -45,7 +45,7 @@ function isStrippedEnv(name: string): boolean {
   return name.startsWith("ANTHROPIC_") || name.startsWith("CLAUDE_CODE_") || name === "CLAUDECODE";
 }
 
-export function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(env)) {
     if (!isStrippedEnv(name)) out[name] = value;
@@ -53,7 +53,7 @@ export function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): Record<string, strin
   return out;
 }
 
-export function buildClaudeCodeArgv(opts: {
+function buildClaudeCodeArgv(opts: {
   model: string;
   effort: string;
   systemPromptFile: string;
@@ -105,12 +105,12 @@ export function buildClaudeCodeArgv(opts: {
 }
 
 /** The OpenCode message plus the tool-name mapping the shared prompt needs on this client. */
-export function buildClaudeCodeMessage(baseRef: string): string {
+function buildClaudeCodeMessage(baseRef: string): string {
   const mapping = MCP_TOOLS.map((t) => `\`warden_${t}\` is \`${MCP_PREFIX}${t}\``).join(", ");
   return `${buildLaneMessage(baseRef)} Tool names on this client: ${mapping}.`;
 }
 
-export interface ParsedClaudeCodeLane {
+interface ParsedClaudeCodeLane {
   parsed: ParsedLane;
   usage?: SessionUsage;
 }
@@ -123,7 +123,7 @@ export interface ParsedClaudeCodeLane {
  * closed through `parseError` / `errors`. Tool names are normalized to
  * the OpenCode form so the det-priors check and the trace read the same.
  */
-export function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
+function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
   const toolNameById = new Map<string, string>();
   const seen = new Map<string, number>();
   const completed = new Map<string, number>();
@@ -272,7 +272,7 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
   const resolved = await resolveDiff({
     repoRoot: opts.repoRoot,
     mode: "review",
-    baseRef: opts.baseRef,
+    ...(opts.baseRef !== undefined ? { baseRef: opts.baseRef } : {}),
   });
   const scope = deriveLaneScope(resolved.diff);
   const model = `${opts.model ?? CLAUDE_CODE_DEFAULT_MODEL}#${opts.effort ?? CLAUDE_CODE_DEFAULT_EFFORT}`;

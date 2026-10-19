@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { chunk as codeChunkChunk, detectLanguage } from "code-chunk";
+import { sha256Hex } from "../hash.js";
 
 /**
  * Single AST-aware chunker entry point for the M6 embedding selector
@@ -122,8 +122,4 @@ export class CodeChunkAdapter implements Chunker {
     }
     return records;
   }
-}
-
-export function sha256Hex(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
 }

@@ -182,9 +182,9 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
   const userPrompt = renderUserPrompt({
     files: input.files,
     snippets,
-    focus: input.focus,
+    ...(input.focus !== undefined ? { focus: input.focus } : {}),
     phase: input.phase,
-    preamble: input.preamble,
+    ...(input.preamble !== undefined ? { preamble: input.preamble } : {}),
   });
 
   let primary: LanguageModel;
@@ -463,7 +463,7 @@ export async function callWorker(opts: {
       ok: true,
       findings: first.findings,
       toolCalls: first.toolCalls,
-      tokenUsage: first.tokenUsage,
+      ...(first.tokenUsage !== undefined ? { tokenUsage: first.tokenUsage } : {}),
     };
   }
   const modelLabel = opts.modelLabel ?? `anthropic ${opts.tier}`;
@@ -514,7 +514,7 @@ async function tryProvider(
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;
-    (async () => {
+    void (async () => {
       try {
         for await (const part of result.fullStream) {
           if (part.type === "tool-call") toolCalls += 1;
@@ -540,7 +540,12 @@ async function tryProvider(
     } catch {
       tokenUsage = undefined;
     }
-    return { ok: true, findings: parsed.findings, toolCalls, tokenUsage };
+    return {
+      ok: true,
+      findings: parsed.findings,
+      toolCalls,
+      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+    };
   } catch (err) {
     return { ok: false, error: formatErr(err) };
   }

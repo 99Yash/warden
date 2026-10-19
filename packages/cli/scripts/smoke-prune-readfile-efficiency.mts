@@ -77,7 +77,11 @@ const readFile = makeReadFileTool({ repoRoot: dir });
 // The AI SDK `tool().execute` is optional, takes a 2nd options arg, and
 // returns `RESULT | AsyncIterable<RESULT>`. This tool always returns a single
 // `ReadFileResult` — narrow it once here so the assertions stay readable.
-async function read(args: { path: string; offset?: number; limit?: number }): Promise<ReadFileResult> {
+async function read(args: {
+  path: string;
+  offset?: number;
+  limit?: number;
+}): Promise<ReadFileResult> {
   const exec = readFile.execute;
   if (!exec) throw new Error("readFile tool has no execute");
   return (await exec(args, { toolCallId: "smoke", messages: [] })) as ReadFileResult;
@@ -89,13 +93,19 @@ assert(
   `window 1 is lines 1–1000, truncated, nextOffset 1001`,
 );
 
-const w2 = await read({ path: "big.log", offset: w1.ok ? w1.nextOffset : undefined });
+const w2 = await read({
+  path: "big.log",
+  ...(w1.ok && w1.nextOffset !== undefined ? { offset: w1.nextOffset } : {}),
+});
 assert(
   w2.ok && w2.startLine === 1001 && w2.content.split("\n")[0] === "line 1001",
   `window 2 continues at line 1001 — the previously-unreachable region`,
 );
 
-const w3 = await read({ path: "big.log", offset: w2.ok ? w2.nextOffset : undefined });
+const w3 = await read({
+  path: "big.log",
+  ...(w2.ok && w2.nextOffset !== undefined ? { offset: w2.nextOffset } : {}),
+});
 assert(
   w3.ok && w3.startLine === 2001 && w3.endLine === 2500 && !w3.truncated,
   `final window is lines 2001–2500, not truncated`,

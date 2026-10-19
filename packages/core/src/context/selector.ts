@@ -93,11 +93,12 @@ export class CheapSignalsSelector implements ContextSelector {
     if (input.importGraph) {
       snapshot = await input.importGraph();
     } else {
+      const tsconfigPath = this.opts.tsconfigPath ?? ecosystem.tsconfigPaths[0];
       const parser =
         this.opts.parser ??
         new TsCompilerParser({
           repoRoot,
-          tsconfigPath: this.opts.tsconfigPath ?? ecosystem.tsconfigPaths[0],
+          ...(tsconfigPath !== undefined ? { tsconfigPath } : {}),
         });
       snapshot = await loadImportGraph({ repoRoot, parser, topic: "context" });
       degraded.push(...snapshot.degraded);
@@ -161,7 +162,7 @@ export class CheapSignalsSelector implements ContextSelector {
           (it): Reason => ({
             kind: "imports",
             target: relative(repoRoot, it.target),
-            evidence: it.evidence.length > 0 ? it.evidence : undefined,
+            ...(it.evidence.length > 0 ? { evidence: it.evidence } : {}),
           }),
         ),
       );
@@ -173,7 +174,7 @@ export class CheapSignalsSelector implements ContextSelector {
           (it): Reason => ({
             kind: "imported-by",
             from: relative(repoRoot, it.from),
-            evidence: it.evidence.length > 0 ? it.evidence : undefined,
+            ...(it.evidence.length > 0 ? { evidence: it.evidence } : {}),
           }),
         ),
       );

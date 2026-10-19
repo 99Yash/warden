@@ -19,7 +19,6 @@
     "eslint-plugin-no-secrets": "^2.3.3",
     "eslint-plugin-security": "^4.0.0",
     "jscpd": "catalog:",
-    "nanoid": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

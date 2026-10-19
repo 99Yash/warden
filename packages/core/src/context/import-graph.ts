@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { and, db, eq, importGraph } from "@warden/db";
+import { sha256Hex } from "../hash.js";
 import { plural } from "../plural.js";
 import type { DegradedEntry } from "../schema.js";
 import type { ExportRef, ImportRef, SourceParser } from "./parser.js";
@@ -105,16 +105,18 @@ export async function loadImportGraph(input: {
       return;
     }
     status[index] = "read";
-    const sha = createHash("sha256").update(bytes).digest("hex");
+    const sha = sha256Hex(bytes);
 
     const cached = readImportGraphRow(path, sha);
     if (cached) {
       stats.reused++;
       entries[index] = {
-        imports: cached.imports.map((imp) => ({
-          ...imp,
-          resolved: parser.resolve(imp.module, abs),
-        })),
+        // Drop the stored `resolved` so a target that no longer resolves
+        // stays absent instead of inheriting the parse-time value.
+        imports: cached.imports.map(({ resolved: _stored, ...imp }) => {
+          const resolved = parser.resolve(imp.module, abs);
+          return resolved !== undefined ? { ...imp, resolved } : imp;
+        }),
         exports: cached.exports,
       };
       return;

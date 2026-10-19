@@ -1,7 +1,83 @@
 {
-  "plugins": null,
+  // Every lint fence in this repo lives in THIS file. oxlint resolves the nearest config, so a
+  // second .oxlintrc.json below the root would replace this one for its whole subtree and leave
+  // `pnpm lint` green; the lint scripts pin `--config .oxlintrc.json` so a nested config is inert.
+  // Narrow a rule with an "overrides" entry below, never with a nested config file.
+  //
+  // The bar for a rule at "error" (docs/gate-design.md): the tree is at zero for it. A rule the
+  // tree still violates is either "off" with its measured count and a pointer to the ratchet
+  // queue, or it is driven to zero first, in its own change. A rule at "warn" enforces nothing
+  // on its own; `pnpm lint` passes `--deny-warnings` so a default-category warning cannot
+  // accumulate either.
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "node"],
+  "jsPlugins": ["./scripts/oxlint/anti-slop/index.ts", "./scripts/oxlint/warden/index.ts"],
   "categories": {},
-  "rules": {},
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    // The vendored anti-slop rules (scripts/oxlint/anti-slop/README.md). Every registered rule
+    // is listed here, "error" or "off"; `pnpm check:oxlint-plugin` fails on one that is not,
+    // and drives every "error" rule through this file to prove it reports.
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-chained-type-assertions": "error",
+    // Ratchet queue — counts measured 2026-10-18 as product src / scripts. Each moves to
+    // "error" in its own change once the tree is at zero. See docs/gate-design.md.
+    "anti-slop/no-unknown-returns": "off", // 6 / 3
+    "anti-slop/no-known-value-widening": "off", // 42 / 18
+    "anti-slop/no-unsafe-dictionary-type": "off", // 50 / 32
+    "anti-slop/no-runtime-typeof": "off", // 75 / 42 (with allowInTypeGuards)
+    "anti-slop/require-readable-spacing": "off", // 4375, whitespace-only autofix; a style decision
+
+    // Warden's own rules (scripts/oxlint/warden/, first-party, see its README). Each keeps
+    // its file scope by itself (`shared/scope.ts`), so none needs an "overrides" entry.
+    // sha256-over-json-stringify: a hash digest over JSON.stringify output, whose pre-image
+    // depends on key order; hash sha256Hex(canonicalJson(value)). no-exported-hasher: a
+    // function outside @warden/core/hash that is exported and hashes its parameter, which
+    // keeps the set of cross-file hashers closed for the sha256 rule.
+    "warden/no-exported-hasher": "error",
+    "warden/sha256-over-json-stringify": "error",
+
+    // Type-aware rules, run through tsgolint (`options.typeAware`).
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      { "considerDefaultExhaustiveForUnions": true }
+    ],
+    "typescript/no-explicit-any": "error",
+    "unicorn/no-useless-spread": "error",
+
+    // `warden mcp` speaks JSON-RPC over stdio, so a stray console.log in product code
+    // corrupts the protocol stream. Product code writes through process.stdout/stderr on
+    // purpose; scripts are exempt below.
+    "no-console": "error",
+
+    // Read configuration through @warden/env (docs/environment.md), never process.env.
+    // packages/env is the owner and is exempt below. A deliberate exception elsewhere takes
+    // `// oxlint-disable-next-line node/no-process-env -- <why>`.
+    "node/no-process-env": "error",
+
+    // Model selection goes through @warden/ai (getBossModel / getWorkerStrongModel /
+    // getWorkerCheapModel, ADR-0006). packages/ai is the one owner of provider packages
+    // and is exempt below. The `ai` package itself (streamText, tool, Output) is allowed.
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["@ai-sdk/*"],
+            "message": "Provider packages are owned by @warden/ai. Get a model from getBossModel() / getWorkerStrongModel() / getWorkerCheapModel() instead (docs/conventions.md, ADR-0006)."
+          }
+        ]
+      }
+    ]
+  },
   "settings": {
     "jsdoc": {
       "ignorePrivate": false,
@@ -18,5 +94,29 @@
     "builtin": true
   },
   "globals": {},
-  "ignorePatterns": ["dist/**", "**/migrations/**", "**/.warden/**"]
+  "ignorePatterns": [
+    "dist/**",
+    "**/migrations/**",
+    "**/.warden/**",
+    // Vendored verbatim; proven by `pnpm check:oxlint-plugin`, not by linting its source.
+    "scripts/oxlint/anti-slop/**"
+  ],
+  "overrides": [
+    {
+      // The env owner reads process.env by definition.
+      "files": ["packages/env/src/**"],
+      "rules": { "node/no-process-env": "off" }
+    },
+    {
+      // The provider owner.
+      "files": ["packages/ai/src/**"],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
+      // Smoke scripts, probes, evals and repo tooling: they print to the terminal and
+      // set up child-process environments directly.
+      "files": ["**/scripts/**", ".claude/hooks/**"],
+      "rules": { "no-console": "off", "node/no-process-env": "off" }
+    }
+  ]
 }

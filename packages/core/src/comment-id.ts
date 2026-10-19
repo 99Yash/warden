@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "./hash.js";
 
 /**
  * Stable, content-addressed comment id. Re-running a review on the same diff
@@ -11,5 +11,5 @@ import { createHash } from "node:crypto";
  * vuln findings) and pass it here.
  */
 export function stableCommentId(key: string): string {
-  return `W-${createHash("sha256").update(key).digest("hex").slice(0, 10)}`;
+  return `W-${sha256Hex(key).slice(0, 10)}`;
 }

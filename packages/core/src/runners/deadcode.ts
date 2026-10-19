@@ -111,7 +111,7 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
             repoRoot: input.repoRoot,
             parser: new TsCompilerParser({
               repoRoot: input.repoRoot,
-              tsconfigPath: input.tsconfigPath,
+              ...(input.tsconfigPath !== undefined ? { tsconfigPath: input.tsconfigPath } : {}),
             }),
             topic: "deadcode",
           });
@@ -402,7 +402,12 @@ async function collectCallsites(
       }
     });
   }
-  return { totalCount, passingCount, exampleSite, unreadCallers };
+  return {
+    totalCount,
+    passingCount,
+    ...(exampleSite !== undefined ? { exampleSite } : {}),
+    unreadCallers,
+  };
 }
 
 function visitCalls(
