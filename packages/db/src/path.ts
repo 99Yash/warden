@@ -16,6 +16,7 @@ import { dirname, resolve } from "node:path";
  * location (e.g. for testing).
  */
 export function resolveCachePath(): string {
+  // oxlint-disable-next-line node/no-process-env -- debt, queued in docs/gate-design.md: WARDEN_CACHE_PATH is not in the @warden/env schema yet
   const override = process.env["WARDEN_CACHE_PATH"];
   const path = override ? resolve(override) : resolve(findRepoRoot(), ".warden", "cache.sqlite");
   mkdirSync(dirname(path), { recursive: true });

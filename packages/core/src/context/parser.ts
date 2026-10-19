@@ -183,6 +183,7 @@ export class TsCompilerParser implements SourceParser {
 }
 
 function loadTsconfig(repoRoot: string, tsconfigPath: string | undefined): ResolvedTsconfig {
+  // oxlint-disable typescript/unbound-method -- ts.sys members are closures that never read `this`; this is TypeScript's own host idiom
   const host: ts.ModuleResolutionHost = {
     fileExists: ts.sys.fileExists,
     readFile: ts.sys.readFile,
@@ -190,6 +191,7 @@ function loadTsconfig(repoRoot: string, tsconfigPath: string | undefined): Resol
     directoryExists: ts.sys.directoryExists,
     getDirectories: ts.sys.getDirectories,
   };
+  // oxlint-enable typescript/unbound-method
   const cache = ts.createModuleResolutionCache(repoRoot, (s) => s, undefined);
 
   let options: ts.CompilerOptions = {

@@ -1,0 +1,92 @@
+# Code style & review checklist
+
+The rules a warden change is held to. Read it before opening a PR, and use it as the checklist when reviewing one. The _why_ for architecture lives in [`decisions.md`](../decisions.md); library mechanics live in [`conventions.md`](./conventions.md). The structure and most of the rules are adapted from alfred's `docs/reference/code-style.md`, kept only where they apply to a CLI that runs tools, calls models, and verifies claims.
+
+Each rule ends with the check that enforces it. _Gate_ names the check that fails `pnpm verify`. _Partly_ names the check for one slice, and review owns the rest. _Review_ means no check enforces it. [`gate-design.md`](./gate-design.md) says which kind of check a new rule gets, and holds the queue of review-only rules with measured counts.
+
+---
+
+## 1. Types come from their source of truth
+
+A local shape that mirrors a schema drifts from it at the next change.
+
+- **Drizzle rows → `$inferSelect` / `$inferInsert`.** Use `Pick<typeof table.$inferSelect, …>` for a subset. Only `.notNull()` controls select-nullability; `.default()` does not. An untyped JSON column infers `unknown`, not your shape. _Review._
+- **Zod schemas → `z.infer`.** A value validated by a schema takes its type from the schema, never from a parallel `interface`. _Review._
+- **A literal shape is right when it deliberately differs** from the source, such as a wire reshape or a model-facing projection. Say why in one comment line. _Review._
+- **`import type` for type-only imports.** _Gate: `verbatimModuleSyntax` (`pnpm check-types`)._
+
+## 2. Data from outside is `unknown` until parsed
+
+Warden's claim is that every external fact is verified through a citable source. The parse at the boundary is where that claim is kept or lost.
+
+- **No `any`.** Use `unknown` and narrow it. _Gate: `typescript/no-explicit-any`._
+- **Parse at the owning boundary, with a schema.** HTTP responses (OSV.dev, npm), tool output (`tsc`, ESLint, `npm audit` JSON), model output, and rows read back from the SQLite cache are all `unknown`. Parse them with zod where they enter. Do not write `(await res.json()) as T` followed by a spot check of one field. `verify/osv.ts` does this today, and it is the first item in the queue. _Partly: `anti-slop/no-widen-then-assert` rejects a widen-then-assert; `no-chained-type-assertions` and `no-unknown-returns` are queued._
+- **Type guards over casts.** `as` asserts; it does not check. If you must assert, check first whether the assertion is needed: remove it and run `pnpm check-types`. _Review: `no-unsafe-type-assertion` is queued at 84 src sites._
+- **No `object` parameters, no `Reflect.apply`, no alias of `unknown`.** Name the owner type. _Gate: `anti-slop/no-object-parameters`, `no-reflect-apply`, `no-unknown-type-aliases`._
+- **Exhaustive switches.** A switch over a union ends in `default: return assertNever(x, "<where>")` (`packages/core/src/assert-never.ts`), so a new variant fails the build. _Partly: `typescript/switch-exhaustiveness-check` fails a union switch with no `default` that misses a member; the `assertNever` default is review._
+- **Minimize `!`.** A non-null assertion is a promise the compiler cannot keep. Narrow instead. _Review: `no-non-null-assertion` is queued._
+
+## 3. Promises
+
+- **Await it, return it, or mark it `void`.** A fire-and-forget promise is spelled `void (async () => { … })()`, with a comment that says where its errors surface (`workers/run-worker.ts` counts tool calls this way; errors surface through the awaited `result.output`). _Gate: `typescript/no-floating-promises`._
+- **No async callback where a void callback is expected.** A rejected `async` handler passed to `createServer` or `.forEach` is unhandled. _Gate: `typescript/no-misused-promises`._
+- **Cancel siblings on failure.** When one leg of a `Promise.all` over model calls fails, abort the others so they stop billing. _Review._
+
+## 4. Environment, subprocesses, and output
+
+- **Configuration goes through `@warden/env`.** `wardenEnv()`, the provider helpers, or the setup and runtime helpers. Never `process.env` in product code. _Gate: `node/no-process-env` (`packages/env` is the owner and is exempt)._
+- **Repo-controlled tools get the deterministic env.** A child process that runs code from the repo under review takes `deterministicProcessEnv()` from `@warden/env`, never the parent env with provider keys in it (ADR-0054). A child that needs more, such as the OpenCode lane, says why at the spawn site. _Review._
+- **Product code never writes through `console`.** `warden mcp` speaks JSON-RPC over stdio, so one stray `console.log` corrupts the protocol stream. Write to `process.stdout` / `process.stderr` on purpose, or through the CLI's renderer. Scripts are exempt. _Gate: `no-console`._
+- **Never log a full error object.** It can carry a key or a token. Log the message and safe fields. _Review._
+
+## 5. Models and external calls
+
+- **Get a model from `@warden/ai`.** `getBossModel()`, `getWorkerStrongModel()`, `getWorkerCheapModel()`. Provider packages (`@ai-sdk/*`) are imported only inside `packages/ai`. _Gate: `no-restricted-imports`._
+- **Every external call has a timeout.** `fetch` gets an `AbortController` with a named timeout constant (`OSV_TIMEOUT_MS` in `verify/osv.ts`). Model calls set `timeout` (`run-worker.ts`). _Review._
+- **AI SDK v6 spellings.** `maxOutputTokens`, `stopWhen: [stepCountIs(n)]`, `inputSchema`, and `generateText` with an `output` instead of the deprecated `generateObject`. See [`conventions.md`](./conventions.md#ai-sdk). _Review._
+- **Read the library's `.d.ts` before you claim it cannot do something.** Most "limitations" are an option name you missed. _Review._
+
+## 6. Cache keys and hashing
+
+Warden is content-addressed: the review resume key, index task ids, chunk hashes, and the Merkle root all depend on a digest being stable.
+
+- **Hash canonical JSON, not `JSON.stringify`.** `JSON.stringify` output depends on key insertion order, so two equal configs can produce two keys. Use the sorted-key canonicalization (`canonicalJson` in `indexing/job-runner.ts`). `review-harness/harness.ts` still hashes plain `JSON.stringify` for its resume key. _Review: the AST port is queued._
+- **Reach for the existing hasher.** `sha256Hex` lives in `packages/core/src/context/chunker.ts` (re-exported from `context/index.ts`). Do not inline another `createHash("sha256")` helper. Five modules do today; giving hashing one owner is queued. _Review._
+
+## 7. Database
+
+- **`db:generate` → `db:migrate`.** Never `db:push` outside local exploration. _Review._
+- **Schema lives in `packages/db/src/schema/`** and is exported through `packages/db/src/schemas.ts`. _Review._
+
+## 8. Constants
+
+- **Name non-obvious numbers.** Thresholds, caps, TTLs, timeouts, retry counts, step caps, and prompt budgets get a named constant with a short reason (`OSV_TTL_MS`, `PER_WORKER_STEP_CAP`). Transparent arithmetic does not. _Review._
+- **Place it at the narrowest owner.** The file that enforces the value first; a shared module only when several files read it. Use the environment only for operator knobs, not to avoid naming a constant. _Review._
+
+## 9. Suppressions
+
+A suppression is a claim that this line is the one exception.
+
+- **Name the rule and give the reason**: `// oxlint-disable-next-line <rule> -- <reason>`. A bare directive reads as "this region is unchecked". _Review._
+- **Do not keep a suppression "in case the rule comes back."** Delete it. _Review: the unused-directive check is queued (see [`gate-design.md`](./gate-design.md))._
+- **`eslint-disable … security/*` directives are not for oxlint.** They suppress a finding in warden's own ESLint-security pass when warden reviews itself (`packages/cli/src/index.ts`). Do not delete one because oxlint has no such rule.
+
+## 10. Formatting
+
+- **oxfmt owns formatting.** Run `pnpm format`. _Gate: `pnpm format:check`._
+- **LLM prompts and eval fixtures are not formatted.** `packages/core/src/review-harness/prompts/**` and `packages/cli/scripts/eval/fixtures/**` are in `.oxfmtrc.json`'s `ignorePatterns`, because a reformatted prompt is a different prompt.
+
+---
+
+## Review hit-list
+
+1. External data cast with `as` instead of parsed (§2). _Partly._
+2. A promise neither awaited nor marked `void` (§3). _Gate._
+3. `process.env` outside `@warden/env`, or a repo-controlled tool spawned with the full env (§4). _Partly._
+4. `console.*` in product code (§4). _Gate._
+5. A provider package imported outside `@warden/ai` (§5). _Gate._
+6. A `fetch` or model call with no timeout (§5). _Review._
+7. A digest over `JSON.stringify`, or a new private sha256 helper (§6). _Review._
+8. A local shape that restates a Drizzle table or zod schema (§1). _Review._
+9. A suppression with no rule name or no reason (§9). _Review._
+10. A non-exhaustive switch over a union (§2). _Partly._

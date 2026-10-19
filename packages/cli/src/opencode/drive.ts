@@ -980,16 +980,17 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   // stops, including warmup, spawn, and lane failure paths.
   const isolation = createOpencodeIsolation();
   try {
+    // oxlint-disable-next-line node/no-process-env -- the OpenCode binary ignores ANTHROPIC_BASE_URL, so it is forwarded as provider config (see buildMcpConfigContent)
+    const anthropicBaseUrl = process.env["ANTHROPIC_BASE_URL"];
     const childEnv: Record<string, string | undefined> = {
+      // oxlint-disable-next-line node/no-process-env -- the OpenCode child keeps the full parent env on purpose: provider credentials and saved auth (see the comment above)
       ...process.env,
       ...isolation.env,
       [OPENCODE_AGENT_ENV]: configPath,
       [OPENCODE_CONTENT_ENV]: buildMcpConfigContent({
         command: resolveWardenMcpCommand(),
         cwd: opts.repoRoot,
-        ...(process.env["ANTHROPIC_BASE_URL"]
-          ? { anthropicBaseUrl: process.env["ANTHROPIC_BASE_URL"] }
-          : {}),
+        ...(anthropicBaseUrl ? { anthropicBaseUrl } : {}),
       }),
       [OPENCODE_PASSWORD_ENV]: password,
       // opencode resolves its location from PWD, not the process cwd. Under

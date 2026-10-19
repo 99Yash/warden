@@ -233,7 +233,7 @@ try {
   assert(warm.bannerKind === "no-index", `no embedding index (banner=${warm.bannerKind})`);
   assert(
     same(warm.importersOfLib, ["src/a.ts"]),
-    `A: lib importers = [a] (got ${warm.importersOfLib})`,
+    `A: lib importers = [a] (got ${warm.importersOfLib.join(",")})`,
   );
 
   // Commit B: a.ts → other, b.ts → lib.
@@ -244,7 +244,7 @@ try {
   const afterCommit = await review();
   assert(
     same(afterCommit.importersOfLib, ["src/b.ts"]),
-    `B: lib importers = [b], old a→lib link gone (got ${afterCommit.importersOfLib})`,
+    `B: lib importers = [b], old a→lib link gone (got ${afterCommit.importersOfLib.join(",")})`,
   );
   assert(afterCommit.semanticReasons === 0, "B: no semantic reasons (graph needs no embeddings)");
 
@@ -255,7 +255,7 @@ try {
   const backToA = await review();
   assert(
     same(backToA.importersOfLib, ["src/a.ts"]),
-    `checkout A: lib importers = [a] (got ${backToA.importersOfLib})`,
+    `checkout A: lib importers = [a] (got ${backToA.importersOfLib.join(",")})`,
   );
   git("checkout", "-q", "main");
   git("reset", "-q", "--hard", shaA);
@@ -264,7 +264,7 @@ try {
   const forwardToB = await review();
   assert(
     same(forwardToB.importersOfLib, ["src/b.ts"]),
-    `reset B: lib importers = [b] (got ${forwardToB.importersOfLib})`,
+    `reset B: lib importers = [b] (got ${forwardToB.importersOfLib.join(",")})`,
   );
 
   // ── [3] add, delete, rename ──────────────────────────────────────────
@@ -277,15 +277,18 @@ try {
   assertClean("C");
   const files = await activeFiles();
   const expected = ["src/c.ts", "src/lib.ts", "src/other.ts", "src/renamed.ts"];
-  assert(same(files, expected), `C: active file set = ${expected} (got ${files})`);
+  assert(
+    same(files, expected),
+    `C: active file set = ${expected.join(",")} (got ${files.join(",")})`,
+  );
   const afterC = await review();
   assert(
     same(afterC.importersOfLib, ["src/c.ts", "src/renamed.ts"]),
-    `C: lib importers = [c, renamed] (got ${afterC.importersOfLib})`,
+    `C: lib importers = [c, renamed] (got ${afterC.importersOfLib.join(",")})`,
   );
   assert(
     !afterC.candidatePaths.includes("src/a.ts") && !afterC.candidatePaths.includes("src/b.ts"),
-    `C: deleted/renamed-away paths are not candidates (got ${afterC.candidatePaths})`,
+    `C: deleted/renamed-away paths are not candidates (got ${afterC.candidatePaths.join(",")})`,
   );
 
   // ── [4] reuse on repeated review of unchanged source ──────────────────
@@ -306,7 +309,7 @@ try {
   assert(third.calls === 1, `one changed file → one parse (got ${third.calls})`);
   assert(
     same(afterD.importersOfLib, ["src/renamed.ts"]),
-    `D: lib importers = [renamed] (got ${afterD.importersOfLib})`,
+    `D: lib importers = [renamed] (got ${afterD.importersOfLib.join(",")})`,
   );
 
   // ── [5] unreadable file ──────────────────────────────────────────────
@@ -324,7 +327,7 @@ try {
       );
       assert(
         !unreadable.importersOfLib.includes("src/renamed.ts"),
-        `cached row for the unreadable file is not used (got ${unreadable.importersOfLib})`,
+        `cached row for the unreadable file is not used (got ${unreadable.importersOfLib.join(",")})`,
       );
     } finally {
       chmodSync(resolve(REPO, "src/renamed.ts"), 0o644);
@@ -337,7 +340,7 @@ try {
   const deleted = await review();
   assert(
     !deleted.candidatePaths.includes("src/renamed.ts"),
-    `deleted file is not a candidate (got ${deleted.candidatePaths})`,
+    `deleted file is not a candidate (got ${deleted.candidatePaths.join(",")})`,
   );
   assert(
     !deleted.degradedMessages.some((m) => m.includes("could not read")),
@@ -409,7 +412,7 @@ try {
     if (i === 0) {
       assert(
         same(keys, snapshot.files),
-        `graph keys follow snapshot.files order (got ${keys.slice(0, 4)}…)`,
+        `graph keys follow snapshot.files order (got ${keys.slice(0, 4).join(",")}…)`,
       );
     }
   }
@@ -438,7 +441,7 @@ try {
   });
   assert(
     !complete.degraded.some((d) => d.message.includes("skipped")),
-    `complete graph: no deadcode skip entry (got ${complete.degraded.map((d) => d.message)})`,
+    `complete graph: no deadcode skip entry (got ${complete.degraded.map((d) => d.message).join(",")})`,
   );
 
   // ── [9] unknown reach is not reported as zero reach ──────────────────
@@ -488,7 +491,7 @@ ${target
       });
       assert(
         unreachable(check.findings).length === 0,
-        `check: no unreachable-optional-param finding (got ${check.findings.map((f) => f.message)})`,
+        `check: no unreachable-optional-param finding (got ${check.findings.map((f) => f.message).join(",")})`,
       );
       const checkSkip = skipEntry(check.degraded);
       assert(
@@ -499,11 +502,11 @@ ${target
       const reviewed = await runDetPriors({ diff: TARGET_DIFF, repoRoot: REPO, mode: "review" });
       assert(
         unreachable(reviewed.findings).length === 0,
-        `review: no unreachable-optional-param finding (got ${reviewed.findings.map((f) => f.message)})`,
+        `review: no unreachable-optional-param finding (got ${reviewed.findings.map((f) => f.message).join(",")})`,
       );
       assert(
         skipEntry(reviewed.degraded) !== undefined,
-        `review: deadcode skip entry reaches the output (got ${reviewed.degraded.map((d) => d.message)})`,
+        `review: deadcode skip entry reaches the output (got ${reviewed.degraded.map((d) => d.message).join(",")})`,
       );
     } finally {
       chmodSync(passerAbs, 0o644);
@@ -534,7 +537,7 @@ ${target
     assert(passerReads >= 2, `caller read was failed after graph load (reads=${passerReads})`);
     assert(
       unreachable(failedRead.findings).length === 0,
-      `caller read failure: no finding (got ${failedRead.findings.map((f) => f.message)})`,
+      `caller read failure: no finding (got ${failedRead.findings.map((f) => f.message).join(",")})`,
     );
     const readSkip = skipEntry(failedRead.degraded);
     assert(
@@ -578,7 +581,7 @@ ${target
     topic: "context",
   });
   const corrupted = wideSnapshot.files.filter((f) => f.includes("\uFFFD"));
-  assert(corrupted.length === 0, `no path holds U+FFFD (got ${corrupted.slice(0, 2)})`);
+  assert(corrupted.length === 0, `no path holds U+FFFD (got ${corrupted.slice(0, 2).join(",")})`);
   const fileSet = new Set(wideSnapshot.files);
   const missingFiles = widePaths.filter((p) => !fileSet.has(p));
   assert(
@@ -606,7 +609,7 @@ ${target
   });
   assert(
     same(dangling.unreadable, ["src/dangling.ts"]),
-    `dangling link is unreadable (got ${dangling.unreadable})`,
+    `dangling link is unreadable (got ${dangling.unreadable.join(",")})`,
   );
   const danglingWarning = dangling.degraded.find(
     (d) => d.kind === "warning" && d.message.includes("could not read"),
@@ -639,9 +642,12 @@ ${target
     });
     assert(
       same(sparse.outsideSparse, [PASSER]),
-      `snapshot lists the passer outside the sparse checkout (got ${sparse.outsideSparse})`,
+      `snapshot lists the passer outside the sparse checkout (got ${sparse.outsideSparse.join(",")})`,
     );
-    assert(sparse.unreadable.length === 0, `no unreadable files (got ${sparse.unreadable})`);
+    assert(
+      sparse.unreadable.length === 0,
+      `no unreadable files (got ${sparse.unreadable.join(",")})`,
+    );
     assert(
       !sparse.files.includes("src/c.ts") && !sparse.files.includes(PASSER),
       "absent files are not in the active file set",
@@ -663,7 +669,7 @@ ${target
     });
     assert(
       unreachable(sparseCheck.findings).length === 0,
-      `check: no unreachable-optional-param finding (got ${sparseCheck.findings.map((f) => f.message)})`,
+      `check: no unreachable-optional-param finding (got ${sparseCheck.findings.map((f) => f.message).join(",")})`,
     );
     const sparseSkip = skipEntry(sparseCheck.degraded);
     assert(
@@ -674,11 +680,11 @@ ${target
     const sparseReview = await runDetPriors({ diff: TARGET_DIFF, repoRoot: REPO, mode: "review" });
     assert(
       unreachable(sparseReview.findings).length === 0,
-      `review: no unreachable-optional-param finding (got ${sparseReview.findings.map((f) => f.message)})`,
+      `review: no unreachable-optional-param finding (got ${sparseReview.findings.map((f) => f.message).join(",")})`,
     );
     assert(
       skipEntry(sparseReview.degraded) !== undefined,
-      `review: deadcode skip entry reaches the output (got ${sparseReview.degraded.map((d) => d.message)})`,
+      `review: deadcode skip entry reaches the output (got ${sparseReview.degraded.map((d) => d.message).join(",")})`,
     );
   } finally {
     git("sparse-checkout", "disable");
@@ -849,7 +855,7 @@ ${target
     const expectedParsed = blockZ ? ["src/x.ts×2"] : ["src/x.ts×2", "src/z.ts×2"];
     assert(
       same(parsed, expectedParsed),
-      `the shared parser parses each new file once (got ${parsed})`,
+      `the shared parser parses each new file once (got ${parsed.join(",")})`,
     );
     if (blockZ) {
       const warnings = oneReview.degraded.filter((d) => d.message.includes("could not read"));

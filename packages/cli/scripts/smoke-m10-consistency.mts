@@ -94,7 +94,7 @@ const result = await runConsistency({
   changed: [{ path: "README.md", addedLines: Array.from({ length: 20 }, (_, i) => i + 1) }],
 });
 
-const ruleIds = result.findings.map((f) => f.ruleId).sort();
+const ruleIds = result.findings.map((f) => f.ruleId ?? "(none)").sort();
 process.stdout.write(`  ruleIds=${JSON.stringify(ruleIds)}\n`);
 for (const f of result.findings) {
   process.stdout.write(`    ${f.ruleId} @ ${f.file}:${f.line} — ${f.message}\n`);

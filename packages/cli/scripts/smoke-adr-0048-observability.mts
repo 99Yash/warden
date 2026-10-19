@@ -45,8 +45,12 @@ function assert(cond: unknown, msg: string): void {
   }
 }
 
-const { isObservabilityEnabled, buildReviewTelemetry, recordDroppedCandidate, shutdownObservability } =
-  await import("@warden/ai");
+const {
+  isObservabilityEnabled,
+  buildReviewTelemetry,
+  recordDroppedCandidate,
+  shutdownObservability,
+} = await import("@warden/ai");
 
 process.stdout.write("A. keys-absent = total no-op\n");
 assert(isObservabilityEnabled() === false, "isObservabilityEnabled() is false without keys");

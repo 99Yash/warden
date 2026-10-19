@@ -77,7 +77,11 @@ const readFile = makeReadFileTool({ repoRoot: dir });
 // The AI SDK `tool().execute` is optional, takes a 2nd options arg, and
 // returns `RESULT | AsyncIterable<RESULT>`. This tool always returns a single
 // `ReadFileResult` — narrow it once here so the assertions stay readable.
-async function read(args: { path: string; offset?: number; limit?: number }): Promise<ReadFileResult> {
+async function read(args: {
+  path: string;
+  offset?: number;
+  limit?: number;
+}): Promise<ReadFileResult> {
   const exec = readFile.execute;
   if (!exec) throw new Error("readFile tool has no execute");
   return (await exec(args, { toolCallId: "smoke", messages: [] })) as ReadFileResult;

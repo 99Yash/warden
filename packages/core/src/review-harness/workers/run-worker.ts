@@ -514,7 +514,7 @@ async function tryProvider(
       timeout: { totalMs: opts.timeoutMs },
     });
     let toolCalls = 0;
-    (async () => {
+    void (async () => {
       try {
         for await (const part of result.fullStream) {
           if (part.type === "tool-call") toolCalls += 1;

@@ -161,7 +161,9 @@ export function buildReviewTelemetry(ctx: ReviewTelemetryContext): ReviewTelemet
   if (ctx.file !== undefined) metadata["warden.file"] = ctx.file;
   return {
     isEnabled: true,
-    functionId: ctx.concern ? `warden.review.${ctx.role}.${ctx.concern}` : `warden.review.${ctx.role}`,
+    functionId: ctx.concern
+      ? `warden.review.${ctx.role}.${ctx.concern}`
+      : `warden.review.${ctx.role}`,
     recordInputs: state.captureIo,
     recordOutputs: state.captureIo,
     metadata,

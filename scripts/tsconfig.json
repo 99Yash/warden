@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The program that type-checks `scripts/`. `scripts/` is not a workspace, so no
+  // package's `check-types` reaches it; the root `check-types` script runs this
+  // project directly. Without it, the vendored oxlint rules and the gate scripts
+  // would be the only TypeScript in the repo checked by nothing.
+  //
+  // Standalone on purpose: these files are run by `node`, so modules resolve the
+  // way Node does (`nodenext`), not the way the base config's bundler mode does.
+  // `allowImportingTsExtensions` lets the rule sources keep the explicit
+  // `./rules/foo.ts` specifiers that Node's type stripping requires.
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["**/*.mjs", "**/*.ts"]
+}

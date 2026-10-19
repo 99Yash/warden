@@ -1,6 +1,6 @@
 # Conventions
 
-See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index.
+See [`CLAUDE.md`](../CLAUDE.md) for the slim agent index and [`code-style.md`](./code-style.md) for the review checklist, with the check that enforces each rule.
 
 ## TypeScript
 
