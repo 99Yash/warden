@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "../hash.js";
 import type { MerkleNode } from "./interfaces.js";
 
 /**
@@ -9,13 +9,10 @@ import type { MerkleNode } from "./interfaces.js";
  *
  * Algorithm is stable across both call sites — sort by `nodePath` then hash
  * the `kind:path:hash\n` triples — so a reconcile that ends at the same set
- * of leaves as a fresh init produces the same root.
+ * of leaves as a fresh init produces the same root. One digest over the
+ * joined triples is byte-identical to feeding them to the hasher one by one.
  */
 export function computeRepoMerkleRoot(nodes: MerkleNode[]): string {
   const sorted = [...nodes].sort((a, b) => a.nodePath.localeCompare(b.nodePath));
-  const h = createHash("sha256");
-  for (const n of sorted) {
-    h.update(`${n.kind}:${n.nodePath}:${n.hash}\n`, "utf8");
-  }
-  return h.digest("hex");
+  return sha256Hex(sorted.map((n) => `${n.kind}:${n.nodePath}:${n.hash}\n`).join(""));
 }

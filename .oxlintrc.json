@@ -10,7 +10,7 @@
   // on its own; `pnpm lint` passes `--deny-warnings` so a default-category warning cannot
   // accumulate either.
   "plugins": ["eslint", "typescript", "unicorn", "oxc", "node"],
-  "jsPlugins": ["./scripts/oxlint/anti-slop/index.ts"],
+  "jsPlugins": ["./scripts/oxlint/anti-slop/index.ts", "./scripts/oxlint/warden/index.ts"],
   "categories": {},
   "options": {
     "typeAware": true
@@ -32,6 +32,15 @@
     "anti-slop/no-unsafe-dictionary-type": "off", // 50 / 32
     "anti-slop/no-runtime-typeof": "off", // 75 / 42 (with allowInTypeGuards)
     "anti-slop/require-readable-spacing": "off", // 4375, whitespace-only autofix; a style decision
+
+    // Warden's own rules (scripts/oxlint/warden/, first-party, see its README). Each keeps
+    // its file scope by itself (`shared/scope.ts`), so none needs an "overrides" entry.
+    // sha256-over-json-stringify: a hash digest over JSON.stringify output, whose pre-image
+    // depends on key order; hash sha256Hex(canonicalJson(value)). no-exported-hasher: a
+    // function outside @warden/core/hash that is exported and hashes its parameter, which
+    // keeps the set of cross-file hashers closed for the sha256 rule.
+    "warden/no-exported-hasher": "error",
+    "warden/sha256-over-json-stringify": "error",
 
     // Type-aware rules, run through tsgolint (`options.typeAware`).
     "typescript/no-floating-promises": "error",

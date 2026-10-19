@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { and, db, eq, importGraph } from "@warden/db";
+import { sha256Hex } from "../hash.js";
 import { plural } from "../plural.js";
 import type { DegradedEntry } from "../schema.js";
 import type { ExportRef, ImportRef, SourceParser } from "./parser.js";
@@ -105,7 +105,7 @@ export async function loadImportGraph(input: {
       return;
     }
     status[index] = "read";
-    const sha = createHash("sha256").update(bytes).digest("hex");
+    const sha = sha256Hex(bytes);
 
     const cached = readImportGraphRow(path, sha);
     if (cached) {

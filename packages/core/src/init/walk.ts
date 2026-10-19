@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
+import { sha256Hex } from "../hash.js";
 
 /**
  * Repo file walker for `warden init` (ADR-0019 #5 — Phase 1). Prefers
@@ -70,7 +70,7 @@ export async function walkRepo(repoRoot: string): Promise<WalkResult> {
         const abs = resolvePath(repoRoot, rel);
         try {
           const content = await readFile(abs, "utf8");
-          const fileSha = createHash("sha256").update(content, "utf8").digest("hex");
+          const fileSha = sha256Hex(content);
           const loc = content.length === 0 ? 0 : content.split("\n").length;
           return { rel, content, fileSha, loc, bytes: Buffer.byteLength(content, "utf8") };
         } catch {

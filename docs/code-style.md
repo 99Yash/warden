@@ -50,8 +50,8 @@ Warden's claim is that every external fact is verified through a citable source.
 
 Warden is content-addressed: the review resume key, index task ids, chunk hashes, and the Merkle root all depend on a digest being stable.
 
-- **Hash canonical JSON, not `JSON.stringify`.** `JSON.stringify` output depends on key insertion order, so two equal configs can produce two keys. Use the sorted-key canonicalization (`canonicalJson` in `indexing/job-runner.ts`). `review-harness/harness.ts` still hashes plain `JSON.stringify` for its resume key. _Review: the AST port is queued._
-- **Reach for the existing hasher.** `sha256Hex` lives in `packages/core/src/context/chunker.ts` (re-exported from `context/index.ts`). Do not inline another `createHash("sha256")` helper. Five modules do today; giving hashing one owner is queued. _Review._
+- **Hash canonical JSON, not `JSON.stringify`.** `JSON.stringify` output depends on key insertion order, so two equal configs can produce two keys. Hash a structured value as `sha256Hex(canonicalJson(value))`. `canonicalJson`'s output is the persisted `jobs.task_id` contract, so change it only with a versioned key. _Gate: `warden/sha256-over-json-stringify`._
+- **Hash through the one owner.** `sha256Hex` and `canonicalJson` live in `packages/core/src/hash.ts`; import them as `@warden/core/hash`, or relatively inside core, and do not re-export them. Do not export another hash helper. A domain function that hashes through the owner (`stableCommentId`, `taskIdFor`) is fine. _Gate: `warden/no-exported-hasher`. A private inline `createHash` is not caught; review owns it._
 
 ## 7. Database
 
