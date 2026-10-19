@@ -104,8 +104,8 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     diff: input.diff,
     repoRoot: input.repoRoot,
     mode: input.config.mode,
-    selector: input.selector,
-    retrievedContext: input.retrievedContext,
+    ...(input.selector !== undefined ? { selector: input.selector } : {}),
+    ...(input.retrievedContext !== undefined ? { retrievedContext: input.retrievedContext } : {}),
     ...(input.diffBase !== undefined ? { diffBase: input.diffBase } : {}),
   });
   // ADR-0054: these signals are published independently of model output,

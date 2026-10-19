@@ -100,10 +100,10 @@ function parseEslintOutput(stdout: string, repoRoot: string): ToolFinding[] {
         file: relFile,
         line: msg.line,
         column: msg.column,
-        endLine: msg.endLine,
-        endColumn: msg.endColumn,
+        ...(msg.endLine !== undefined ? { endLine: msg.endLine } : {}),
+        ...(msg.endColumn !== undefined ? { endColumn: msg.endColumn } : {}),
         severity: msg.severity === 2 ? "error" : "warning",
-        ruleId: msg.ruleId ?? undefined,
+        ...(msg.ruleId !== null ? { ruleId: msg.ruleId } : {}),
         message: msg.message,
       });
     }

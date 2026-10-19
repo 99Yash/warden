@@ -76,9 +76,10 @@ export class TsCompilerParser implements SourceParser {
         const isTypeOnly = stmt.importClause?.isTypeOnly ?? false;
         const symbols = collectImportSymbols(stmt);
         const range = lineRange(sf, stmt);
+        const resolved = this.resolve(moduleName, absPath);
         refs.push({
           module: moduleName,
-          resolved: this.resolve(moduleName, absPath),
+          ...(resolved !== undefined ? { resolved } : {}),
           kind: isTypeOnly ? "type" : "value",
           symbols,
           ...range,
@@ -93,9 +94,10 @@ export class TsCompilerParser implements SourceParser {
         if (expr && ts.isStringLiteral(expr)) {
           const moduleName = expr.text;
           const range = lineRange(sf, stmt);
+          const resolved = this.resolve(moduleName, absPath);
           refs.push({
             module: moduleName,
-            resolved: this.resolve(moduleName, absPath),
+            ...(resolved !== undefined ? { resolved } : {}),
             kind: "value",
             symbols: [stmt.name.text],
             ...range,
@@ -118,9 +120,10 @@ export class TsCompilerParser implements SourceParser {
           }
         }
         const range = lineRange(sf, stmt);
+        const resolved = this.resolve(moduleName, absPath);
         refs.push({
           module: moduleName,
-          resolved: this.resolve(moduleName, absPath),
+          ...(resolved !== undefined ? { resolved } : {}),
           kind: isTypeOnly ? "type" : "value",
           symbols,
           ...range,
@@ -187,7 +190,7 @@ function loadTsconfig(repoRoot: string, tsconfigPath: string | undefined): Resol
   const host: ts.ModuleResolutionHost = {
     fileExists: ts.sys.fileExists,
     readFile: ts.sys.readFile,
-    realpath: ts.sys.realpath,
+    ...(ts.sys.realpath !== undefined ? { realpath: ts.sys.realpath } : {}),
     directoryExists: ts.sys.directoryExists,
     getDirectories: ts.sys.getDirectories,
   };

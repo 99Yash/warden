@@ -923,7 +923,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
     resolveDiff({
       repoRoot: opts.repoRoot,
       mode: "review",
-      baseRef: opts.baseRef,
+      ...(opts.baseRef !== undefined ? { baseRef: opts.baseRef } : {}),
     }),
   );
   const scope = deriveLaneScope(resolved.diff);

@@ -159,7 +159,10 @@ function readEnvelope(result: unknown, tool: string): Envelope {
     status: envelope.status,
     ...(envelope.status === "ok"
       ? { data: ReviewBundlePageSchema.parse(envelope.data) }
-      : { reason: envelope.reason, hint: envelope.hint }),
+      : {
+          reason: envelope.reason,
+          ...(envelope.hint !== undefined ? { hint: envelope.hint } : {}),
+        }),
     isError: parsed.isError ?? false,
   };
 }

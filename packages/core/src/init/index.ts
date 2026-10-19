@@ -311,7 +311,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
     provider,
     lockedModelId,
     lockedModelVersion,
-    maxUsdBudget: opts.maxCostUsd,
+    ...(opts.maxCostUsd !== undefined ? { maxUsdBudget: opts.maxCostUsd } : {}),
     emit: translateReconcileEvent,
   });
 

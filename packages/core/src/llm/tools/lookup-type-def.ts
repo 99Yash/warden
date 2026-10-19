@@ -89,9 +89,14 @@ export function makeLookupTypeDefTool(opts: MakeLookupTypeDefToolOptions) {
           reason: "package_not_installed",
         };
       }
-      return lookupTypeDef(opts.repoRoot, args.package, args.symbol, {
-        packageSearchRoots: opts.packageSearchRoots,
-      });
+      return lookupTypeDef(
+        opts.repoRoot,
+        args.package,
+        args.symbol,
+        opts.packageSearchRoots !== undefined
+          ? { packageSearchRoots: opts.packageSearchRoots }
+          : {},
+      );
     },
   });
 }

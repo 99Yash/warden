@@ -111,10 +111,12 @@ export async function loadImportGraph(input: {
     if (cached) {
       stats.reused++;
       entries[index] = {
-        imports: cached.imports.map((imp) => ({
-          ...imp,
-          resolved: parser.resolve(imp.module, abs),
-        })),
+        // Drop the stored `resolved` so a target that no longer resolves
+        // stays absent instead of inheriting the parse-time value.
+        imports: cached.imports.map(({ resolved: _stored, ...imp }) => {
+          const resolved = parser.resolve(imp.module, abs);
+          return resolved !== undefined ? { ...imp, resolved } : imp;
+        }),
         exports: cached.exports,
       };
       return;

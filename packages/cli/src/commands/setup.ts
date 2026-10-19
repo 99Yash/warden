@@ -50,7 +50,7 @@ export async function runSetupCommand(opts: SetupCliOpts, repoRoot: string): Pro
     return;
   }
 
-  renderSetup({ global, project, runtime, readiness });
+  renderSetup({ global, ...(project !== undefined ? { project } : {}), runtime, readiness });
 }
 
 function renderSetup(input: {

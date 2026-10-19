@@ -14,6 +14,7 @@ A local shape that mirrors a schema drifts from it at the next change.
 - **Zod schemas → `z.infer`.** A value validated by a schema takes its type from the schema, never from a parallel `interface`. _Review._
 - **A literal shape is right when it deliberately differs** from the source, such as a wire reshape or a model-facing projection. Say why in one comment line. _Review._
 - **`import type` for type-only imports.** _Gate: `verbatimModuleSyntax` (`pnpm check-types`)._
+- **An optional property means the key is absent.** `k?: T` does not accept `undefined`. When the value may be missing, omit the key: `...(x !== undefined ? { k: x } : {})`. Write `k?: T | undefined` only when an explicit `undefined` means something different from a missing key, or when the type mirrors an API that sends one. zod's `.optional()` infers `T | undefined`, so a parsed field is spread into a hand-written optional field, not assigned to it. _Gate: `exactOptionalPropertyTypes` (`pnpm check-types`)._
 
 ## 2. Data from outside is `unknown` until parsed
 

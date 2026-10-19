@@ -280,13 +280,9 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
     shouldRunSelector && input.selector !== undefined
       ? input.selector
       : shouldRunSelector
-        ? new CheapSignalsSelector({
-            embeddingProvider: semanticDeps?.embeddingProvider ?? null,
-            embeddingStore: semanticDeps?.embeddingStore ?? null,
-            chunkStore: semanticDeps?.chunkStore ?? null,
-            lockedModelId: semanticDeps?.lockedModelId,
-            lockedModelVersionForDocument: semanticDeps?.lockedModelVersionForDocument,
-          })
+        ? new CheapSignalsSelector(
+            semanticDeps ?? { embeddingProvider: null, embeddingStore: null, chunkStore: null },
+          )
         : null;
 
   // One import graph per review, built with one parser and read by both the
@@ -301,7 +297,9 @@ export async function runDetPriors(input: DetPriorsInput): Promise<DetPriors> {
         input.parser ??
         new TsCompilerParser({
           repoRoot: input.repoRoot,
-          tsconfigPath: ecosystem.tsconfigPaths[0],
+          ...(ecosystem.tsconfigPaths[0] !== undefined
+            ? { tsconfigPath: ecosystem.tsconfigPaths[0] }
+            : {}),
         }),
       topic: "context",
     }));

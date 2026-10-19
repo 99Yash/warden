@@ -272,7 +272,7 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
   const resolved = await resolveDiff({
     repoRoot: opts.repoRoot,
     mode: "review",
-    baseRef: opts.baseRef,
+    ...(opts.baseRef !== undefined ? { baseRef: opts.baseRef } : {}),
   });
   const scope = deriveLaneScope(resolved.diff);
   const model = `${opts.model ?? CLAUDE_CODE_DEFAULT_MODEL}#${opts.effort ?? CLAUDE_CODE_DEFAULT_EFFORT}`;
