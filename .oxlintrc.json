@@ -61,6 +61,13 @@
     // carries a directive with the reason (`packages/mcp/src/server.ts` keeps the low-level
     // MCP `Server`).
     "typescript/no-deprecated": "error",
+    // no-unnecessary-type-assertion: an `as T` or `<T>` that does not change the type, an
+    // `as T` where the context already expects `T` and the value fits it, and a `!` on a
+    // value that is never null or undefined. Delete the assertion; when it was the only place
+    // a reader learned the type, annotate the binding or the return type instead. A comment
+    // that explained the deleted cast goes with it. It applies to every surface, with no
+    // override.
+    "typescript/no-unnecessary-type-assertion": "error",
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
     // A `catch` handles the failure, logs safe fields, or holds a comment that says why the
