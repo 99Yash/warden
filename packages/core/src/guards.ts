@@ -15,6 +15,10 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  * `undefined` when `err` is not an `Error` or has no string `code`.
  */
 export function errnoCode(err: unknown): string | undefined {
-  if (!(err instanceof Error) || !("code" in err)) return undefined;
-  return typeof err.code === "string" ? err.code : undefined;
+  return hasStringCode(err) ? err.code : undefined;
+}
+
+/** An `Error` with a string `code`: the shape of a Node system error. */
+function hasStringCode(err: unknown): err is Error & { code: string } {
+  return err instanceof Error && "code" in err && typeof err.code === "string";
 }

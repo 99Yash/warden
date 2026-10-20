@@ -146,7 +146,7 @@ async function buildDepsContext(repoRoot: string, changed: ChangedFile[]): Promi
       if (!isRecord(parsed)) continue;
       for (const key of MANIFEST_DEP_KEYS) {
         const block = parsed[key];
-        if (!block || typeof block !== "object") continue;
+        if (!isRecord(block)) continue;
         for (const dep of Object.keys(block)) {
           dependencySet.add(dep);
         }
