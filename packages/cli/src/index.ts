@@ -25,7 +25,7 @@ import { Command } from "commander";
 import pc from "picocolors";
 import { runInitCommand } from "./commands/init.js";
 import { runSetupCommand, type SetupCliOpts } from "./commands/setup.js";
-import { formatCommentSet } from "./format.js";
+import { formatCliError, formatCommentSet } from "./format.js";
 import { createPhaseRenderer, renderBannerLine } from "./render.js";
 import { runOpencodeReview } from "./opencode/drive.js";
 
@@ -351,8 +351,8 @@ program.parseAsync(process.argv).then(
   // telemetry never started (no Langfuse keys).
   () => shutdownObservability(),
   async (err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(pc.red(`warden: ${message}\n`));
+    // A failed review adds its known spend after the message (ADR-0048).
+    process.stderr.write(`${formatCliError(err)}\n`);
     await shutdownObservability();
     process.exit(1);
   },

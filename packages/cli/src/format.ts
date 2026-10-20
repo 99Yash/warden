@@ -1,10 +1,12 @@
-import type {
-  CommentSet,
-  CostByTier,
-  CostLabelsByTier,
-  DegradedEntry,
-  ReviewInput,
-  Tier,
+import {
+  ReviewFailedError,
+  type CommentSet,
+  type CostByTier,
+  type CostLabelsByTier,
+  type DegradedEntry,
+  type ReviewInput,
+  type ReviewSpend,
+  type Tier,
 } from "@warden/core";
 import pc from "picocolors";
 
@@ -48,6 +50,47 @@ export function formatCommentSet(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The stderr text for a command that failed. The first line is always
+ * `warden: <message>`. A failed review (`ReviewFailedError`) adds a second
+ * line with the spend known at the failure, so the user sees what the
+ * failed run cost:
+ *
+ *   warden: review-harness boss: … failed (…); Gemini fallback skipped (tools required)
+ *   warden: spent before the failure: ≥ $0.42 (gpt-6.1-sol $0.31 · gpt-6-luna $0.11); 1 model request reported no usage; review run run_…
+ *
+ * The caller keeps the exit code.
+ */
+export function formatCliError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const lines = [pc.red(`warden: ${message}`)];
+  if (err instanceof ReviewFailedError) {
+    lines.push(pc.yellow(`warden: ${renderFailureSpend(err.spend)}`));
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The spend line of a failed review. `≥` marks a lower bound, as on the
+ * summary line. A failure that has no usage at all reads `$0.00`.
+ */
+function renderFailureSpend(spend: ReviewSpend | undefined): string {
+  if (spend === undefined) return "spent before the failure: unknown (the usage could not be read)";
+  const cost = spend.costUsd ?? 0;
+  const unknown = spend.usageUnknownRequests;
+  const amount = cost === 0 ? "$0.00" : formatUsd(cost);
+  const breakdown = renderCostBreakdown(spend.costByTier, spend.costLabels);
+  const parts = [
+    `spent before the failure: ${unknown !== undefined ? `≥ ${amount}` : amount}` +
+      (breakdown ? ` (${breakdown})` : ""),
+  ];
+  if (unknown !== undefined) {
+    parts.push(`${unknown} model request${unknown === 1 ? "" : "s"} reported no usage`);
+  }
+  parts.push(`review run ${spend.runId}`);
+  return parts.join("; ");
 }
 
 function tierSwatch(tier: Tier): string {
