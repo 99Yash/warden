@@ -73,6 +73,7 @@ export type ToolErrorReason = (typeof TOOL_ERROR_REASONS)[number];
 export const ToolErrorReasonSchema = z.enum(TOOL_ERROR_REASONS);
 
 /** Each descriptor binds its success data to the same exclusive envelope. */
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- a generic bound, not a value type: `Data` is the tool's own result type, and `dataSchema` owns its values
 export function toolResultEnvelopeSchema<Data extends Record<string, unknown>>(
   dataSchema: z.ZodType<Data>,
   toolSchema: z.ZodType<string> = z.string(),
@@ -103,6 +104,7 @@ export const ToolResultEnvelopeSchema = toolResultEnvelopeSchema(z.record(z.stri
 
 export type ToolResultEnvelope = z.infer<typeof ToolResultEnvelopeSchema>;
 
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- a generic bound, not a value type: `Data` is the tool's own result type, which its schema owns
 export function okEnvelope<Data extends Record<string, unknown>>(tool: string, data: Data) {
   return { envelopeVersion: TOOL_ENVELOPE_VERSION, tool, status: "ok" as const, data };
 }

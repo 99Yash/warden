@@ -690,6 +690,7 @@ function deepMerge(base: unknown, override: unknown): unknown {
   return merged;
 }
 
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- a guard for `deepMerge`: the check proves only an object, its keys are the config layer's, and `mergeConfig` parses the result with `configSchema`
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

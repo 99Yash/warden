@@ -5,6 +5,7 @@
  */
 
 /** A non-null object that is not an array: JSON's `{…}`. */
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- the canonical guard for unknown JSON: the check proves only an object, so each value read stays `unknown` and the caller narrows it
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

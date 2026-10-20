@@ -45,10 +45,16 @@
     // keeps its return with
     // `// oxlint-disable-next-line anti-slop/no-known-value-widening -- <reason>`.
     "anti-slop/no-known-value-widening": "error",
-    // Ratchet queue — counts measured 2026-10-18 as product src / scripts (the
-    // no-unsafe-dictionary-type count on 2026-10-20). Each moves to "error" in its own change
-    // once the tree is at zero. See docs/gate-design.md.
-    "anti-slop/no-unsafe-dictionary-type": "off", // 16 / 10
+    // no-unsafe-dictionary-type: a dictionary type whose value type is `unknown`, `any`,
+    // `object` or `{}` (`Record<string, unknown>`, an index signature) gives each reader no
+    // value contract. Parse with a zod schema and use its type, name the keys that the code
+    // reads in an interface, derive the type from its owner (an SDK type, a table's
+    // `$inferInsert`), or use a `Map` with a concrete value type. A type guard for unknown
+    // JSON, an opaque JSON column whose reader parses it, and a generic bound keep it with
+    // `// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- <reason>`.
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    // Ratchet queue — counts measured 2026-10-18 as product src / scripts. Each moves to
+    // "error" in its own change once the tree is at zero. See docs/gate-design.md.
     "anti-slop/no-runtime-typeof": "off", // 75 / 42 (with allowInTypeGuards)
     "anti-slop/require-readable-spacing": "off", // 4375, whitespace-only autofix; a style decision
 

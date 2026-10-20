@@ -9,7 +9,16 @@ import type { ToolFinding } from "./types.js";
 // jscpd's CJS build (`dist/index.js`) instead, which uses plain `require()`
 // for `colors/safe` and works correctly. Local issue; tracked by upstream.
 const requireCjs = createRequire(import.meta.url);
-type DetectClones = (opts: Record<string, unknown>) => Promise<JscpdClone[]>;
+/** The subset of jscpd's `IOptions` that `runJscpd` passes. jscpd ships no type declarations. */
+interface JscpdOptions {
+  path: string[];
+  minLines: number;
+  minTokens: number;
+  silent: boolean;
+  gitignore: boolean;
+  reporters: string[];
+}
+type DetectClones = (opts: JscpdOptions) => Promise<JscpdClone[]>;
 interface JscpdLocation {
   line: number;
   column?: number;

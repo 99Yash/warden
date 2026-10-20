@@ -32,7 +32,22 @@ function nm(packageName: string): string {
   return resolve(TMP_ROOT, "node_modules", packageName);
 }
 
-function writePkg(dir: string, pkgJson: Record<string, unknown>): void {
+/** A conditional `exports` entry, as the fixtures write it. */
+interface FakeExportEntry {
+  types: string;
+  default?: string;
+}
+
+/** The `package.json` fields the fixtures write. */
+interface FakePackageJson {
+  name: string;
+  version: string;
+  main?: string;
+  types?: string;
+  exports?: Record<string, FakeExportEntry>;
+}
+
+function writePkg(dir: string, pkgJson: FakePackageJson): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(resolve(dir, "package.json"), JSON.stringify(pkgJson, null, 2));
 }

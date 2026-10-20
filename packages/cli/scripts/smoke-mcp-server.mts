@@ -22,7 +22,11 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolResultSchema,
+  type CallToolRequest,
+  type JSONRPCMessage,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   LookupTypeDefResultSchema,
@@ -73,7 +77,11 @@ client.onerror = (err) => {
   protocolErrors.push(err.message);
 };
 
-async function call(name: string, args: Record<string, unknown>, caller: Client = client) {
+async function call(
+  name: string,
+  args: CallToolRequest["params"]["arguments"],
+  caller: Client = client,
+) {
   const result = CallToolResultSchema.parse(await caller.callTool({ name, arguments: args }));
   const content = result.content;
   if (content.length !== 1 || content[0]?.type !== "text") {
@@ -436,7 +444,7 @@ try {
     child.stderr.on("data", (c: string) => {
       childErr += c;
     });
-    const send = (msg: Record<string, unknown>): void => {
+    const send = (msg: JSONRPCMessage): void => {
       child.stdin.write(`${JSON.stringify(msg)}\n`);
     };
     // A JSON-RPC message on one stdout line: a response carries `id` and,

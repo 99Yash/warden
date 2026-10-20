@@ -113,6 +113,7 @@ function defOf(schema: ZodType): ZodDef {
 }
 
 /** A non-null object that is not an array. `@warden/ai` sits below `@warden/core` and cannot import its `isRecord`. */
+// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- a guard for unknown model output: the check proves only an object, so each value read stays `unknown` and the caller narrows it
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

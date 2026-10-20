@@ -869,8 +869,13 @@ try {
     ReviewBundlePageSchema.safeParse(triplePage).success,
     "the bound core schema accepts a complete {path, line, snippet} citation",
   );
-  const brokenTriple = structuredClone(triplePage);
-  delete (brokenTriple.findings[0]?.sources[0] as Record<string, unknown> | undefined)?.["snippet"];
+  const brokenTriple = {
+    ...triplePage,
+    findings: triplePage.findings.map((f) => ({
+      ...f,
+      sources: f.sources.map(({ snippet: _snippet, ...source }) => source),
+    })),
+  };
   assert(
     !ReviewBundlePageSchema.safeParse(brokenTriple).success,
     "the bound core schema rejects a citation whose triple lost its snippet",

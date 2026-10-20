@@ -27,6 +27,7 @@ export const llmReviewCache = sqliteTable(
     modelId: text("model_id").notNull(),
 
     /** LLM output payload — `{ revisedComments[], questions[] }`. */
+    // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- opaque JSON column of a table that no code reads or writes now (`review_runs` supersedes it); a reader parses the payload
     payload: text("payload", { mode: "json" }).notNull().$type<Record<string, unknown>>(),
 
     /** Wall-clock duration of the upstream call (ms). For dogfooding telemetry. */
