@@ -74,6 +74,7 @@ export function transformSchemaForGemini<T extends ZodType>(schema: T): GeminiSc
     return { requestSchema: schema, responseTransform: identity };
   }
   return {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- generic schema walker: the rebuilt ZodType stands in for T on the wire
     requestSchema: transformed as T,
     responseTransform: (raw) => applyPaths(raw, recordedPaths),
   };
@@ -91,10 +92,11 @@ export function transformSchemaForGemini<T extends ZodType>(schema: T): GeminiSc
  */
 type PathStep = { kind: "key"; name: string } | { kind: "index" };
 
-interface ZodInternal {
-  _zod?: { def?: ZodDef };
-}
-
+/**
+ * The def fields the walker reads. Every field is optional, so zod's own def
+ * type fits it with no cast; the walker checks `type` before it reads the
+ * field that belongs to that type.
+ */
 interface ZodDef {
   type?: string;
   options?: ZodType[];
@@ -105,8 +107,13 @@ interface ZodDef {
   defaultValue?: unknown;
 }
 
-function defOf(schema: unknown): ZodDef | undefined {
-  return (schema as ZodInternal | undefined)?._zod?.def;
+function defOf(schema: ZodType): ZodDef {
+  return schema._zod.def;
+}
+
+/** A non-null object that is not an array. `@warden/ai` sits below `@warden/core` and cannot import its `isRecord`. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function identity(v: unknown): unknown {
@@ -125,7 +132,6 @@ function identity(v: unknown): unknown {
  */
 function walk(schema: ZodType, currentPath: PathStep[], paths: PathStep[][]): ZodType {
   const def = defOf(schema);
-  if (!def) return schema;
 
   switch (def.type) {
     case "union": {
@@ -216,7 +222,7 @@ function isNumericLiteralUnion(def: ZodDef): boolean {
   if (!options || options.length === 0) return false;
   for (const opt of options) {
     const optDef = defOf(opt);
-    if (!optDef || optDef.type !== "literal") return false;
+    if (optDef.type !== "literal") return false;
     const values = optDef.values;
     if (!values || values.length === 0) return false;
     for (const v of values) {
@@ -229,7 +235,7 @@ function isNumericLiteralUnion(def: ZodDef): boolean {
 function numericLiteralUnionToString(def: ZodDef): ZodType {
   const options = def.options ?? [];
   const [first, second, ...rest] = options.flatMap((opt) => {
-    const values = defOf(opt)?.values ?? [];
+    const values = defOf(opt).values ?? [];
     return values
       .filter((v): v is number => typeof v === "number")
       .map((v) => z.literal(String(v)));
@@ -270,12 +276,11 @@ function applyPath(value: unknown, path: PathStep[], step: number): unknown {
   const next = path[step];
   if (next === undefined) return value;
   if (next.kind === "key") {
-    if (typeof value !== "object" || Array.isArray(value)) return value;
-    const obj = value as Record<string, unknown>;
-    if (!(next.name in obj)) return value;
-    const replaced = applyPath(obj[next.name], path, step + 1);
-    if (replaced === obj[next.name]) return value;
-    return { ...obj, [next.name]: replaced };
+    if (!isRecord(value)) return value;
+    if (!(next.name in value)) return value;
+    const replaced = applyPath(value[next.name], path, step + 1);
+    if (replaced === value[next.name]) return value;
+    return { ...value, [next.name]: replaced };
   }
   if (!Array.isArray(value)) return value;
   let changed = false;

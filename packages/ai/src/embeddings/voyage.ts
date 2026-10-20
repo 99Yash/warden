@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   type EmbedInputType,
   type EmbedRequest,
@@ -33,12 +34,19 @@ export interface VoyageProviderOptions {
   timeoutMs?: number;
 }
 
-interface VoyageEmbedResponseShape {
-  object?: string;
-  data?: { object?: string; embedding?: number[]; index?: number }[];
-  model?: string;
-  usage?: { total_tokens?: number };
-}
+/** The fields of a Voyage embeddings response that the provider reads. Usage is telemetry: a wrong value reads as absent. */
+const VoyageEmbedResponseSchema = z.looseObject({
+  data: z.array(z.unknown()).optional(),
+  usage: z
+    .looseObject({ total_tokens: z.number().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
+
+const VoyageEmbeddingItemSchema = z.looseObject({
+  index: z.number(),
+  embedding: z.array(z.number()),
+});
 
 class VoyageHttpError extends Error {
   readonly statusCode: number;
@@ -141,16 +149,23 @@ export class VoyageProvider implements EmbeddingProvider {
       );
     }
 
-    const json = (await response.json()) as VoyageEmbedResponseShape;
+    const parsed = VoyageEmbedResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error(
+        "VoyageProvider: malformed response — body is not an object with a data array",
+      );
+    }
+    const json = parsed.data;
     const data = json.data ?? [];
     const vectors: Float32Array[] = Array.from({ length: req.inputs.length });
-    for (const item of data) {
-      if (typeof item.index !== "number" || !Array.isArray(item.embedding)) {
+    for (const entry of data) {
+      const item = VoyageEmbeddingItemSchema.safeParse(entry);
+      if (!item.success) {
         throw new Error(
           "VoyageProvider: malformed response — embedding item missing index/embedding",
         );
       }
-      vectors[item.index] = Float32Array.from(item.embedding);
+      vectors[item.data.index] = Float32Array.from(item.data.embedding);
     }
     for (let i = 0; i < vectors.length; i++) {
       if (!vectors[i]) {
