@@ -226,8 +226,10 @@ different code (OpenCode vs warden's catalog).
 - Cost source: the OpenCode session total from the serve API; the
   harness reference cost is `CommentSet.metadata.costUsd`. The two are
   priced by different code (OpenCode vs warden's catalog).
-- Labels match on file + line ±5 + category (+ `claim_includes`): a lane
-  that picks a different `category` for a real bug scores a miss.
+- Labels match on file + line ±5 + category (+ `claim_includes`, + `kind`):
+  a lane that picks a different `category` for a real bug scores a miss.
+  A label with `kind` matches only a comment of that kind (ADR-0052 leg
+  (iv)); a label without it matches any kind.
 
 ## Results
 

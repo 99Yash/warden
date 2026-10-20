@@ -20,11 +20,12 @@
  * sample fails the precision gate.
  */
 
-import type { CommentSetMetadata } from "@warden/core";
+import type { CommentSet, CommentSetMetadata } from "@warden/core";
 import type { SessionUsage } from "../../src/opencode/drive.js";
 import type {
   AggregateScore,
   Fixture,
+  FixtureLabel,
   FixtureSample,
   FixtureScore,
   ParityVerdict,
@@ -558,4 +559,39 @@ function round4(n: number): number {
 
 function labelExpectation(label: Fixture["labels"][number]): "present" | "absent" {
   return label.expect ?? "present";
+}
+
+// ---------------------------------------------------------------------------
+// Label matching
+// ---------------------------------------------------------------------------
+
+/** The Comment fields a label matches against. */
+export type LabelMatchComment = Pick<
+  CommentSet["comments"][number],
+  "file" | "lineStart" | "lineEnd" | "category" | "kind" | "claim"
+>;
+
+/**
+ * Whether one comment matches one label. The comment must cite the label's
+ * `path`; and, when the label sets them, cite within ±5 lines of `line`,
+ * have the same `category` and `kind`, and contain `claimIncludes` in its
+ * claim (case-insensitive). A label without `kind` matches any kind.
+ */
+export function matchesLabel(comment: LabelMatchComment, label: FixtureLabel): boolean {
+  if (comment.file !== label.path) return false;
+  if (label.line !== undefined) {
+    const drift = 5;
+    const lo = comment.lineStart - drift;
+    const hi = comment.lineEnd + drift;
+    if (label.line < lo || label.line > hi) return false;
+  }
+  if (label.category !== undefined && comment.category !== label.category) return false;
+  if (label.kind !== undefined && comment.kind !== label.kind) return false;
+  if (
+    label.claimIncludes !== undefined &&
+    !comment.claim.toLowerCase().includes(label.claimIncludes.toLowerCase())
+  ) {
+    return false;
+  }
+  return true;
 }
