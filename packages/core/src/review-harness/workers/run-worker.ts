@@ -20,6 +20,7 @@ import { makeLookupTypeDefTool } from "../../llm/tools/lookup-type-def.js";
 import type { Category, Comment, DegradedEntry, Source } from "../../schema.js";
 import type { ReasonedFindingMode } from "../boss-loop.js";
 import { loadWorkerSystemPrompt, type WorkerPromptVariant } from "../prompts/loader.js";
+import { OutputCutoffLog } from "../output-cutoff.js";
 import { CallUsageMeter, type CallUsage } from "../scratchpad.js";
 import {
   resolveWorkerTier,
@@ -258,6 +259,14 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     };
   }
 
+  if (call.warning !== undefined) {
+    degraded.push({
+      kind: "warning",
+      topic: `worker-${input.concern}`,
+      message: `${input.concern}: ${call.warning}`,
+    });
+  }
+
   const category = CATEGORY_BY_CONCERN[input.concern];
   const nowIso = new Date().toISOString();
   const findings: Comment[] = [];
@@ -429,6 +438,11 @@ interface WorkerCallOk {
   findings: WorkerFinding[];
   toolCalls: number;
   usage: CallUsage;
+  /**
+   * Set when an earlier step was cut off at the output token limit, but the
+   * final output parsed. `runWorker()` adds it as a warning entry.
+   */
+  warning?: string;
 }
 
 interface WorkerCallErr {
@@ -462,7 +476,11 @@ export async function callWorker(opts: {
   telemetry?: ReviewTelemetrySettings;
 }): Promise<WorkerCallOk | WorkerCallErr> {
   const first = await tryProvider(opts.primary, opts);
-  if (first.ok) return first;
+  if (first.ok) {
+    if (first.warning === undefined) return first;
+    const modelLabel = opts.modelLabel ?? `anthropic ${opts.tier}`;
+    return { ...first, warning: `${modelLabel} ${first.warning}` };
+  }
   const modelLabel = opts.modelLabel ?? `anthropic ${opts.tier}`;
   return {
     ok: false,
@@ -489,6 +507,7 @@ async function tryProvider(
   // Count usage per step, so that a call that fails after some steps still
   // records what it spent (see `CallUsageMeter`).
   const meter = new CallUsageMeter();
+  const cutoffs = new OutputCutoffLog();
   try {
     const reasoned = opts.reasonedFindingMode === "allow-empty-sources";
     const schemaPair = reasoned ? REASONED_WORKER_GEMINI_PAIR : LEGACY_WORKER_GEMINI_PAIR;
@@ -501,7 +520,10 @@ async function tryProvider(
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
       output: Output.object({ schema: schemaPair.requestSchema }),
       prepareStep: meter.prepareStep,
-      onStepFinish: meter.onStepFinish,
+      onStepFinish: (step) => {
+        meter.onStepFinish(step);
+        cutoffs.onStepFinish(step);
+      },
       ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
       ...(opts.telemetry !== undefined ? { experimental_telemetry: opts.telemetry } : {}),
       timeout: { totalMs: opts.timeoutMs },
@@ -522,6 +544,12 @@ async function tryProvider(
     // check the result against the schema the pair came from; a failure is a
     // failed worker call, like any other error in this function.
     const checked = outputSchema.safeParse(schemaPair.responseTransform(rawOutput));
+    const cutoff = cutoffs.describe();
+    // The final output was cut off: its findings are not complete, so the
+    // call fails (no clean result from a cut-off output).
+    if (cutoff !== undefined && cutoffs.lastStepCut()) {
+      return { ok: false, error: cutoff, usage: meter.snapshot() };
+    }
     if (!checked.success) {
       return {
         ok: false,
@@ -538,9 +566,18 @@ async function tryProvider(
       findings: checked.data.findings,
       toolCalls,
       usage: meter.snapshot(),
+      ...(cutoff !== undefined ? { warning: `${cutoff}; a later step wrote the output` } : {}),
     };
   } catch (err) {
-    return { ok: false, error: formatErr(err), usage: meter.snapshot() };
+    // A cut-off step is the likely cause (for example, the output did not
+    // parse), so it goes first: `formatErr` cuts the message at 160 chars.
+    const cutoff = cutoffs.describe();
+    const error = formatErr(err);
+    return {
+      ok: false,
+      error: cutoff === undefined ? error : `${cutoff}; ${error}`,
+      usage: meter.snapshot(),
+    };
   }
 }
 
