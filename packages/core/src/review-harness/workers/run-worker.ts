@@ -70,14 +70,14 @@ const REASONED_WORKER_GEMINI_PAIR = transformSchemaForGemini(ReasonedWorkerOutpu
 const PER_WORKER_STEP_CAP = 8;
 const DEFAULT_TIMEOUT_MS = 90_000;
 
-const CATEGORY_BY_CONCERN: Record<Concern, Category> = {
+const CATEGORY_BY_CONCERN = {
   correctness: "correctness",
   scalability: "scalability",
   consistency: "consistency",
   security: "security",
   committability: "committability",
   leverage: "leverage",
-};
+} satisfies Record<Concern, Category>;
 
 export interface RunWorkerInput extends WorkerInvocation {
   /**

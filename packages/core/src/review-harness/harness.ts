@@ -506,7 +506,9 @@ function formatErr(err: unknown): string {
 // threshold when no single request does.
 // ---------------------------------------------------------------------------
 
-type RequestsByTier = Record<ReviewCostTier, TokenUsage[]>;
+// A mapped type, not `Record`: anti-slop/no-known-value-widening reads every
+// `Record<K, V>` as an open dictionary, and this one has one key per tier.
+type RequestsByTier = { [Tier in ReviewCostTier]: TokenUsage[] };
 
 function toUsageBlock(usage: TokenUsageBlock): TokenUsageBlock {
   const block: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -525,11 +527,13 @@ function addUsage(acc: TokenUsageBlock, next: TokenUsage): TokenUsageBlock {
  * Per-tier token usage plus the count of model requests whose usage is
  * unknown, over the boss and every worker (failed ones included).
  */
-function summarizeUsage(scratchpad: ReviewScratchpad): {
+interface UsageSummary {
   tokenUsage: TokenUsageByTier | undefined;
   requestsByTier: RequestsByTier;
   unknownRequests: number;
-} {
+}
+
+function summarizeUsage(scratchpad: ReviewScratchpad): UsageSummary {
   const boss = scratchpad.bossUsage();
   const workers = scratchpad.workerOutputs();
   const requestsByTier: RequestsByTier = {
@@ -599,6 +603,12 @@ async function computeCosts(
   return { ...costs, costLabels: getReviewModelLabelsByTier() };
 }
 
+/** The total cost of a review, and the cost of each tier that has usage. */
+interface TierCosts {
+  costUsd: number;
+  costByTier: CostByTier;
+}
+
 /**
  * Pure cost step of `computeCosts`: price every request of each tier on its
  * own, then sum. A tier gets a `costByTier` entry when `usage` has a block
@@ -610,7 +620,7 @@ export function priceRequestsByTier(
   usage: TokenUsageByTier,
   requests: RequestsByTier,
   prices: Record<ReviewCostTier, LlmModelPrice>,
-): { costUsd: number; costByTier: CostByTier } {
+): TierCosts {
   const raw = {
     opus: tierCost(requests.opus, prices.opus),
     sonnet: tierCost(requests.sonnet, prices.sonnet),

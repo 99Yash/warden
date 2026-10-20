@@ -36,10 +36,19 @@
     // `// oxlint-disable-next-line anti-slop/no-unknown-returns -- <reason>`; the reason names
     // the parse.
     "anti-slop/no-unknown-returns": "error",
-    // Ratchet queue — counts measured 2026-10-18 as product src / scripts. Each moves to
-    // "error" in its own change once the tree is at zero. See docs/gate-design.md.
-    "anti-slop/no-known-value-widening": "off", // 42 / 18
-    "anti-slop/no-unsafe-dictionary-type": "off", // 50 / 32
+    // no-known-value-widening: an explicit `Record<…>`, `unknown`, `object` or anonymous object
+    // type on a binding, a property, a return or an `as` discards what an object literal, an
+    // array, a function or a `new` already proves. Let inference keep the type, check the
+    // shape with `satisfies`, or name the owner contract (an interface, or a mapped type over a
+    // closed union: the rule reads each `Record<K, V>` as an open dictionary). A table that an
+    // arbitrary string indexes is a `Map`. A generic walker whose callers parse the result
+    // keeps its return with
+    // `// oxlint-disable-next-line anti-slop/no-known-value-widening -- <reason>`.
+    "anti-slop/no-known-value-widening": "error",
+    // Ratchet queue — counts measured 2026-10-18 as product src / scripts (the
+    // no-unsafe-dictionary-type count on 2026-10-20). Each moves to "error" in its own change
+    // once the tree is at zero. See docs/gate-design.md.
+    "anti-slop/no-unsafe-dictionary-type": "off", // 16 / 10
     "anti-slop/no-runtime-typeof": "off", // 75 / 42 (with allowInTypeGuards)
     "anti-slop/require-readable-spacing": "off", // 4375, whitespace-only autofix; a style decision
 

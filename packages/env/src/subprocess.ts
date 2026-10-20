@@ -21,12 +21,12 @@ const DETERMINISTIC_ENV_KEYS = [
 export function deterministicProcessEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const env: Record<string, string> = {};
+  const entries: Array<[string, string]> = [];
   for (const key of DETERMINISTIC_ENV_KEYS) {
     const value = source[key];
-    if (value !== undefined) env[key] = value;
+    if (value !== undefined) entries.push([key, value]);
   }
-  return env;
+  return Object.fromEntries(entries);
 }
 
 /** Apply the same policy for directly launched `warden mcp` sessions. */

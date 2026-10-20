@@ -283,6 +283,7 @@ function applyPath(value: unknown, path: PathStep[], step: number): unknown {
     if (!(next.name in value)) return value;
     const replaced = applyPath(value[next.name], path, step + 1);
     if (replaced === value[next.name]) return value;
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- generic walker over the unparsed model output; the caller parses the result
     return { ...value, [next.name]: replaced };
   }
   if (!Array.isArray(value)) return value;

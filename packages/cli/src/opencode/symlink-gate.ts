@@ -6,17 +6,17 @@ import { errnoCode } from "@warden/core/guards";
 function gitPath(value: string): string {
   if (!value.startsWith('"')) return value.replace(/\t$/, "");
   const bytes: number[] = [];
-  const escapes: Record<string, string> = {
-    a: "\x07",
-    b: "\b",
-    t: "\t",
-    n: "\n",
-    v: "\v",
-    f: "\f",
-    r: "\r",
-    '"': '"',
-    "\\": "\\",
-  };
+  const escapes = new Map([
+    ["a", "\x07"],
+    ["b", "\b"],
+    ["t", "\t"],
+    ["n", "\n"],
+    ["v", "\v"],
+    ["f", "\f"],
+    ["r", "\r"],
+    ['"', '"'],
+    ["\\", "\\"],
+  ]);
   const body = value.slice(1, value.lastIndexOf('"'));
   for (let i = 0; i < body.length; i++) {
     let ch = body.charAt(i);
@@ -32,7 +32,7 @@ function gitPath(value: string): string {
       // the gate does for every path it cannot read.
       if (i >= body.length) throw new Error(`malformed quoted path in the diff: ${value}`);
       const escaped = body.charAt(i);
-      ch = escapes[escaped] ?? escaped;
+      ch = escapes.get(escaped) ?? escaped;
     }
     bytes.push(...Buffer.from(ch));
   }

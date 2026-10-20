@@ -61,6 +61,11 @@ function assert(cond: unknown, msg: string): void {
   }
 }
 
+/** A string at the bottom of a chain of `{ child }` objects. */
+type NestedObject = string | { child: NestedObject };
+/** A string at the bottom of a chain of one-element arrays. */
+type NestedArray = string | NestedArray[];
+
 const TMP = mkdtempSync(resolve(tmpdir(), "warden-untrusted-input-"));
 
 try {
@@ -68,7 +73,7 @@ try {
   // [1] Credential rules: one positive sample per rule, plus near misses.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[1] credential rules\n");
-  const samples: Record<CredentialRuleId, string> = {
+  const samples = {
     "pem-private-key": "-----BEGIN " + "RSA PRIVATE KEY-----",
     "aws-access-key-id": "AKIA" + "Q".repeat(16),
     "github-token": "ghp_" + "a1".repeat(18),
@@ -88,7 +93,7 @@ try {
     "google-api-key": "AIza" + "w".repeat(35),
     "npm-token": "npm_" + "n".repeat(36),
     jwt: "eyJ" + "h".repeat(12) + ".eyJ" + "p".repeat(12) + "." + "s".repeat(12),
-  };
+  } satisfies Record<CredentialRuleId, string>;
   for (const rule of CREDENTIAL_RULES) {
     const sample = samples[rule.id];
     assert(!rule.pattern.global, `${rule.id} has no stateful /g flag`);
@@ -97,13 +102,13 @@ try {
       `${rule.id} matches its sample`,
     );
   }
-  let deep: unknown = "clean";
+  let deep: NestedObject = "clean";
   for (let depth = 0; depth < 10000; depth++) deep = { child: deep };
   assert(
     screenFinding(deep) === SECRET_DEPTH_RULE_ID,
     "excessive object depth fails closed without RangeError",
   );
-  let deepArray: unknown = "clean";
+  let deepArray: NestedArray = "clean";
   for (let depth = 0; depth < 10000; depth++) deepArray = [deepArray];
   assert(
     screenFinding(deepArray) === SECRET_DEPTH_RULE_ID,
@@ -113,7 +118,7 @@ try {
     screenFinding({ extra: { nested: "clean" } }) === undefined,
     "ordinary nested output passes",
   );
-  let boundary: unknown = "clean";
+  let boundary: NestedObject = "clean";
   for (let depth = 0; depth < SECRET_SCAN_MAX_DEPTH; depth++) boundary = { child: boundary };
   assert(screenFinding(boundary) === undefined, "output at the depth limit passes");
   assert(

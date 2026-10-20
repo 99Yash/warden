@@ -57,10 +57,10 @@ function loadDiligentPreamble(): string {
   return diligentPreambleCache;
 }
 
-const BOSS_PROMPT_PATHS: Record<BossPromptVariant, string> = {
+const BOSS_PROMPT_PATHS = {
   rules: resolve(DIR, "boss-system.md"),
   examples: resolve(DIR, "boss-system-examples.md"),
-};
+} satisfies Record<BossPromptVariant, string>;
 
 const bossCache = new Map<BossPromptVariant, string>();
 // Cache key: `${variant}:${concern}` so baseline + variant for the same
