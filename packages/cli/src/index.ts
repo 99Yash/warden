@@ -28,6 +28,7 @@ import { runSetupCommand, type SetupCliOpts } from "./commands/setup.js";
 import { formatCliError, formatCommentSet } from "./format.js";
 import { createPhaseRenderer, renderBannerLine } from "./render.js";
 import { runOpencodeReview } from "./opencode/drive.js";
+import { LANE_SPECS, laneSpecFor, type LaneSpec } from "./opencode/materialize.js";
 
 function findUp(filename: string): string | undefined {
   let dir = process.cwd();
@@ -253,7 +254,11 @@ program
 program
   .command("opencode-review")
   .description(
-    "Run the down lane in OpenCode, build the trusted lane envelope, and publish only the runPostPass CommentSet. No warden provider key needed.",
+    "Run one review lane in OpenCode (the down lane by default), build the trusted lane envelope, and publish only the runPostPass CommentSet. No warden provider key needed.",
+  )
+  .option(
+    `--lane <${LANE_SPECS.map((spec) => spec.lane).join("|")}>`,
+    "The lane to run. Default down. The up lane (ADR-0052, not ratified) is off unless you pass --lane up.",
   )
   .option(
     "--base <ref>",
@@ -381,6 +386,7 @@ async function runSecurity(opts: CommonOpts): Promise<void> {
 }
 
 interface OpencodeReviewOpts {
+  lane?: string;
   base?: string;
   model?: string;
   json?: boolean;
@@ -400,6 +406,15 @@ async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void>
   const repoRoot = findRepoRoot();
   loadWardenRuntime({ repoRoot });
 
+  let lane: LaneSpec | undefined;
+  if (opts.lane !== undefined) {
+    lane = laneSpecFor(opts.lane);
+    if (lane === undefined) {
+      throw new Error(
+        `opencode-review: --lane must be one of ${LANE_SPECS.map((spec) => spec.lane).join(", ")} (got "${opts.lane}")`,
+      );
+    }
+  }
   let volumeCap: number | undefined;
   if (opts.volumeCap !== undefined) {
     const n = Number(opts.volumeCap);
@@ -433,6 +448,7 @@ async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void>
 
   await runOpencodeReview({
     repoRoot,
+    ...(lane !== undefined ? { lane } : {}),
     ...(opts.base !== undefined ? { baseRef: opts.base } : {}),
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.json !== undefined ? { json: opts.json } : {}),

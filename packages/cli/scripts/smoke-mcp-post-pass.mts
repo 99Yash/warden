@@ -392,7 +392,7 @@ try {
     diff: DIFF,
     lanes: [
       {
-        lane: "up",
+        lane: "down",
         status: "ok",
         scope: [SRC],
         findings: [
@@ -444,6 +444,29 @@ try {
   assert(
     kindOf(claimOf(cveLow)) === "question",
     "model-labelled cve low-confidence demotes — the label is not authority",
+  );
+
+  // ADR-0052: an up-lane finding demotes on confidence alone. Its `api_def`
+  // source proves that a primitive exists, not that the restructure is
+  // right. The same finding from the down lane keeps the exemption.
+  const upApiDefLow = { ...apiDefLow, claim: "smoke up-lane reinvention claim" };
+  const r5up = await runPostPass({
+    repoRoot: TMP_ROOT,
+    diff: DIFF,
+    lanes: [mkLane("up", [upApiDefLow])],
+  });
+  const r5down = await runPostPass({
+    repoRoot: TMP_ROOT,
+    diff: DIFF,
+    lanes: [mkLane("down", [upApiDefLow])],
+  });
+  assert(
+    r5up.comments.find((c) => c.claim === upApiDefLow.claim)?.kind === "question",
+    "up lane: verified api_def below 0.7 still demotes to question (no authority exemption)",
+  );
+  assert(
+    r5down.comments.find((c) => c.claim === upApiDefLow.claim)?.kind === "assertion",
+    "down lane: the same verified api_def finding stays an assertion",
   );
 
   // ---------------------------------------------------------------------------

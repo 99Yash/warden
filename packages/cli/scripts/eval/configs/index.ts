@@ -195,4 +195,18 @@ const claudeCodeDown: EvalConfig = {
   runtime: "claude-code",
 };
 
-export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown];
+/**
+ * The OpenCode up lane (ADR-0052 Lever D, proposed): structural search,
+ * default-off. Like `opencode-down`, it is out of `ALL_CONFIGS`, so only
+ * `--config opencode-up` (or `--compare`) runs it. It scores the up
+ * lane alone; the eval plan in the up-lane PR compares it with
+ * `opencode-down` on the same fixtures.
+ */
+const opencodeUp: EvalConfig = {
+  name: "opencode-up",
+  description: "OpenCode up lane (structural search, ADR-0052) via driveOpencodeLane.",
+  runtime: "opencode",
+  lane: "up",
+};
+
+export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp];

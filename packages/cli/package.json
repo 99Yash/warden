@@ -14,6 +14,7 @@
     "warden": "node --import tsx/esm src/index.ts",
     "lanes:materialize": "node --import tsx/esm scripts/materialize-lanes.mts",
     "lanes:check": "node --import tsx/esm scripts/materialize-lanes.mts --check",
+    "lanes:measure": "node --import tsx/esm scripts/measure-lanes.mts",
     "smoke:m5-selector": "node --import tsx/esm scripts/smoke-m5-selector.mts",
     "smoke:import-graph-freshness": "node --import tsx/esm scripts/smoke-import-graph-freshness.mts",
     "smoke:m5-jscpd": "node --import tsx/esm scripts/smoke-m5-jscpd.mts",

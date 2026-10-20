@@ -78,6 +78,17 @@ const SecretGuardPlaceholderSchema = z.strictObject({
     ),
 });
 
+/**
+ * ADR-0052 (2026-10-03 amendment): lanes whose findings demote on
+ * confidence alone at step 5. An up-lane reinvention finding cites the
+ * `lookup_type_def` `.d.ts` source, which proves that the primitive
+ * exists, not that the restructure is right. So that citation must not
+ * keep a tier-4/5 closure an assertion. Keyed by minted id: a
+ * byte-identical finding from another lane shares the id (step 8 dedupes
+ * the two to one comment), so it takes the stricter rule.
+ */
+const CONFIDENCE_ONLY_LANES: ReadonlySet<LaneName> = new Set(["up"]);
+
 export interface PostPassConfig {
   verbose?: boolean;
   volumeCap?: number;
@@ -104,6 +115,7 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
   // lines, category, and claim) submitted by two lanes dedupe at step 8.
   const perLane: Comment[][] = [];
   const invalidByLane = new Map<string, number>();
+  const confidenceOnlyIds = new Set<string>();
   for (const lane of input.lanes) {
     const scope = new Set(lane.scope.map((p) => p.replace(/\\/g, "/")));
     const kept: Comment[] = [];
@@ -135,12 +147,11 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
         postPass.push(secretGuardEntry(lane.lane, secret, anchor));
         continue;
       }
-      kept.push({
-        ...rest,
-        id: stableCommentId(
-          `post-pass:${rest.file}:${rest.lineStart}:${rest.lineEnd}:${rest.category}:${rest.claim}`,
-        ),
-      });
+      const id = stableCommentId(
+        `post-pass:${rest.file}:${rest.lineStart}:${rest.lineEnd}:${rest.category}:${rest.claim}`,
+      );
+      if (CONFIDENCE_ONLY_LANES.has(lane.lane)) confidenceOnlyIds.add(id);
+      kept.push({ ...rest, id });
     }
     perLane.push(kept);
   }
@@ -229,11 +240,14 @@ export async function runPostPass(input: PostPassInput): Promise<CommentSet> {
     });
   }
 
-  // 5. Confidence→kind demotion (never drops).
-  const demoted = applyConfidenceToKind(
-    anchored.comments,
-    input.config?.securityFloor !== undefined ? { securityFloor: input.config.securityFloor } : {},
-  );
+  // 5. Confidence→kind demotion (never drops). Up-lane findings get no
+  // verified-authority exemption (`CONFIDENCE_ONLY_LANES`).
+  const demoted = applyConfidenceToKind(anchored.comments, {
+    confidenceOnlyIds,
+    ...(input.config?.securityFloor !== undefined
+      ? { securityFloor: input.config.securityFloor }
+      : {}),
+  });
   const demotionEntries = demotionsToDegraded(demoted.demotions);
 
   // 6. Tier-3 gate, same rule as review-mode applyHardRules.

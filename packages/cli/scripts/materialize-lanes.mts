@@ -14,26 +14,17 @@ import {
   LANE_SPECS,
   materializeLane,
   missingRequiredPhrases,
-  parseCharterIncludes,
 } from "../src/opencode/materialize.js";
+import { readLaneInput } from "./lane-input.mjs";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(CLI_ROOT, "..", "..");
 const OUT_DIR = resolve(CLI_ROOT, "opencode");
 
-function readSource(rel: string): string {
-  return readFileSync(resolve(REPO_ROOT, rel), "utf8");
-}
-
 const outputs: Array<{ filename: string; content: string }> = [];
 const lostPhrases: string[] = [];
 for (const spec of LANE_SPECS) {
-  const charter = readSource(spec.charterPath);
-  const sources = new Map<string, string>();
-  for (const include of parseCharterIncludes(charter, spec.charterPath)) {
-    if (!sources.has(include.file)) sources.set(include.file, readSource(include.file));
-  }
-  const { prompt, configJson } = materializeLane(spec, { charter, sources });
+  const { prompt, configJson } = materializeLane(spec, readLaneInput(spec, REPO_ROOT));
   for (const phrase of missingRequiredPhrases(spec, prompt)) {
     lostPhrases.push(`${spec.promptFilename}: "${phrase}"`);
   }

@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import {
   CommentSetSchema,
@@ -34,6 +35,7 @@ import {
   DOWN_LANE_SPEC,
   LANE_MCP_TOOLS,
   LANE_SPECS,
+  UP_LANE_SPEC,
   materializeLane,
   missingRequiredPhrases,
   extractSection,
@@ -52,6 +54,7 @@ import {
   evaluateLane,
   isContextOverflowError,
   laneCompactionReason,
+  laneScopeCeiling,
   laneScopeOverCeiling,
   parseLaneEvents,
   parseMcpServers,
@@ -63,6 +66,7 @@ import {
   wardenMcpReadiness,
 } from "../src/opencode/drive.js";
 import { isOpencodeCostMeasured } from "./eval/score.mjs";
+import { readLaneInput } from "./lane-input.mjs";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
 async function withEnv<T>(
@@ -182,14 +186,7 @@ function readCommitted(rel: string): string {
 }
 
 function materializeInput(spec: LaneSpec = DOWN_LANE_SPEC): MaterializeInput {
-  const charter = readFileSync(resolve(CLI_ROOT, "..", "..", spec.charterPath), "utf8");
-  const sources = new Map<string, string>();
-  for (const include of parseCharterIncludes(charter, spec.charterPath)) {
-    if (!sources.has(include.file)) {
-      sources.set(include.file, readFileSync(resolve(CLI_ROOT, "..", "..", include.file), "utf8"));
-    }
-  }
-  return { charter, sources };
+  return readLaneInput(spec, resolve(CLI_ROOT, "..", ".."));
 }
 
 function stripKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -464,6 +461,21 @@ try {
     "config turns auto-compaction off (top-level compaction.auto:false)",
   );
   assert(agent?.mode === "primary", "agent mode is primary (--agent selects it regardless)");
+  // Every lane gets the same security policy: only the agent key, its
+  // description, and its prompt file differ from the down config.
+  for (const spec of LANE_SPECS.filter((s) => s !== DOWN_LANE_SPEC)) {
+    const other = LaneConfigSchema.parse(
+      JSON.parse(materializeLane(spec, materializeInput(spec)).configJson),
+    );
+    const otherAgent = other.agents[spec.agentId];
+    assert(
+      Object.keys(other.agents).length === 1 &&
+        isDeepStrictEqual(otherAgent?.permissions, agent?.permissions) &&
+        isDeepStrictEqual(other.mcp, config.mcp) &&
+        isDeepStrictEqual(other.compaction, config.compaction),
+      `${spec.lane} config has one agent with the down lane's permissions, MCP server, and compaction`,
+    );
+  }
   assert(
     z.string().safeParse(agent?.model).success,
     "agent carries a model default (--model still required: run ignores it)",
@@ -1292,7 +1304,8 @@ if (argv[0] !== "run") fail("first argv must be run or serve");
 for (const w of ["--server", "--format"]) if (!has(w)) fail("missing " + w);
 if (has("--standalone")) fail("--standalone must not be passed (warmed serve owns MCP)");
 if (!String(argv[argv.indexOf("--server") + 1] ?? "").startsWith("http://127.0.0.1:")) fail("wrong --server URL");
-if (!has("--agent", "warden-down")) fail("wrong agent");
+if (!has("--agent", process.env.WARDEN_SMOKE_AGENT ?? "warden-down")) fail("wrong agent");
+if (!(process.env.OPENCODE_CONFIG ?? "").endsWith("/" + (process.env.WARDEN_SMOKE_CONFIG_FILE ?? "opencode.json"))) fail("wrong lane config");
 if (!has("--model") || (argv[argv.indexOf("--model") + 1] ?? "").length === 0) fail("missing --model value");
 if (has("--auto")) fail("--auto must not be passed");
 checkSharedEnv();
@@ -1467,6 +1480,44 @@ if (mode === "runfail") {
       lanesOut.lanes[0]?.lane === "down" &&
       lanesOut.lanes[0].status === "ok",
     "--lanes-out carries the down/ok envelope for replay",
+  );
+  // (a1) the up lane is opt-in: `--lane up` runs agent warden-up against
+  // its own config, and the envelope and trace name the up lane.
+  const upRun = runDriver(
+    ["--base", "HEAD~1", "--json", "--lane", "up", "--lanes-out", "lanes-up.json"],
+    {
+      WARDEN_SMOKE_AGENT: UP_LANE_SPEC.agentId,
+      WARDEN_SMOKE_CONFIG_FILE: UP_LANE_SPEC.configFilename,
+    },
+  );
+  const upSet = parseOut(upRun.out);
+  assert(
+    upRun.exit === 0 && upSet?.comments.some((c) => c.claim === inScopeFinding.claim) === true,
+    `--lane up runs ${UP_LANE_SPEC.agentId} on ${UP_LANE_SPEC.configFilename} and publishes (exit ${upRun.exit})`,
+  );
+  assert(
+    upSet?.metadata.degradedWorkers.some(
+      (d) => d.topic === "lane-trace" && d.message.startsWith("lane-trace: up ok"),
+    ) === true,
+    "the up lane's trace entry names the up lane",
+  );
+  let upLanesOut: z.infer<typeof PostPassLanesSchema> | undefined;
+  try {
+    upLanesOut = PostPassLanesSchema.parse(
+      JSON.parse(readFileSync(resolve(REPO, "lanes-up.json"), "utf8")),
+    );
+  } catch {
+    upLanesOut = undefined;
+  }
+  assert(
+    upLanesOut?.lanes.length === 1 && upLanesOut.lanes[0]?.lane === "up",
+    "--lanes-out carries one up envelope",
+  );
+  // An unknown lane name fails in flag parsing, before any spawn.
+  const badLane = runDriver(["--base", "HEAD~1", "--json", "--lane", "surface"]);
+  assert(
+    badLane.exit !== 0 && badLane.out === "",
+    "--lane with an unknown lane fails before spawn",
   );
   // The fake serve answers the session route with a fixed usage; the
   // lane-trace entry carries it as a cost suffix.
@@ -1986,6 +2037,30 @@ if (mode === "runfail") {
       overReason.includes(`ceiling of ${DOWN_LANE_MAX_SCOPE_FILES}`) &&
       overReason.includes(`DOWN_LANE_SPEC.steps ${DOWN_LANE_SPEC.steps}`),
     `scope one over the ceiling fails naming the numbers and their source (${overReason})`,
+  );
+  // The down reason keeps its pre-seam text byte for byte.
+  assert(
+    overReason ===
+      "review target too large: 59 changed files exceed the down lane ceiling of 58 " +
+        "(DOWN_LANE_SPEC.steps 60 - 1 text-only final step - 1 warden_run_det_priors call, " +
+        "at one read per changed file)",
+    "down over-ceiling reason is unchanged",
+  );
+  // The up lane pays a read and a grep per file in pass 1, plus 9 pass 2
+  // reads: floor((60 - 2 - 9) / 2) = 24.
+  const upCeiling = laneScopeCeiling(UP_LANE_SPEC);
+  assert(upCeiling === 24, `up ceiling derives from its scope budget (got ${upCeiling})`);
+  assert(
+    laneScopeOverCeiling(scopeOf(upCeiling), UP_LANE_SPEC) === undefined,
+    `up scope at the ceiling (${upCeiling} files) is allowed`,
+  );
+  const upOverReason = laneScopeOverCeiling(scopeOf(upCeiling + 1), UP_LANE_SPEC) ?? "";
+  assert(
+    upOverReason ===
+      "review target too large: 25 changed files exceed the up lane ceiling of 24 " +
+        "(UP_LANE_SPEC.steps 60 - 1 text-only final step - 1 warden_run_det_priors call " +
+        "- 9 pass 2 reads (3 candidates x 3 home files), at one read and one grep per changed file)",
+    `up over-ceiling reason names its own derivation (${upOverReason})`,
   );
   const BIG = mkdtempSync(resolve(tmpdir(), "warden-lanes-big-"));
   const bigGit = (args: string[]): void => {

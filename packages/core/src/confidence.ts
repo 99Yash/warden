@@ -36,6 +36,15 @@ export interface ApplyConfidenceFloorOptions {
   securityFloor?: number;
 }
 
+export interface ApplyConfidenceToKindOptions extends ApplyConfidenceFloorOptions {
+  /**
+   * Ids of comments that demote on confidence alone: a verified authority
+   * does not keep them an assertion. The post-pass fills it for lanes whose
+   * cited authority does not prove the claim (the up lane, ADR-0052).
+   */
+  confidenceOnlyIds?: ReadonlySet<string>;
+}
+
 /**
  * Drop comments whose confidence is below their category's floor. Tier-1
  * bypasses unconditionally. Returns the surviving comments plus per-category
@@ -139,22 +148,23 @@ export function hasVerifiedAuthority(c: Comment): boolean {
 
 /**
  * Demote low-confidence assertions to questions (ADR-0044 §6). For each
- * comment with `kind === "assertion"`, no verified authority, and
- * `confidence` below the category threshold (resolved floor, else
- * `DEFAULT_ASSERTION_THRESHOLD`), rewrite `kind` to `"question"`. Tier 1
- * is not exempt — Tier-1 never drops, but it still degrades. Never drops,
- * never promotes a question.
+ * comment with `kind === "assertion"`, no verified authority (or an id in
+ * `opts.confidenceOnlyIds`), and `confidence` below the category threshold
+ * (resolved floor, else `DEFAULT_ASSERTION_THRESHOLD`), rewrite `kind` to
+ * `"question"`. Tier 1 is not exempt — Tier-1 never drops, but it still
+ * degrades. Never drops, never promotes a question.
  */
 export function applyConfidenceToKind(
   comments: Comment[],
-  opts: ApplyConfidenceFloorOptions = {},
+  opts: ApplyConfidenceToKindOptions = {},
 ): ConfidenceDemotionResult {
   const floors = resolveFloors(opts);
   const out: Comment[] = [];
   const demotions = new Map<Category, { count: number; threshold: number }>();
   for (const c of comments) {
     const threshold = floors.get(c.category) ?? DEFAULT_ASSERTION_THRESHOLD;
-    if (c.kind === "assertion" && !hasVerifiedAuthority(c) && c.confidence < threshold) {
+    const exempt = opts.confidenceOnlyIds?.has(c.id) !== true && hasVerifiedAuthority(c);
+    if (c.kind === "assertion" && !exempt && c.confidence < threshold) {
       out.push({ ...c, kind: "question" });
       const prev = demotions.get(c.category);
       demotions.set(c.category, { count: (prev?.count ?? 0) + 1, threshold });
