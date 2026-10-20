@@ -33,6 +33,7 @@ export const externalKnowledge = sqliteTable(
     sourceUrl: text("source_url"),
 
     /** Verified payload from the upstream (raw JSON). */
+    // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- opaque JSON column: the caller owns the shape, and `getCached` reads the raw text and parses it with the caller's schema
     payload: text("payload", { mode: "json" }).notNull().$type<Record<string, unknown>>(),
 
     /** Unix epoch ms; consumers respect TTLs documented in vision.md §9. */
