@@ -774,7 +774,7 @@ function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-function lineRange(node: ts.Node, sf: ts.SourceFile): { line_start: number; line_end: number } {
+function lineRange(node: ts.Node, sf: ts.SourceFile) {
   const start = sf.getLineAndCharacterOfPosition(node.getStart(sf));
   const end = sf.getLineAndCharacterOfPosition(node.getEnd());
   return { line_start: start.line + 1, line_end: end.line + 1 };

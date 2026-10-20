@@ -264,7 +264,7 @@ function namedSymbolsOf(stmt: ts.Statement): string[] {
   return [];
 }
 
-function lineRange(sf: ts.SourceFile, node: ts.Node): { startLine: number; endLine: number } {
+function lineRange(sf: ts.SourceFile, node: ts.Node) {
   const start = sf.getLineAndCharacterOfPosition(node.getStart(sf));
   const end = sf.getLineAndCharacterOfPosition(node.getEnd());
   return { startLine: start.line + 1, endLine: end.line + 1 };

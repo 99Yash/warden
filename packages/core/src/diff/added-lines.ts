@@ -13,20 +13,20 @@ export function decodeGitPath(header: string): string | undefined {
   if (raw === undefined || raw === "/dev/null") return undefined;
   let path = raw;
   if (header.startsWith('"')) {
-    const escapes: Record<string, string> = {
-      a: "\x07",
-      b: "\b",
-      f: "\f",
-      n: "\n",
-      r: "\r",
-      t: "\t",
-      v: "\x0b",
-    };
+    const escapes = new Map([
+      ["a", "\x07"],
+      ["b", "\b"],
+      ["f", "\f"],
+      ["n", "\n"],
+      ["r", "\r"],
+      ["t", "\t"],
+      ["v", "\x0b"],
+    ]);
     path = Buffer.concat(
       (raw.match(/\\(?:[0-7]{1,3}|.)|[^\\]+/g) ?? []).map((part) => {
         if (/^\\[0-7]/.test(part)) return Buffer.from([Number.parseInt(part.slice(1), 8)]);
         return Buffer.from(
-          part.startsWith("\\") ? (escapes[part.slice(1)] ?? part.slice(1)) : part,
+          part.startsWith("\\") ? (escapes.get(part.slice(1)) ?? part.slice(1)) : part,
         );
       }),
     ).toString("utf8");

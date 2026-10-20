@@ -259,7 +259,7 @@ function createSecurityEslint(repoRoot: string): ESLintLike {
  * - `detect-non-literal-require` overlaps with the LLM's flow recognition
  *   on dynamic `require` (off in v0).
  */
-function rulesBlock(): Record<string, "error"> {
+function rulesBlock() {
   return {
     "security/detect-eval-with-expression": "error",
     "security/detect-child-process": "error",
@@ -269,7 +269,7 @@ function rulesBlock(): Record<string, "error"> {
     "security/detect-buffer-noassert": "error",
     "security/detect-disable-mustache-escape": "error",
     "no-secrets/no-secrets": "error",
-  };
+  } satisfies Record<string, "error">;
 }
 
 function formatErr(err: unknown): string {

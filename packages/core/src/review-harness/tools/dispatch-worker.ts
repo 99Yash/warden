@@ -56,14 +56,14 @@ export type DispatchPhase = z.infer<typeof PhaseEnum>;
  * boundary (this file, where the per-tier concurrency cap is acquired
  * per ADR-0033) read the same table.
  */
-export const DEFAULT_TIER_BY_CONCERN: Record<Concern, WorkerTier> = {
+export const DEFAULT_TIER_BY_CONCERN = {
   correctness: "sonnet",
   scalability: "sonnet",
   consistency: "sonnet",
   security: "sonnet",
   committability: "haiku",
   leverage: "haiku",
-};
+} satisfies Record<Concern, WorkerTier>;
 
 /**
  * Resolve a dispatch's tier from the per-concern default + optional boss

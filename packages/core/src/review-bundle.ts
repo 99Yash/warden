@@ -247,11 +247,11 @@ export function projectBundleFindings(det: DetPriors): BundleFinding[] {
 }
 
 /** First `n` entries plus the total, so a capped component can report the shortfall. */
-function capped<T>(items: T[], n: number): { included: T[]; total: number } {
+function capped<T>(items: T[], n: number) {
   return { included: items.slice(0, n), total: items.length };
 }
 
-function tally(values: Array<string | number>): Record<string, number> {
+function tally(values: Array<string | number>) {
   const out: Record<string, number> = {};
   for (const v of values) {
     const key = String(v);
@@ -441,9 +441,7 @@ export function buildReviewBundlePage(
    * placed. Returns the packed slice, how much of it was used, how many entries
    * were rejected as individually oversized, and where traversal stopped.
    */
-  const pack = (
-    capacity: number,
-  ): { packed: BundleFinding[]; used: number; rejected: number; cursor: number } => {
+  const pack = (capacity: number) => {
     const packed: BundleFinding[] = [];
     let used = 0;
     let rejected = 0;
@@ -502,12 +500,12 @@ export function buildReviewBundlePage(
     body = compose();
   }
 
-  const included: Record<(typeof TRIM_ORDER)[number], number> = {
+  const included = {
     findings: page.length,
     changedFiles: changed.included.length,
     contextHandles: handles.included.length,
     degraded: degraded.included.length,
-  };
+  } satisfies Record<(typeof TRIM_ORDER)[number], number>;
   const omissions: BundleOmission[] = [];
   for (const component of OMITTED_COMPONENTS) {
     const total = totals[component];

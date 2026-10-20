@@ -46,7 +46,13 @@ export function toComment(f: ToolFinding): Comment {
   };
 }
 
-export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } {
+/** The tier and category that a tool finding gets. */
+interface FindingSeverity {
+  tier: Tier;
+  category: Category;
+}
+
+export function mapSeverity(f: ToolFinding): FindingSeverity {
   switch (f.source) {
     // ADR-0054: deterministic integrity signals must survive curation and caps.
     case "input-integrity":

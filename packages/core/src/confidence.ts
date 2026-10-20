@@ -18,9 +18,9 @@ import type { Category, Comment, DegradedEntry } from "./schema.js";
  * categories add their own env var on demand — there is no per-category
  * config file, flag, or per-comment threshold per ADR-0028 alternatives.
  */
-export const CATEGORY_CONFIDENCE_FLOOR: Partial<Record<Category, number>> = {
-  security: 0.8,
-};
+export const CATEGORY_CONFIDENCE_FLOOR: ReadonlyMap<Category, number> = new Map([
+  ["security", 0.8],
+]);
 
 export interface ConfidenceFloorResult {
   kept: Comment[];
@@ -53,7 +53,7 @@ export function applyConfidenceFloor(
       kept.push(c);
       continue;
     }
-    const floor = floors[c.category];
+    const floor = floors.get(c.category);
     if (floor === undefined || c.confidence >= floor) {
       kept.push(c);
       continue;
@@ -153,7 +153,7 @@ export function applyConfidenceToKind(
   const out: Comment[] = [];
   const demotions = new Map<Category, { count: number; threshold: number }>();
   for (const c of comments) {
-    const threshold = floors[c.category] ?? DEFAULT_ASSERTION_THRESHOLD;
+    const threshold = floors.get(c.category) ?? DEFAULT_ASSERTION_THRESHOLD;
     if (c.kind === "assertion" && !hasVerifiedAuthority(c) && c.confidence < threshold) {
       out.push({ ...c, kind: "question" });
       const prev = demotions.get(c.category);
@@ -181,12 +181,12 @@ export function demotionsToDegraded(
   return entries;
 }
 
-function resolveFloors(opts: ApplyConfidenceFloorOptions): Partial<Record<Category, number>> {
+function resolveFloors(opts: ApplyConfidenceFloorOptions): ReadonlyMap<Category, number> {
   // Static map is the v0 source of truth. The explicit smoke override wins
   // over env so a same-process test can flip the floor; env wins over the
   // static default when the smoke override is absent.
   if (opts.securityFloor !== undefined) {
-    return { ...CATEGORY_CONFIDENCE_FLOOR, security: opts.securityFloor };
+    return withSecurityFloor(opts.securityFloor);
   }
   let envFloor: number | undefined;
   try {
@@ -201,7 +201,12 @@ function resolveFloors(opts: ApplyConfidenceFloorOptions): Partial<Record<Catego
     // an env error through a category-filter code path.
   }
   if (envFloor !== undefined) {
-    return { ...CATEGORY_CONFIDENCE_FLOOR, security: envFloor };
+    return withSecurityFloor(envFloor);
   }
-  return { ...CATEGORY_CONFIDENCE_FLOOR };
+  return CATEGORY_CONFIDENCE_FLOOR;
+}
+
+/** The static floors, with `security` replaced by `floor`. */
+function withSecurityFloor(floor: number): ReadonlyMap<Category, number> {
+  return new Map([...CATEGORY_CONFIDENCE_FLOOR, ["security", floor]]);
 }
