@@ -67,15 +67,13 @@ export function extractSection(source: string, file: string, heading: string): s
   if (start === -1) {
     throw new Error(`materialize: heading "${heading}" not found in ${file}`);
   }
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i] as string;
+  // The section ends at the next heading of the same or a higher level.
+  const next = lines.findIndex((line, i) => {
+    if (i <= start) return false;
     const lineLevel = headingLevel(line);
-    if (lineLevel !== undefined && lineLevel <= level) {
-      end = i;
-      break;
-    }
-  }
+    return lineLevel !== undefined && lineLevel <= level;
+  });
+  const end = next === -1 ? lines.length : next;
   return lines
     .slice(start, end)
     .filter((line) => !isCommentLine(line))
@@ -118,17 +116,16 @@ function parseCharterIncludesLined(
   charter: string,
 ): Array<{ include: LaneInclude; lineNo: number }> {
   const fences = [...charter.matchAll(/```includes[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm)];
-  if (fences.length === 0) {
+  const [fence, second] = fences;
+  if (fence === undefined) {
     throw new Error(`materialize: no fenced includes list in ${CHARTER_PATH}`);
   }
-  const second = fences[1];
   if (second !== undefined) {
     const lineNo = charter.slice(0, second.index).split("\n").length;
     throw new Error(
       `materialize: ${CHARTER_PATH} line ${lineNo}: second includes fence (only one includes list is allowed)`,
     );
   }
-  const fence = fences[0] as RegExpMatchArray;
   const fenceLine = charter.slice(0, fence.index).split("\n").length;
   const body = (fence[1] ?? "").split("\n");
   const includes: Array<{ include: LaneInclude; lineNo: number }> = [];
@@ -179,12 +176,13 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
   // A charter entry that names a missing section fails naming the charter
   // line, so `lanes:check` catches a stale include list.
   const sections = lined.map(({ include, lineNo }) => {
+    // The loop above checked every file, so this lookup always finds one.
+    const source = input.sources.get(include.file);
+    if (source === undefined) {
+      throw new Error(`materialize: source file not provided: ${include.file}`);
+    }
     try {
-      return extractSection(
-        input.sources.get(include.file) as string,
-        include.file,
-        include.heading,
-      );
+      return extractSection(source, include.file, include.heading);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       const succinct = detail.startsWith("materialize: ")

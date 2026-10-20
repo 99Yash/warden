@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { z } from "zod";
 import type { DegradedEntry } from "../schema.js";
 import { spawnCapture } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
@@ -54,20 +55,22 @@ export async function runEslint(
   return { findings, degraded };
 }
 
-interface EslintMessage {
-  ruleId: string | null;
-  severity: 1 | 2;
-  message: string;
-  line: number;
-  column: number;
-  endLine?: number;
-  endColumn?: number;
-}
+const EslintMessageSchema = z.object({
+  ruleId: z.string().nullable(),
+  severity: z.number(),
+  message: z.string(),
+  line: z.number(),
+  column: z.number(),
+  endLine: z.number().optional(),
+  endColumn: z.number().optional(),
+});
 
-interface EslintFileResult {
-  filePath: string;
-  messages: EslintMessage[];
-}
+// `messages` is parsed one entry at a time below, so one odd message does not
+// drop the findings of the whole run.
+const EslintFileResultSchema = z.object({
+  filePath: z.string(),
+  messages: z.array(z.unknown()),
+});
 
 function parsedOk(stdout: string): boolean {
   const start = stdout.indexOf("[");
@@ -83,18 +86,24 @@ function parsedOk(stdout: string): boolean {
 function parseEslintOutput(stdout: string, repoRoot: string): ToolFinding[] {
   const start = stdout.indexOf("[");
   if (start === -1) return [];
-  let parsed: EslintFileResult[];
+  let raw: unknown;
   try {
-    parsed = JSON.parse(stdout.slice(start)) as EslintFileResult[];
+    raw = JSON.parse(stdout.slice(start));
   } catch {
     return [];
   }
+  const parsed = z.array(EslintFileResultSchema).safeParse(raw);
+  if (!parsed.success) return [];
 
   const findings: ToolFinding[] = [];
-  for (const file of parsed) {
+  for (const file of parsed.data) {
     const absFile = isAbsolute(file.filePath) ? file.filePath : resolve(repoRoot, file.filePath);
     const relFile = relative(repoRoot, absFile);
-    for (const msg of file.messages) {
+    for (const entry of file.messages) {
+      // A message with no position (an ignored-file warning) is not a finding.
+      const result = EslintMessageSchema.safeParse(entry);
+      if (!result.success) continue;
+      const msg = result.data;
       findings.push({
         source: "eslint",
         file: relFile,

@@ -36,7 +36,6 @@ import {
   ReasonedWorkerOutputSchema,
   WorkerOutputSchema,
   type WorkerFinding,
-  type WorkerOutput,
 } from "./finding-schema.js";
 
 // Adapter is vestigial post-ADR-0017 2026-05-17 amendment (Gemini fallback
@@ -498,10 +497,9 @@ async function tryProvider(
   },
 ): Promise<ProviderOk | ProviderErr> {
   try {
-    const schemaPair =
-      opts.reasonedFindingMode === "allow-empty-sources"
-        ? REASONED_WORKER_GEMINI_PAIR
-        : LEGACY_WORKER_GEMINI_PAIR;
+    const reasoned = opts.reasonedFindingMode === "allow-empty-sources";
+    const schemaPair = reasoned ? REASONED_WORKER_GEMINI_PAIR : LEGACY_WORKER_GEMINI_PAIR;
+    const outputSchema = reasoned ? ReasonedWorkerOutputSchema : WorkerOutputSchema;
     const result = streamText({
       model,
       system: opts.systemPrompt,
@@ -525,8 +523,21 @@ async function tryProvider(
     })();
     const rawOutput = await result.output;
     // Coerce string-form numeric literals back to numbers. No-op when the
-    // schema contained no numeric-literal-union (pair is identity).
-    const parsed = schemaPair.responseTransform(rawOutput) as WorkerOutput;
+    // schema contained no numeric-literal-union (pair is identity). Then
+    // check the result against the schema the pair came from; a failure is a
+    // failed worker call, like any other error in this function.
+    const checked = outputSchema.safeParse(schemaPair.responseTransform(rawOutput));
+    if (!checked.success) {
+      return {
+        ok: false,
+        error:
+          `output failed its schema after the response transform: ${checked.error.message}`.slice(
+            0,
+            160,
+          ),
+      };
+    }
+    const parsed = checked.data;
     let tokenUsage: TokenUsage | undefined;
     try {
       // `totalUsage` sums every step of the tool loop; `usage` is the last step only.

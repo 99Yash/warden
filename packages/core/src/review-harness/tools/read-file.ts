@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { tool } from "@warden/ai";
 import { z } from "zod";
+import { errnoCode } from "../../guards.js";
 import { isGitIgnored, isInSkipDir, isSensitivePath, resolveWithinRoot } from "./safety.js";
 
 /**
@@ -166,7 +167,7 @@ async function readBounded(
       stream.destroy();
     }
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    const code = errnoCode(err);
     if (code === "ENOENT" || code === "EISDIR") {
       return { ok: false, reason: "not_found", path: relForReport };
     }

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { isRecord } from "../guards.js";
 
 export type Lockfile = "npm" | "pnpm" | "yarn";
 
@@ -64,8 +65,8 @@ function detectMonorepo(repoRoot: string): boolean {
   const pkgPath = join(repoRoot, "package.json");
   if (!existsSync(pkgPath)) return false;
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { workspaces?: unknown };
-    return Boolean(pkg.workspaces);
+    const pkg: unknown = JSON.parse(readFileSync(pkgPath, "utf8"));
+    return isRecord(pkg) && Boolean(pkg["workspaces"]);
   } catch {
     return false;
   }
@@ -78,8 +79,8 @@ function detectEslint(repoRoot: string): boolean {
   const pkgPath = join(repoRoot, "package.json");
   if (!existsSync(pkgPath)) return false;
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { eslintConfig?: unknown };
-    return Boolean(pkg.eslintConfig);
+    const pkg: unknown = JSON.parse(readFileSync(pkgPath, "utf8"));
+    return isRecord(pkg) && Boolean(pkg["eslintConfig"]);
   } catch {
     return false;
   }

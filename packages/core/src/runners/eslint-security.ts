@@ -178,6 +178,7 @@ function isSecurityRule(ruleId: string): boolean {
 }
 
 function createSecurityEslint(repoRoot: string): ESLintLike {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- createRequire returns `any`; ESLintClass restates the slice of eslint's export that is used
   const eslintModule = requireFromHere("eslint") as { ESLint: ESLintClass };
   const pluginSecurity = requireFromHere("eslint-plugin-security") as unknown;
   const pluginNoSecrets = requireFromHere("eslint-plugin-no-secrets") as unknown;

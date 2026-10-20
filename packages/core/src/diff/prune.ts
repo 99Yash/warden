@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import type { DegradedEntry } from "../schema.js";
 import type { ChangedFile } from "./index.js";
 import { buildDiffTree, type DiffTreeNode } from "./tree.js";
@@ -25,13 +26,14 @@ import { buildDiffTree, type DiffTreeNode } from "./tree.js";
  * a review to $11 (issue #34). Small extension drops stay silent.
  */
 
-interface NoiseProfile {
-  ecosystem: string;
-  alwaysNoise: {
-    directories: string[];
-    extensions: string[];
-  };
-}
+const NoiseProfileSchema = z.object({
+  ecosystem: z.string(),
+  alwaysNoise: z.object({
+    directories: z.array(z.string()),
+    extensions: z.array(z.string()),
+  }),
+});
+type NoiseProfile = z.infer<typeof NoiseProfileSchema>;
 
 const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "ecosystem", "profiles");
 
@@ -49,7 +51,8 @@ let cachedJsProfile: NoiseProfile | undefined;
 function loadJsProfile(): NoiseProfile {
   if (cachedJsProfile) return cachedJsProfile;
   const raw = readFileSync(resolve(PROFILE_DIR, "javascript.json"), "utf8");
-  cachedJsProfile = JSON.parse(raw) as NoiseProfile;
+  // A bundled asset: a malformed profile throws here, as a missing one does.
+  cachedJsProfile = NoiseProfileSchema.parse(JSON.parse(raw));
   return cachedJsProfile;
 }
 

@@ -448,15 +448,15 @@ export function buildReviewBundlePage(
     let used = 0;
     let rejected = 0;
     let i = start;
-    while (i < allFindings.length) {
-      const size = entryBytes(allFindings[i]);
+    for (const finding of allFindings.slice(start)) {
+      const size = entryBytes(finding);
       if (size > capacity) {
         rejected++;
         i++;
         continue;
       }
       if (used + size > capacity) break;
-      packed.push(allFindings[i] as BundleFinding);
+      packed.push(finding);
       used += size;
       i++;
     }

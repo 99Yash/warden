@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isRecord } from "./guards.js";
 
 // The one owner of content hashing (docs/code-style.md §6). `warden/no-exported-hasher`
 // rejects an exported hash helper anywhere else, and `warden/sha256-over-json-stringify`
@@ -39,10 +40,8 @@ export function sha256Hex(data: string | Uint8Array): string {
  * Changing any of these re-keys every stored job row; do it with a versioned key.
  */
 export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
+  if (!isRecord(value)) return JSON.stringify(value);
+  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
 }

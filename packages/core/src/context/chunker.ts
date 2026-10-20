@@ -33,6 +33,11 @@ export const SUPPORTED_LANGUAGES = [
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
+/** True when `value` is one of {@link SUPPORTED_LANGUAGES}, for a language read back from the cache. */
+export function isSupportedLanguage(value: string): value is SupportedLanguage {
+  return SUPPORTED_LANGUAGES.some((language) => language === value);
+}
+
 export interface ChunkRecord {
   /** sha256(content). Primary key in the `chunks` table. */
   chunkHash: string;

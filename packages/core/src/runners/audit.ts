@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Lockfile } from "../ecosystem/index.js";
 import type { DegradedEntry } from "../schema.js";
 import { spawnCapture } from "./_shared.js";
@@ -82,31 +83,34 @@ function parseAuditOutput(stdout: string): AuditAdvisory[] | undefined {
     return undefined;
   }
   if (!raw || typeof raw !== "object") return undefined;
-  const obj = raw as Record<string, unknown>;
-  if (obj["advisories"] && typeof obj["advisories"] === "object") {
-    return parsePnpmShape(obj["advisories"] as Record<string, unknown>);
+  if ("advisories" in raw && raw.advisories && typeof raw.advisories === "object") {
+    return parsePnpmShape(Object.values(raw.advisories));
   }
-  if (obj["vulnerabilities"] && typeof obj["vulnerabilities"] === "object") {
-    return parseNpmShape(obj["vulnerabilities"] as Record<string, unknown>);
+  if ("vulnerabilities" in raw && raw.vulnerabilities && typeof raw.vulnerabilities === "object") {
+    return parseNpmShape(Object.values(raw.vulnerabilities));
   }
   // Empty result — both registries omit the key entirely when nothing matched.
   return [];
 }
 
-interface PnpmAdvisoryEntry {
-  github_advisory_id?: string;
-  module_name?: string;
-  severity?: string;
-  title?: string;
-  url?: string;
-  vulnerable_versions?: string;
-}
+/** A field of the wrong type reads as absent, the same as a missing field. */
+const optionalString = z.string().optional().catch(undefined);
 
-function parsePnpmShape(advisories: Record<string, unknown>): AuditAdvisory[] {
+const PnpmAdvisoryEntrySchema = z.object({
+  github_advisory_id: optionalString,
+  module_name: optionalString,
+  severity: optionalString,
+  title: optionalString,
+  url: optionalString,
+  vulnerable_versions: optionalString,
+});
+
+function parsePnpmShape(entries: unknown[]): AuditAdvisory[] {
   const out: AuditAdvisory[] = [];
-  for (const entry of Object.values(advisories)) {
-    if (!entry || typeof entry !== "object") continue;
-    const a = entry as PnpmAdvisoryEntry;
+  for (const entry of entries) {
+    const parsed = PnpmAdvisoryEntrySchema.safeParse(entry);
+    if (!parsed.success) continue;
+    const a = parsed.data;
     const ghsaId = a.github_advisory_id ?? extractGhsa(a.url);
     if (!ghsaId || !a.module_name) continue;
     out.push({
@@ -121,27 +125,28 @@ function parsePnpmShape(advisories: Record<string, unknown>): AuditAdvisory[] {
   return dedupeByGhsa(out);
 }
 
-interface NpmViaEntry {
-  source?: number;
-  name?: string;
-  title?: string;
-  url?: string;
-  severity?: string;
-  range?: string;
-}
+const NpmViaEntrySchema = z.object({
+  name: optionalString,
+  title: optionalString,
+  url: optionalString,
+  severity: optionalString,
+  range: optionalString,
+});
 
-function parseNpmShape(vulns: Record<string, unknown>): AuditAdvisory[] {
+const NpmVulnerabilitySchema = z.object({ via: z.array(z.unknown()) });
+
+function parseNpmShape(entries: unknown[]): AuditAdvisory[] {
   const out: AuditAdvisory[] = [];
-  for (const entry of Object.values(vulns)) {
-    if (!entry || typeof entry !== "object") continue;
-    const via = (entry as { via?: unknown }).via;
-    if (!Array.isArray(via)) continue;
-    for (const v of via) {
+  for (const entry of entries) {
+    const vulnerability = NpmVulnerabilitySchema.safeParse(entry);
+    if (!vulnerability.success) continue;
+    for (const v of vulnerability.data.via) {
       // `via` items can be plain strings (transitive references). Skip those —
       // they're not citable advisories on their own; the leaf advisory will be
       // present elsewhere in the same `vulnerabilities` map.
-      if (!v || typeof v !== "object") continue;
-      const adv = v as NpmViaEntry;
+      const parsed = NpmViaEntrySchema.safeParse(v);
+      if (!parsed.success) continue;
+      const adv = parsed.data;
       const ghsaId = extractGhsa(adv.url);
       if (!ghsaId || !adv.name) continue;
       out.push({
