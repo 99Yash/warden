@@ -329,7 +329,7 @@ async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
         if (!map || typeof map !== "object") continue;
         const subEntry = (map as Record<string, unknown>)[subpath];
         if (Array.isArray(subEntry) && subEntry.length > 0) {
-          const first = subEntry[0];
+          const first: unknown = subEntry[0];
           if (typeof first === "string") {
             await pushIfExists(resolvePath(pkgDir, first));
           }

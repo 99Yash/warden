@@ -7,12 +7,27 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { spawnCapture } from "@warden/core/runners/_shared";
+import { z } from "zod";
 import { buildMcpConfigContent } from "../src/opencode/drive.js";
+
+/** The part of `buildMcpConfigContent`'s output that this smoke runs: the warden server's argv. */
+const McpConfigSchema = z.object({
+  mcp: z.object({
+    servers: z.object({ warden: z.object({ command: z.tuple([z.string()], z.string()) }) }),
+  }),
+});
+/** A child's `JSON.stringify(process.env)`. */
+const EnvSchema = z.record(z.string(), z.string());
+/** What `runtime-probe.mjs` prints. The smoke counts the env files and does not read them. */
+const RuntimeProbeSchema = z.object({
+  env: EnvSchema,
+  files: z.array(z.unknown()),
+  nextFiles: z.array(z.unknown()),
+});
 
 const root = mkdtempSync(resolve(tmpdir(), "warden-secret-isolation-"));
 const cliRoot = fileURLToPath(new URL("..", import.meta.url));
-// This is a private core helper, outside the CLI's composite TS project.
-const { spawnCapture } = await import(resolve(cliRoot, "../core/src/runners/_shared.ts"));
 const secrets = {
   ANTHROPIC_API_KEY: "smoke-provider-value",
   OPENAI_API_KEY: "smoke-provider-value",
@@ -36,7 +51,7 @@ try {
     },
   );
   assert(capture.ok);
-  const childEnv = JSON.parse(capture.stdout);
+  const childEnv = EnvSchema.parse(JSON.parse(capture.stdout));
   check(
     Object.keys(secrets).every((key) => childEnv[key] === undefined),
     "detector child excludes all supplied secrets",
@@ -44,15 +59,19 @@ try {
   check(childEnv.NODE_OPTIONS === undefined, "detector child excludes Node startup hooks");
   check(childEnv.PATH === process.env.PATH, "detector child retains PATH");
 
-  const config = JSON.parse(
-    buildMcpConfigContent({
-      cwd: root,
-      command: [process.execPath, "-e", "process.stdout.write(JSON.stringify(process.env))"],
-    }),
+  const config = McpConfigSchema.parse(
+    JSON.parse(
+      buildMcpConfigContent({
+        cwd: root,
+        command: [process.execPath, "-e", "process.stdout.write(JSON.stringify(process.env))"],
+      }),
+    ),
   );
   const [bin, ...argv] = config.mcp.servers.warden.command;
-  const mcpEnv = JSON.parse(
-    execFileSync(bin, argv, { cwd: root, env: { ...process.env, ...secrets }, encoding: "utf8" }),
+  const mcpEnv = EnvSchema.parse(
+    JSON.parse(
+      execFileSync(bin, argv, { cwd: root, env: { ...process.env, ...secrets }, encoding: "utf8" }),
+    ),
   );
   check(
     Object.keys(secrets).every((key) => mcpEnv[key] === undefined),
@@ -106,14 +125,21 @@ try {
     process.stdout.write(JSON.stringify({ env: process.env, files: runtime.envFiles, nextFiles: next.envFiles }));
   `,
   );
-  const runtime = JSON.parse(
-    execFileSync(
-      process.execPath,
-      ["--import", fileURLToPath(import.meta.resolve("tsx/esm")), runtimeProbe],
-      {
-        env: { ...process.env, ...secrets, XDG_CONFIG_HOME: configHome, WARDEN_ENV_FILE: override },
-        encoding: "utf8",
-      },
+  const runtime = RuntimeProbeSchema.parse(
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["--import", fileURLToPath(import.meta.resolve("tsx/esm")), runtimeProbe],
+        {
+          env: {
+            ...process.env,
+            ...secrets,
+            XDG_CONFIG_HOME: configHome,
+            WARDEN_ENV_FILE: override,
+          },
+          encoding: "utf8",
+        },
+      ),
     ),
   );
   check(
@@ -168,7 +194,9 @@ try {
   });
   check(!result.isError, "real MCP runs the fixture detectors");
   for (const name of ["eslint", "tsc"]) {
-    const env = JSON.parse(readFileSync(resolve(root, `${name}-env.json`), "utf8"));
+    const env = EnvSchema.parse(
+      JSON.parse(readFileSync(resolve(root, `${name}-env.json`), "utf8")),
+    );
     check(
       Object.keys(secrets).every((key) => env[key] === undefined),
       `${name} repo code cannot read inherited secrets`,

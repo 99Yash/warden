@@ -73,7 +73,7 @@ function parsedOk(stdout: string): boolean {
   const start = stdout.indexOf("[");
   if (start === -1) return false;
   try {
-    const v = JSON.parse(stdout.slice(start));
+    const v: unknown = JSON.parse(stdout.slice(start));
     return Array.isArray(v);
   } catch {
     return false;
