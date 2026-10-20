@@ -18,6 +18,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
     "types": ["node"],
     // code-chunk's `exports.types` points at its raw `src/*.ts`, which
     // `skipLibCheck` does not skip, so every program that reaches it through
