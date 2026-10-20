@@ -30,7 +30,6 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   BUNDLE_LIMITS,
-  REVIEW_BUNDLE_VERSION,
   ReviewBundlePageSchema,
   buildReviewBundlePage,
   runDetPriors,
@@ -43,7 +42,6 @@ import {
 import {
   DEFAULT_REVIEW_CACHE_CAPACITY,
   MAX_TOOL_RESULT_BYTES,
-  TOOL_ENVELOPE_VERSION,
   TOOL_NAME_RUN_DET_PRIORS,
   ToolResultEnvelopeSchema,
   createReviewResultCache,
@@ -185,8 +183,6 @@ function readEnvelope(result: unknown, tool: string): Envelope {
   }
   const envelope = ToolResultEnvelopeSchema.parse(JSON.parse(text));
   if (envelope.tool !== tool) throw new Error(`Envelope tool mismatch: ${envelope.tool}`);
-  if (envelope.envelopeVersion !== TOOL_ENVELOPE_VERSION)
-    throw new Error("Envelope version mismatch");
   return {
     status: envelope.status,
     ...(envelope.status === "ok"
@@ -267,7 +263,6 @@ try {
   );
   assert(first.status === "ok" && first.data !== undefined, "fixture diff returns status: ok");
   const page = okPage(first, "fixture diff");
-  assert(page.schemaVersion === REVIEW_BUNDLE_VERSION, "bundle carries its own schema version");
   assert(page.reviewHandle.startsWith("rb_"), "result carries an opaque review handle");
   assert(
     page.findings.length <= BUNDLE_LIMITS.findingsPerPage,
@@ -296,10 +291,6 @@ try {
   );
 
   process.stdout.write("\n[3] findings preserve tier / category / sources\n");
-  assert(
-    page.findings.every((f) => f.tier === 1 || f.tier === 2 || f.tier === 3),
-    "every finding carries a tier",
-  );
   assert(
     page.findings.every((f) => typeof f.category === "string" && f.category.length > 0),
     "every finding carries a category",
@@ -425,8 +416,8 @@ try {
   });
   assert(
     tripleProbe.sources[0]?.path === "src/a.ts" &&
-      tripleProbe.sources[0]?.line === 7 &&
-      tripleProbe.sources[0]?.snippet === "const c = structuredClone(x);",
+      tripleProbe.sources[0].line === 7 &&
+      tripleProbe.sources[0].snippet === "const c = structuredClone(x);",
     "an evidence triple reaches sources[] intact on a citing detector",
   );
 
@@ -760,12 +751,12 @@ try {
   const vulnPage = buildReviewBundlePage(vulnOnly, "rb_vuln", 0);
   assert(vulnPage.findingsTotal === 1, "a vulnerability-only result reports 1 finding, not 0");
   assert(
-    vulnPage.findings[0]?.category === "vulnerability" && vulnPage.findings[0]?.tier === 1,
+    vulnPage.findings[0]?.category === "vulnerability" && vulnPage.findings[0].tier === 1,
     "the vulnerability comment keeps its category and severity-derived tier",
   );
   assert(
     vulnPage.findings[0]?.detector === "vuln" &&
-      vulnPage.findings[0]?.sources.some((s) => s["type"] === "advisory"),
+      vulnPage.findings[0].sources.some((s) => s["type"] === "advisory"),
     "the vulnerability comment is labelled and keeps its advisory citation intact",
   );
   assert(

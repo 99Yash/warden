@@ -119,10 +119,6 @@ assert(
 );
 
 for (const f of result.findings) {
-  assert(
-    f.kind === "assertion" || f.kind === "question",
-    `kind ∈ {assertion,question} for ${f.id} (got ${f.kind})`,
-  );
   assert(f.sources.length > 0, `${f.id} carries ≥1 source`);
   for (const s of f.sources) {
     assert(

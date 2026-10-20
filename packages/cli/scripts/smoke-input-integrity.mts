@@ -52,8 +52,8 @@ try {
       const result = await publish(diffFor([`// text${String.fromCodePoint(cp)}`]));
       assert.equal(result.comments.length, 1);
       assert.equal(result.comments[0]?.tier, 1);
-      assert.equal(result.comments[0]?.category, "security");
-      assert.match(result.comments[0]?.claim ?? "", /hidden-unicode/);
+      assert.equal(result.comments[0].category, "security");
+      assert.match(result.comments[0].claim, /hidden-unicode/);
       assert(!JSON.stringify(result).includes(String.fromCodePoint(cp)));
     });
   }
@@ -74,7 +74,7 @@ try {
       assert.equal(result.comments.length, 1);
       assert.match(result.comments[0]?.claim ?? "", /reviewer-instruction/);
       assert.equal(result.comments[0]?.kind, "assertion");
-      assert.equal(result.comments[0]?.sources[0]?.type, "tool");
+      assert.equal(result.comments[0].sources[0]?.type, "tool");
     });
   }
 

@@ -303,7 +303,7 @@ export function materializePatchPostImages(diff: string, repoRoot: string): stri
       // "\ No newline at end of file" marker. When it follows a
       // post-image line, the file ends without a trailing newline —
       // unless a later hunk line advances past it (cleared above).
-      if (prevWasPostLine && nextNewLine !== null) {
+      if (prevWasPostLine) {
         noTrailingNewlineAt = nextNewLine - 1;
       }
       prevWasPostLine = false;

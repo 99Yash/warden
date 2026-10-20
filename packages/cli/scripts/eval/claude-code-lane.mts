@@ -368,7 +368,7 @@ function spawnClaude(
       child.kill("SIGKILL");
       finish({ exitCode: -1, stdout, timedOut: true });
     }, timeoutSecs * 1000);
-    timer.unref?.();
+    timer.unref();
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
     });

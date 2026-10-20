@@ -170,7 +170,7 @@ try {
     });
     assert.equal(result.comments.length, 1, "sensitive paths publish without a text hunk");
     assert.equal(result.comments[0]?.lineStart, 0);
-    assert.equal(result.comments[0]?.lineEnd, 0);
+    assert.equal(result.comments[0].lineEnd, 0);
     assert(CommentSetSchema.safeParse(result).success);
   }
   assert.equal(

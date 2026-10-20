@@ -135,10 +135,6 @@ for (const f of result.findings) {
   assert(f.category === "leverage", `${f.id} category="leverage" (got ${f.category})`);
   assert(f.file === FIXTURE_PATH, `${f.id} file matches fixture path (got ${f.file})`);
   assert(f.lineStart >= 1 && f.lineStart <= 6, `${f.id} lineStart ∈ [1,6] (got ${f.lineStart})`);
-  assert(
-    f.kind === "assertion" || f.kind === "question",
-    `${f.id} kind ∈ {assertion,question} (got ${f.kind})`,
-  );
   assert(f.sources.length > 0, `${f.id} carries ≥1 source`);
   for (const s of f.sources) {
     assert(

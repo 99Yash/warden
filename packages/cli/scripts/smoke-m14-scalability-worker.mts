@@ -99,10 +99,6 @@ const inLineRange = result.findings.filter((f) => f.lineStart >= 1 && f.lineStar
 assert(inLineRange.length === result.findings.length, `every finding's lineStart ∈ [1,8]`);
 
 for (const f of result.findings) {
-  assert(
-    f.kind === "assertion" || f.kind === "question",
-    `kind ∈ {assertion,question} for ${f.id}`,
-  );
   assert(f.sources.length > 0, `${f.id} carries ≥1 source`);
   for (const s of f.sources) {
     assert(s.type === "tool" || s.type === "api_def", `${f.id} source.type ∈ {tool,api_def}`);

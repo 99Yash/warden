@@ -137,7 +137,7 @@ const expectedSnippet = `const rows = await db.query("SELECT * FROM users WHERE 
 if (security.evidence?.snippet !== expectedSnippet) {
   fail(`Security evidence snippet mismatch — got ${JSON.stringify(security.evidence)}`);
 }
-if (security.evidence?.path !== "src/db.ts" || security.evidence?.line !== 3) {
+if (security.evidence.path !== "src/db.ts" || security.evidence.line !== 3) {
   fail(`Security evidence path/line should be repo-relative src/db.ts:3`);
 }
 
@@ -178,8 +178,8 @@ if (garbage.findings.length !== 0) fail("malformed stdout should yield no findin
 if (garbage.degraded.length !== 1 || garbage.degraded[0]?.topic !== "react-doctor") {
   fail(`malformed stdout should yield one react-doctor degraded entry`);
 }
-if (garbage.degraded[0]?.kind !== "actionable") {
-  fail(`degrade entry should be actionable, got ${garbage.degraded[0]?.kind}`);
+if (garbage.degraded[0].kind !== "actionable") {
+  fail(`degrade entry should be actionable, got ${garbage.degraded[0].kind}`);
 }
 
 const notOk = await parseReactDoctorStdout(
