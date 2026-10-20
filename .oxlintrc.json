@@ -130,6 +130,14 @@
     // import/namespace: `ns.x` on a namespace import whose module does not export `x`.
     "import/default": "error",
     "import/namespace": "error",
+    // import/no-cycle: a module that reaches itself again through its imports. ESM loads a
+    // cycle without an error, but a binding read during module evaluation can be in its TDZ,
+    // and the order of `export` lines then decides whether the process boots. It resolves
+    // relative and `@warden/*` specifiers alike. It skips type-only imports, the inline
+    // `{ type X }` form too, although that form keeps a runtime import under
+    // verbatimModuleSyntax. Break a cycle by moving the shared piece into a module that both
+    // sides import, or by importing a concrete sibling instead of a barrel.
+    "import/no-cycle": "error",
 
     // A `catch` that throws a new error must pass the caught one as `{ cause }`, so the stack
     // and the original failure survive the rewrap. Default options.
