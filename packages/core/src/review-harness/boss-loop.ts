@@ -617,6 +617,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     // back to Gemini. Hard-fail cleanly with a legible message.
     throw new Error(
       `review-harness boss: ${primaryInfo.label} failed (${primarySummary}); Gemini fallback skipped (tools required)`,
+      { cause: err },
     );
   }
 }
