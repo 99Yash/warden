@@ -64,8 +64,8 @@
     // `server.address()`, keeps its probe with
     // `// oxlint-disable-next-line anti-slop/no-runtime-typeof -- <reason>`.
     "anti-slop/no-runtime-typeof": ["error", { "allowInTypeGuards": true }],
-    // Ratchet queue — count measured 2026-10-18. It moves to "error" in its own change once
-    // the tree is at zero. See docs/gate-design.md.
+    // Not queued: the user decided on 2026-10-20 to keep this rule off. Count measured
+    // 2026-10-18. See docs/gate-design.md.
     "anti-slop/require-readable-spacing": "off", // 4375, whitespace-only autofix; a style decision
 
     // Warden's own rules (scripts/oxlint/warden/, first-party, see its README). Each keeps
