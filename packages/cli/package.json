@@ -56,6 +56,7 @@
     "smoke:bugfloor": "pnpm smoke:bugfloor-verify-citations && pnpm smoke:bugfloor-db-automigrate && pnpm smoke:bugfloor-leverage-snippet && pnpm smoke:bugfloor-gemini-skip-with-tools && pnpm smoke:bugfloor-whole-repo-fallback",
     "smoke:model-catalog": "node --import tsx/esm scripts/smoke-model-catalog.mts",
     "smoke:cost-gaps": "node --import tsx/esm scripts/smoke-cost-gaps.mts",
+    "smoke:cost-on-failure": "node --import tsx/esm scripts/smoke-cost-on-failure.mts",
     "smoke:boss-final-step": "node --import tsx/esm scripts/smoke-boss-final-step.mts",
     "smoke:openai-tool-strict": "node --import tsx/esm scripts/smoke-openai-tool-strict.mts",
     "smoke:anthropic-max-output": "node --import tsx/esm scripts/smoke-anthropic-max-output.mts",
