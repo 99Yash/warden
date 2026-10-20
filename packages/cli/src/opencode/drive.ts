@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deterministicProcessEnv } from "@warden/env";
+import { z } from "zod";
 import {
   deriveLaneScope,
   isNotClean,
@@ -333,6 +334,78 @@ export interface ParsedLane {
    * lets the driver read the session total from the serve API.
    */
   sessionId?: string;
+  /**
+   * The provider message of the first `error` event that is a context
+   * overflow (`isContextOverflowError`). The lane config turns
+   * auto-compaction off, so at the context limit the provider rejects the
+   * request and the run ends with this error.
+   */
+  contextLimit?: string;
+}
+
+/**
+ * Context-overflow message patterns, copied from the shipped binary
+ * v2.0.32 (`Un=[/prompt is too long/i, …]`). The binary uses them to
+ * classify a 4xx provider error as `context-overflow`, but the
+ * `--format json` error event keeps only `type: "provider.invalid-request"`
+ * (the class of every invalid request), so the driver re-applies them.
+ */
+const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
+  /prompt is too long/i,
+  /input is too long for requested model/i,
+  /exceeded this model context window limit/i,
+  /exceeds the context window/i,
+  /exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))/i,
+  /input token count.*exceeds the maximum/i,
+  /number of input tokens exceeds maximum length/i,
+  /tokens in request more than max tokens allowed/i,
+  /maximum prompt length is \d+/i,
+  /reduce the length of the messages/i,
+  /requested input length \d+ exceeds maximum input length/i,
+  /maximum context length is \d+ tokens/i,
+  /exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?/i,
+  /input(?: \(\d+ tokens\))? is longer than the model'?s context length/i,
+  /exceeds the limit of \d+/i,
+  /exceeds the available context size/i,
+  /greater than the context length/i,
+  /`inputs` tokens \+ `max_new_tokens` must be <= \d+/i,
+  /context window exceeds limit/i,
+  /exceeded model token limit/i,
+  /context[_ ]length[_ ]exceeded/i,
+  /context length is only \d+ tokens/i,
+  /input length.*exceeds.*context length/i,
+  /prompt (?:too long|超长)/i,
+  /too large for model with \d+ maximum context length/i,
+  /prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?/i,
+  /model_context_window_exceeded/i,
+  /range of input length should be/i,
+  /too many tokens/i,
+  /token limit exceeded/i,
+  /request_too_large/i,
+];
+
+/** The fields of a run `error` event that the driver reads. A field of the wrong type reads as absent. */
+const LaneErrorSchema = z.looseObject({
+  type: z.string().optional().catch(undefined),
+  message: z.string().optional().catch(undefined),
+  response: z
+    .looseObject({ body: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
+
+/**
+ * Whether an `error` event's `error` object is a provider context
+ * overflow. Shape verified with the shipped binary v2.0.32 and a loopback
+ * Anthropic stub that answers 400 "prompt is too long":
+ * `{type:"provider.invalid-request", message, status:400,
+ * response:{body}}`. The message and the raw body are both checked.
+ */
+export function isContextOverflowError(error: unknown): boolean {
+  const parsed = LaneErrorSchema.safeParse(error);
+  if (!parsed.success || parsed.data.type !== "provider.invalid-request") return false;
+  const text = `${parsed.data.message ?? ""}\n${parsed.data.response?.body ?? ""}`;
+  return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 /** Parses `opencode run --format json` JSONL. Unknown lines are skipped — the stream is host-owned, not schema-bound. */
@@ -360,6 +433,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
   const durationByTool = new Map<string, number>();
   const errors: string[] = [];
   let sessionId: string | undefined;
+  let contextLimit: string | undefined;
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (trimmed === "") continue;
@@ -414,8 +488,11 @@ export function parseLaneEvents(stdout: string): ParsedLane {
         }
       }
     } else if (record["type"] === "error") {
-      const message = (record["error"] as Record<string, unknown> | undefined)?.["message"];
-      errors.push(typeof message === "string" && message !== "" ? message : "unknown error event");
+      const error = record["error"];
+      const message = LaneErrorSchema.safeParse(error).data?.message;
+      const text = message !== undefined && message !== "" ? message : "unknown error event";
+      errors.push(text);
+      if (contextLimit === undefined && isContextOverflowError(error)) contextLimit = text;
     }
   }
   const toolCalls: ToolCallCount[] = [...seenByTool.keys()].map((name) => {
@@ -446,6 +523,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     errors,
     ...(parseError !== undefined ? { parseError } : {}),
     ...(sessionId !== undefined ? { sessionId } : {}),
+    ...(contextLimit !== undefined ? { contextLimit } : {}),
   };
 }
 
@@ -469,6 +547,15 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
     toolCalls,
   });
   if (process.timedOut) return fail(withTail("opencode run timed out", process.stderrTail));
+  // Before the exit code: the run client exits 1 on this error, and the
+  // generic "exited 1" reason would hide why.
+  if (parsed.contextLimit !== undefined) {
+    return fail(
+      screenLaneReason(
+        `context_limit: the lane reached the model context limit, and auto-compaction is off (${parsed.contextLimit})`,
+      ),
+    );
+  }
   if (process.exitCode !== 0)
     return fail(withTail(`opencode run exited ${process.exitCode}`, process.stderrTail));
   if (parsed.errors.length > 0)
@@ -724,6 +811,71 @@ async function fetchSessionUsage(opts: {
   }
 }
 
+/** The `SessionMessagesResponse` fields that `parseSessionCompactions` reads. */
+const SessionMessagesSchema = z.object({ data: z.array(z.looseObject({ type: z.string() })) });
+
+/**
+ * The `GET /api/session/<id>/message?type=compaction` response is
+ * untrusted JSON: validate at this boundary. Shape (verified live against
+ * v2.0.32, `SessionMessagesResponse`): `{data:[{type:"compaction", status,
+ * reason, …}], cursor:{previous, next}}`. Returns the count of
+ * `compaction` messages (completed or failed — each one is an attempt),
+ * or `undefined` when the shape is wrong.
+ */
+export function parseSessionCompactions(body: unknown): number | undefined {
+  const parsed = SessionMessagesSchema.safeParse(body);
+  if (!parsed.success) return undefined;
+  return parsed.data.data.filter((entry) => entry.type === "compaction").length;
+}
+
+/**
+ * Count the session's compaction messages from the serve API. The
+ * `--format json` stream has no compaction event (the run client emits
+ * only `step_start`, `text`, `reasoning`, `tool_use`, `step_finish`, and
+ * `error` — verified against v2.0.32), so a completed compaction is
+ * invisible there. One page of 200 is enough: any count above zero fails
+ * the lane. Any read failure returns `undefined` (count unknown).
+ */
+async function fetchSessionCompactions(opts: {
+  baseUrl: string;
+  password: string;
+  directory: string;
+  sessionId: string;
+  timeoutMs: number;
+}): Promise<number | undefined> {
+  try {
+    const url = new URL(`/api/session/${encodeURIComponent(opts.sessionId)}/message`, opts.baseUrl);
+    url.searchParams.set("location[directory]", opts.directory);
+    url.searchParams.set("type", "compaction");
+    url.searchParams.set("limit", "200");
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Basic ${Buffer.from(`opencode:${opts.password}`, "utf8").toString("base64")}`,
+      },
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+    if (!res.ok) return undefined;
+    return parseSessionCompactions(await res.json());
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The lane failure reason when the session compacted, else `undefined`.
+ * The lane config turns auto-compaction off, so a count above zero means
+ * the config did not apply (for example, a binary that ignores the key).
+ * A summary can drop the evidence that a finding cites, so the lane is
+ * not clean.
+ */
+export function laneCompactionReason(compactions: number | undefined): string | undefined {
+  if (compactions === undefined || compactions === 0) return undefined;
+  return (
+    `compaction: the lane session compacted ${compactions} ${compactions === 1 ? "time" : "times"}, ` +
+    `but the lane config turns auto-compaction off; a summary can drop the evidence a finding needs`
+  );
+}
+
 /**
  * Poll `GET <baseUrl>/api/mcp` until the warden server shows `connected`.
  * This call also boots the location, so a cold serve reports pending
@@ -876,7 +1028,13 @@ class PhaseTimer {
 function writeTimingsOut(
   path: string,
   repoRoot: string,
-  record: { timings: DriveTimings; runSpawned: boolean; model: string; usage?: SessionUsage },
+  record: {
+    timings: DriveTimings;
+    runSpawned: boolean;
+    model: string;
+    usage?: SessionUsage;
+    compactions?: number;
+  },
 ): void {
   writeFileSync(resolve(repoRoot, path), JSON.stringify({ version: 1, ...record }, null, 2) + "\n");
 }
@@ -896,6 +1054,12 @@ export interface DriveLaneResult {
   model: string;
   /** Phase timings. Optional so other lane drivers (the eval Claude Code lane) can omit them. */
   timings?: DriveTimings;
+  /**
+   * Compaction messages in the lane session (completed or failed). The
+   * lane config turns auto-compaction off, so a healthy run has 0. Absent
+   * when no run was spawned or the serve read failed.
+   */
+  compactions?: number;
 }
 
 /**
@@ -1067,19 +1231,24 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
       // The serve child is still alive here (killed in `finally` below),
       // so the session total can be read before it goes away.
       let usage: SessionUsage | undefined;
+      let compactions: number | undefined;
       const sessionId = parseLaneEvents(processResult.stdout).sessionId;
       if (sessionId !== undefined) {
-        usage = await timer.time("usage", () =>
-          fetchSessionUsage({
-            baseUrl,
-            password,
-            directory: opts.repoRoot,
-            sessionId,
-            timeoutMs: Math.min(mcpTimeoutMs, 10000),
-          }),
+        const read = {
+          baseUrl,
+          password,
+          directory: opts.repoRoot,
+          sessionId,
+          timeoutMs: Math.min(mcpTimeoutMs, 10000),
+        };
+        [usage, compactions] = await timer.time("usage", () =>
+          Promise.all([fetchSessionUsage(read), fetchSessionCompactions(read)]),
         );
       }
-      return await buildVerdict(processResult, opts, resolved, scope, timer, usage);
+      return await buildVerdict(processResult, opts, resolved, scope, timer, {
+        ...(usage !== undefined ? { usage } : {}),
+        ...(compactions !== undefined ? { compactions } : {}),
+      });
     } finally {
       mcpAbort.abort();
       await killServe(serve);
@@ -1113,22 +1282,25 @@ function writeLanesOut(opts: DriveOptions, lanes: LaneOutput[]): void {
   }
 }
 
+/**
+ * `session` is absent when no run was spawned. On a spawned run,
+ * `compactions` is the count from the serve API, or `"unknown"` when the
+ * read failed.
+ */
 function laneTraceEntry(
   status: string,
   reason: string | undefined,
   toolCalls: string,
-  usage?: SessionUsage,
+  session?: { usage?: SessionUsage; compactions: number | "unknown" },
 ): DegradedEntry {
-  const base = `lane-trace: down ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`;
-  if (usage === undefined) {
-    return { kind: "info", topic: "lane-trace", message: base };
+  let message = `lane-trace: down ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`;
+  const usage = session?.usage;
+  if (usage !== undefined) {
+    const input = usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite;
+    message += ` · cost $${usage.costUsd.toFixed(4)} · tokens ${input}/${usage.tokens.output}`;
   }
-  const input = usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite;
-  return {
-    kind: "info",
-    topic: "lane-trace",
-    message: `${base} · cost $${usage.costUsd.toFixed(4)} · tokens ${input}/${usage.tokens.output}`,
-  };
+  if (session !== undefined) message += ` · compactions ${session.compactions}`;
+  return { kind: "info", topic: "lane-trace", message };
 }
 
 function requestedModel(opts: DriveOptions): string {
@@ -1151,6 +1323,7 @@ async function buildLaneResult(
     timer: PhaseTimer;
     usage?: SessionUsage;
     toolCalls?: ToolCallCount[];
+    compactions?: number;
   },
 ): Promise<DriveLaneResult> {
   const verbose = opts.verbose === true;
@@ -1173,6 +1346,7 @@ async function buildLaneResult(
       runSpawned: facts.runSpawned,
       model: requestedModel(opts),
       ...(facts.usage !== undefined ? { usage: facts.usage } : {}),
+      ...(facts.compactions !== undefined ? { compactions: facts.compactions } : {}),
     });
   }
   return {
@@ -1182,6 +1356,7 @@ async function buildLaneResult(
     model: requestedModel(opts),
     timings,
     ...(facts.usage !== undefined ? { usage: facts.usage } : {}),
+    ...(facts.compactions !== undefined ? { compactions: facts.compactions } : {}),
   };
 }
 
@@ -1213,9 +1388,16 @@ async function buildVerdict(
   resolved: ResolvedDiff,
   scope: string[],
   timer: PhaseTimer,
-  usage?: SessionUsage,
+  session: { usage?: SessionUsage; compactions?: number },
 ): Promise<DriveLaneResult> {
-  const verdict = evaluateLane(parseLaneEvents(processResult.stdout), processResult);
+  const { usage, compactions } = session;
+  let verdict = evaluateLane(parseLaneEvents(processResult.stdout), processResult);
+  // A compacted session fails the lane even when the submission is good:
+  // the findings still go to the post-pass, but the result is not clean.
+  const compactionReason = laneCompactionReason(compactions);
+  if (compactionReason !== undefined && verdict.status === "ok") {
+    verdict = { ...verdict, status: "failed", reason: compactionReason };
+  }
   const traceCounts = verdict.toolCalls.map((t) => `${t.name}×${t.completed}`).join(", ");
   const lanes: LaneOutput[] = [
     {
@@ -1233,13 +1415,17 @@ async function buildVerdict(
     lanes,
     [
       ...(resolved.degraded ?? []),
-      laneTraceEntry(verdict.status, verdict.reason, traceCounts, usage),
+      laneTraceEntry(verdict.status, verdict.reason, traceCounts, {
+        ...(usage !== undefined ? { usage } : {}),
+        compactions: compactions ?? "unknown",
+      }),
     ],
     {
       runSpawned: true,
       timer,
       toolCalls: verdict.toolCalls,
       ...(usage !== undefined ? { usage } : {}),
+      ...(compactions !== undefined ? { compactions } : {}),
     },
   );
 }

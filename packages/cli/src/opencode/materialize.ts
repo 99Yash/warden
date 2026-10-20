@@ -252,6 +252,14 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
         warden: { type: "local", command: ["warden", "mcp"], codemode: false },
       },
     },
+    // A lane must not compact: a summary drops the code text a finding
+    // cites. OpenCode compacts by default (`{auto: true, keep: 15000}`),
+    // before a step near the context limit and after a provider overflow.
+    // `auto: false` skips both; only a manual compact still runs. The key
+    // is top-level; there is no per-agent field (verified in the shipped
+    // binary v2.0.32). At the limit the provider rejects the request, and
+    // the driver fails the lane with a `context_limit` reason.
+    compaction: { auto: false },
   };
   return { prompt, configJson: `${JSON.stringify(config, null, 2)}\n` };
 }

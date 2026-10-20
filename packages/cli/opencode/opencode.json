@@ -211,5 +211,8 @@
         "codemode": false
       }
     }
+  },
+  "compaction": {
+    "auto": false
   }
 }

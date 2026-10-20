@@ -45,9 +45,12 @@ import {
   DOWN_LANE_MAX_SCOPE_FILES,
   driveOpencodeLane,
   evaluateLane,
+  isContextOverflowError,
+  laneCompactionReason,
   laneScopeOverCeiling,
   parseLaneEvents,
   parseMcpServers,
+  parseSessionCompactions,
   parseSessionUsage,
   resolveLoaderFlags,
   resolveWardenMcpCommand,
@@ -113,6 +116,7 @@ const LaneConfigSchema = z.object({
     }),
   ),
   mcp: z.object({ servers: z.record(z.string(), z.looseObject({ codemode: z.unknown() })) }),
+  compaction: z.unknown(),
 });
 
 /** The paths of `OPENCODE_CONFIG_CONTENT` that section [6] reads; the asserts check the values. */
@@ -142,6 +146,7 @@ const TimingsFileSchema = z.object({
     totalMs: z.number(),
   }),
   usage: z.object({ costUsd: z.number() }).optional(),
+  compactions: z.number().optional(),
 });
 
 /** The port of a server that listens on TCP. */
@@ -400,6 +405,11 @@ try {
     config.mcp.servers["warden"]?.codemode === false,
     "warden MCP server runs with codemode:false",
   );
+  // Top-level key: OpenCode v2.0.32 has no per-agent compaction field.
+  assert(
+    JSON.stringify(config.compaction) === JSON.stringify({ auto: false }),
+    "config turns auto-compaction off (top-level compaction.auto:false)",
+  );
   assert(agent?.mode === "primary", "agent mode is primary (--agent selects it regardless)");
   assert(
     typeof agent?.model === "string",
@@ -655,6 +665,103 @@ try {
       `${c.name} → failed (${verdict.reason ?? "no reason"})`,
     );
   }
+  // Context limit: the error event that the shipped binary v2.0.32 emits
+  // when a loopback Anthropic stub answers 400 "prompt is too long" and
+  // compaction is off (recorded 2026-10-20). The run exits 1; the reason
+  // must name the context limit, not only the exit code.
+  const overflowError = {
+    type: "provider.invalid-request",
+    message: "prompt is too long: 250000 tokens > 200000 maximum",
+    status: 400,
+    response: {
+      body: '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 250000 tokens > 200000 maximum"}}',
+    },
+  };
+  const overflowLine = JSON.stringify({
+    type: "error",
+    timestamp: 3,
+    sessionID: "s",
+    error: overflowError,
+  });
+  const contextLimited = evaluateLane(
+    parseLaneEvents(
+      [stepEvent("m"), toolEvent("warden_run_det_priors", "completed", "m"), overflowLine].join(
+        "\n",
+      ),
+    ),
+    { exitCode: 1, stdout: "", timedOut: false },
+  );
+  assert(
+    contextLimited.status === "failed" &&
+      (contextLimited.reason ?? "").startsWith("context_limit:") &&
+      (contextLimited.reason ?? "").includes("prompt is too long"),
+    `context overflow error → failed with a context_limit reason (${contextLimited.reason ?? "no reason"})`,
+  );
+  assert(
+    isContextOverflowError({
+      type: "provider.invalid-request",
+      message: "Bad Request",
+      response: { body: '{"error":{"code":"context_length_exceeded"}}' },
+    }),
+    "an overflow code in the response body alone is a context overflow",
+  );
+  assert(
+    !isContextOverflowError({
+      type: "provider.invalid-request",
+      message: "tools.0.input_schema: field required",
+    }),
+    "another invalid request is not a context overflow",
+  );
+  assert(
+    !isContextOverflowError({ type: "provider.rate-limit", message: "prompt is too long" }),
+    "a non-invalid-request error type is not a context overflow",
+  );
+  const otherInvalid = evaluateLane(
+    parseLaneEvents(
+      [
+        stepEvent("m"),
+        '{"type":"error","error":{"type":"provider.invalid-request","message":"tools.0: bad"}}',
+      ].join("\n"),
+    ),
+    { exitCode: 1, stdout: "", timedOut: false },
+  );
+  assert(
+    otherInvalid.status === "failed" && (otherInvalid.reason ?? "").includes("exited 1"),
+    `another invalid request keeps the exit-code reason (${otherInvalid.reason ?? "no reason"})`,
+  );
+
+  // Compaction count: the stream has no compaction event, so the driver
+  // reads `GET /api/session/<id>/message?type=compaction` (shape recorded
+  // live against v2.0.32).
+  assert(
+    parseSessionCompactions({ data: [], cursor: { previous: null, next: null } }) === 0,
+    "parseSessionCompactions: an empty page is 0",
+  );
+  assert(
+    parseSessionCompactions({
+      data: [
+        { type: "compaction", status: "completed", reason: "auto" },
+        { type: "compaction", status: "failed", reason: "auto" },
+      ],
+      cursor: {},
+    }) === 2,
+    "parseSessionCompactions: counts completed and failed compactions",
+  );
+  assert(
+    parseSessionCompactions({ data: { id: "s" } }) === undefined &&
+      parseSessionCompactions({ data: [{ status: "completed" }] }) === undefined &&
+      parseSessionCompactions(null) === undefined,
+    "parseSessionCompactions: a wrong shape is undefined (count unknown)",
+  );
+  assert(
+    laneCompactionReason(0) === undefined && laneCompactionReason(undefined) === undefined,
+    "laneCompactionReason: 0 or unknown does not fail the lane",
+  );
+  assert(
+    (laneCompactionReason(1) ?? "").startsWith("compaction: the lane session compacted 1 time,"),
+    "laneCompactionReason: a compaction fails the lane",
+  );
+
   // A started-but-never-completed det-priors call does not satisfy the gate.
   const runningOnly = evaluateLane(
     parseLaneEvents(
@@ -1060,6 +1167,20 @@ if (argv[0] === "serve") {
       }
       return true;
     };
+    // The compaction count read (v2.0.32 SessionMessagesResponse shape).
+    const msgMatch = u.pathname.match(/^\\/api\\/session\\/([^/]+)\\/message$/);
+    if (msgMatch) {
+      if (!checkAuth()) return;
+      if (!u.searchParams.get("location[directory]")) fail("message read must send location[directory]");
+      if (u.searchParams.get("type") !== "compaction") fail("message read must filter type=compaction");
+      const n = Number(process.env.WARDEN_SMOKE_COMPACTIONS ?? "0");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        data: Array.from({ length: n }, (_, i) => ({ type: "compaction", id: "msg_c" + i, status: "completed", reason: "auto" })),
+        cursor: { previous: null, next: null },
+      }));
+      return;
+    }
     const sessMatch = u.pathname.match(/^\\/api\\/session\\/(.+)$/);
     if (sessMatch) {
       if (!checkAuth()) return;
@@ -1131,6 +1252,12 @@ if (mode === "runfail") {
 } else if (mode === "nosubmission") {
   tool("warden_run_det_priors");
   text("looks clean to me, no block here");
+} else if (mode === "contextlimit") {
+  // v2.0.32 with compaction off: the provider rejects the full context,
+  // the run client emits this error and exits 1.
+  tool("warden_run_det_priors");
+  emit({ type: "error", timestamp: 3, sessionID: "s", error: { type: "provider.invalid-request", message: "prompt is too long: 250000 tokens > 200000 maximum", status: 400 } });
+  process.exit(1);
 }
 }
 `,
@@ -1278,6 +1405,51 @@ if (mode === "runfail") {
     ) === true,
     "lane-trace entry carries the session cost (150 in / 50 out)",
   );
+  assert(
+    okSet?.metadata.degradedWorkers.some(
+      (d) => d.topic === "lane-trace" && d.message.includes("compactions 0"),
+    ) === true,
+    "lane-trace entry records 0 compactions",
+  );
+
+  // A compacted session fails the lane, and the findings still publish.
+  const compactedRun = runDriver(["--base", "HEAD~1", "--json"], {
+    WARDEN_SMOKE_COMPACTIONS: "2",
+  });
+  const compactedSet = parseOut(compactedRun.out);
+  assert(
+    compactedRun.exit === 1 &&
+      compactedSet?.comments.some((c) => c.claim === inScopeFinding.claim) === true &&
+      compactedSet.metadata.degradedWorkers.some(
+        (d) =>
+          d.kind === "actionable" &&
+          d.topic === "lane-health" &&
+          d.message.includes("compaction: the lane session compacted 2 times"),
+      ) &&
+      compactedSet.metadata.degradedWorkers.some(
+        (d) => d.topic === "lane-trace" && d.message.includes("compactions 2"),
+      ),
+    "2 compactions → lane failed (not clean), trace records 2, findings still publish",
+  );
+  await assertServeDead("compaction");
+
+  // The context limit fails the lane with a reason that names it.
+  const contextRun = runDriver(["--base", "HEAD~1", "--json"], {
+    WARDEN_SMOKE_MODE: "contextlimit",
+  });
+  const contextSet = parseOut(contextRun.out);
+  assert(
+    contextRun.exit === 1 &&
+      contextSet?.metadata.degradedWorkers.some(
+        (d) =>
+          d.kind === "actionable" &&
+          d.topic === "lane-health" &&
+          d.message.includes("context_limit:") &&
+          d.message.includes("prompt is too long"),
+      ) === true,
+    "context limit → lane failed with a context_limit reason in lane-health",
+  );
+  await assertServeDead("context limit");
   // parseSessionUsage validates the same shape the fake serve sends.
   const smokeUsage = parseSessionUsage({
     data: {
@@ -1317,11 +1489,12 @@ if (mode === "runfail") {
     timingsFile.version === 1 &&
       timingsFile.runSpawned === true &&
       timingsFile.usage?.costUsd === 0.0123 &&
+      timingsFile.compactions === 0 &&
       spawnedPhases.every((p) => typeof timingsFile.timings.phases[p] === "number") &&
       timingsFile.timings.tools.some((t) => t.name === "warden_run_det_priors") &&
       lanePhaseMs !== undefined &&
       timingsFile.timings.totalMs >= lanePhaseMs,
-    "--timings-out records every phase of a spawned run, the tool list, and the session cost",
+    "--timings-out records every phase of a spawned run, the tool list, the session cost, and 0 compactions",
   );
   assert(
     JSON.stringify(driven.timings) === JSON.stringify(timingsFile.timings),
@@ -1347,6 +1520,7 @@ if (mode === "runfail") {
     "driveOpencodeLane returns the CommentSet the wrapper prints",
   );
   assert(driven.usage?.costUsd === 0.0123, "driveOpencodeLane returns the session usage");
+  assert(driven.compactions === 0, "driveOpencodeLane returns the compaction count");
   assert(
     driven.lanes[0]?.status === "ok" &&
       driven.result.metadata.degradedWorkers.some(
