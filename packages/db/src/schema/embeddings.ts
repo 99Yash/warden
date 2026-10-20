@@ -25,9 +25,7 @@ export const embeddings = sqliteTable(
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.chunkHash, t.modelId, t.modelVersion] }),
-  }),
+  (t) => [primaryKey({ columns: [t.chunkHash, t.modelId, t.modelVersion] })],
 );
 
 export type EmbeddingRow = typeof embeddings.$inferSelect;

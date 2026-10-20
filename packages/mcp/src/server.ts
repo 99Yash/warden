@@ -124,11 +124,13 @@ export interface StartMcpServerOptions {
  * request handler is running; used by `startMcpServer` to let already-started
  * requests finish (and write their responses) before closing on client EOF.
  */
+// oxlint-disable-next-line typescript/no-deprecated -- low-level Server on purpose: raw JSON Schemas, an envelope for unknown tools, in-flight tracking; McpServer owns all three
 export interface WardenMcpServer extends Server {
   whenIdle(): Promise<void>;
 }
 
 export function createMcpServer(repoRoot: string): WardenMcpServer {
+  // oxlint-disable-next-line typescript/no-deprecated -- see WardenMcpServer: McpServer would replace the envelope and the JSON Schemas
   const server = new Server(
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     { capabilities: { tools: {} } },

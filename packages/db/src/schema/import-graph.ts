@@ -29,9 +29,7 @@ export const importGraph = sqliteTable(
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.filePath, t.fileSha] }),
-  }),
+  (t) => [primaryKey({ columns: [t.filePath, t.fileSha] })],
 );
 
 export type ImportGraphRow = typeof importGraph.$inferSelect;

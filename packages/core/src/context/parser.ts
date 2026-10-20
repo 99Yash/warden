@@ -73,7 +73,7 @@ export class TsCompilerParser implements SourceParser {
     for (const stmt of sf.statements) {
       if (ts.isImportDeclaration(stmt)) {
         const moduleName = stripQuotes(stmt.moduleSpecifier.getText(sf));
-        const isTypeOnly = stmt.importClause?.isTypeOnly ?? false;
+        const isTypeOnly = stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword;
         const symbols = collectImportSymbols(stmt);
         const range = lineRange(sf, stmt);
         const resolved = this.resolve(moduleName, absPath);

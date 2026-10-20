@@ -45,10 +45,10 @@ export const externalKnowledge = sqliteTable(
 
     ...lifecycle_dates,
   },
-  (t) => ({
-    sourceTypeIdx: index("external_knowledge_source_type_idx").on(t.sourceType),
-    ttlExpiresAtIdx: index("external_knowledge_ttl_expires_at_idx").on(t.ttlExpiresAt),
-  }),
+  (t) => [
+    index("external_knowledge_source_type_idx").on(t.sourceType),
+    index("external_knowledge_ttl_expires_at_idx").on(t.ttlExpiresAt),
+  ],
 );
 
 export type ExternalKnowledge = typeof externalKnowledge.$inferSelect;

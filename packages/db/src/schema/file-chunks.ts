@@ -27,11 +27,11 @@ export const fileChunks = sqliteTable(
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.filePath, t.chunkHash] }),
-    pathIdx: index("idx_fc_path").on(t.filePath),
-    hashIdx: index("idx_fc_hash").on(t.chunkHash),
-  }),
+  (t) => [
+    primaryKey({ columns: [t.filePath, t.chunkHash] }),
+    index("idx_fc_path").on(t.filePath),
+    index("idx_fc_hash").on(t.chunkHash),
+  ],
 );
 
 export type FileChunksRow = typeof fileChunks.$inferSelect;

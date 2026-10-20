@@ -28,7 +28,7 @@ const ModelsDevModelSchema = z
     tool_call: z.boolean().optional(),
     structured_output: z.boolean().optional(),
   })
-  .passthrough();
+  .loose();
 
 const ModelsDevCatalogSchema = z.record(
   z.string(),
@@ -36,7 +36,7 @@ const ModelsDevCatalogSchema = z.record(
     .object({
       models: z.record(z.string(), ModelsDevModelSchema).optional(),
     })
-    .passthrough(),
+    .loose(),
 );
 
 type ModelsDevModel = z.infer<typeof ModelsDevModelSchema>;
