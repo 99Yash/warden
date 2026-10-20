@@ -1,0 +1,52 @@
+diff --git a/src/profiles/upsert-profile.ts b/src/profiles/upsert-profile.ts
+new file mode 100644
+index 0000000..7b2e4a1
+--- /dev/null
++++ b/src/profiles/upsert-profile.ts
+@@ -0,0 +1,23 @@
++import type { Pool } from "pg";
++
++export interface Profile {
++  userId: string;
++  displayName: string;
++  bio: string;
++}
++
++/**
++ * Save a profile: insert it, or update the row that has the same user id.
++ * This is one statement on purpose. Two saves that race for a new user
++ * cannot both insert, and no reader sees a profile between a delete and an
++ * insert. The caller does not need to know if the row existed.
++ */
++export async function upsertProfile(pool: Pool, profile: Profile): Promise<void> {
++  await pool.query(
++    `INSERT INTO profiles (user_id, display_name, bio)
++     VALUES ($1, $2, $3)
++     ON CONFLICT (user_id) DO UPDATE
++       SET display_name = EXCLUDED.display_name, bio = EXCLUDED.bio`,
++    [profile.userId, profile.displayName, profile.bio],
++  );
++}
+diff --git a/src/routes/profile.ts b/src/routes/profile.ts
+new file mode 100644
+index 0000000..e05c9d3
+--- /dev/null
++++ b/src/routes/profile.ts
+@@ -0,0 +1,16 @@
++import type { Pool } from "pg";
++import { upsertProfile } from "../profiles/upsert-profile";
++
++export interface ProfileBody {
++  displayName: string;
++  bio: string;
++}
++
++/** PUT /profile: store the signed-in user's profile, whether or not one exists. */
++export async function putProfile(
++  pool: Pool,
++  sessionUserId: string,
++  body: ProfileBody,
++): Promise<{ status: 204 }> {
++  await upsertProfile(pool, { userId: sessionUserId, ...body });
++  return { status: 204 };
++}

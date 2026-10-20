@@ -1,0 +1,65 @@
+diff --git a/src/export/csv.ts b/src/export/csv.ts
+new file mode 100644
+index 0000000..5e0d7c4
+--- /dev/null
++++ b/src/export/csv.ts
+@@ -0,0 +1,20 @@
++import { slugify } from "../utils/strings";
++
++export interface CsvFile {
++  filename: string;
++  body: string;
++}
++
++/**
++ * Quote one field for RFC 4180: wrap it in double quotes when it holds a
++ * comma, a double quote, or a line break, and double each quote inside it.
++ */
++function escapeCsvField(value: string): string {
++  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
++}
++
++/** A CSV download: a header row, then one line per row, CRLF line ends. */
++export function toCsv(title: string, header: string[], rows: string[][]): CsvFile {
++  const lines = [header, ...rows].map((row) => row.map(escapeCsvField).join(","));
++  return { filename: `${slugify(title)}.csv`, body: `${lines.join("\r\n")}\r\n` };
++}
+diff --git a/src/reports/pdf.ts b/src/reports/pdf.ts
+index 5d1e2a7..c41f0b9 100644
+--- a/src/reports/pdf.ts
++++ b/src/reports/pdf.ts
+@@ -1,10 +1,7 @@
++import { slugify } from "../utils/strings";
+ import { renderPdf } from "./render-pdf";
+
+ /** Build the PDF download for a report. */
+ export async function pdfDownload(title: string, html: string): Promise<{ filename: string; body: Uint8Array }> {
+-  const slug = title
+-    .toLowerCase()
+-    .replace(/[^a-z0-9]+/g, "-")
+-    .replace(/^-+|-+$/g, "");
+-  return { filename: `${slug}.pdf`, body: await renderPdf(html) };
++  return { filename: `${slugify(title)}.pdf`, body: await renderPdf(html) };
+ }
+diff --git a/src/utils/strings.ts b/src/utils/strings.ts
+index 3b18e51..9f2c4a0 100644
+--- a/src/utils/strings.ts
++++ b/src/utils/strings.ts
+@@ -1,9 +1,17 @@
+ /** Upper-case the first character. */
+ export function capitalize(text: string): string {
+   return text.charAt(0).toUpperCase() + text.slice(1);
+ }
+
+ /** Cut `text` to `max` characters and mark the cut with an ellipsis. */
+ export function truncate(text: string, max: number): string {
+   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+ }
++
++/** Lower-case `text` and join its words with hyphens: "Q3 Report" -> "q3-report". */
++export function slugify(text: string): string {
++  return text
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, "-")
++    .replace(/^-+|-+$/g, "");
++}

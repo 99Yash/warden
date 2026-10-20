@@ -9,7 +9,7 @@
  * one runtime import is zod, for the `meta.json` schema.
  */
 
-import type { BossLoopConfig } from "@warden/core";
+import type { BossLoopConfig, Kind } from "@warden/core";
 import type { LaneSpec } from "../../src/opencode/materialize.js";
 import { z } from "zod";
 
@@ -67,6 +67,12 @@ export interface FixtureLabel {
   category?: string;
   /** Optional case-insensitive substring that must appear in the Comment claim. */
   claimIncludes?: string;
+  /**
+   * Optional Comment.kind the comment must have (ADR-0052 eval leg (iv)):
+   * a `question` label is caught only by a question, and an `absent` label
+   * with `assertion` is hit only by an assertion. Absent = any kind.
+   */
+  kind?: Kind;
   /** Free-text reminder of what to look for. */
   description: string;
 }

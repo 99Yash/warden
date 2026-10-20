@@ -183,7 +183,7 @@ function loadFixtures(): LoadedFixture[] {
 // ---------------------------------------------------------------------------
 process.stdout.write("\n(a) buildFixtureRepo on every fixture\n");
 const loaded = loadFixtures();
-assert(loaded.length === 13, `13 fixtures loaded (got ${loaded.length})`);
+assert(loaded.length === 23, `23 fixtures loaded (got ${loaded.length})`);
 for (const { fixture, sections, how, worktreeBefore, repoPath } of loaded) {
   const startedAt = Date.now();
   let root = "";

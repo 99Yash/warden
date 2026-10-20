@@ -43,6 +43,7 @@ import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  KindEnum,
   ReviewFailedError,
   runReviewHarness,
   type CommentSet,
@@ -77,6 +78,7 @@ import {
   formatCost,
   harnessSampleCost,
   isOpencodeCostMeasured,
+  matchesLabel,
   renderMarkdownTable,
   scoreFixtureRun,
 } from "./score.mjs";
@@ -401,7 +403,8 @@ interface ParsedLabels {
  * Parse `labels.md`. Two shapes:
  *   1. `expected: zero comments` (clean-control). Returns `expectsEmpty: true`.
  *   2. List of `- id: <id>` blocks with `path`, `line` (optional),
- *      `category` (optional), `description` properties. `expect: absent`
+ *      `category` (optional), `kind` (optional: `assertion` or `question`;
+ *      any other value throws), `description` properties. `expect: absent`
  *      marks a known false-positive trap. We accept a lightweight YAML-ish
  *      key:value format inside fenced ```yaml``` blocks to keep authoring
  *      trivial.
@@ -445,6 +448,16 @@ function parseLabelBlock(text: string): FixtureLabel | null {
   }
   if (kv["category"]) label.category = kv["category"];
   if (kv["claim_includes"]) label.claimIncludes = kv["claim_includes"];
+  if (kv["kind"]) {
+    // A typo must not silently widen the label to any kind.
+    const kind = KindEnum.safeParse(kv["kind"]);
+    if (!kind.success) {
+      throw new Error(
+        `labels.md: label "${kv["id"]}" has kind "${kv["kind"]}"; use one of ${KindEnum.options.join(", ")}`,
+      );
+    }
+    label.kind = kind.data;
+  }
   return label;
 }
 
@@ -679,7 +692,8 @@ async function runOnceHarness(
  *
  * A `present` label is "caught" iff at least one Comment cites its `path` AND
  * (when the label has a `line`) cites within ±5 lines of it AND (when the
- * label has a `category`) matches Comment.category. An `absent` label is a
+ * label has a `category`) matches Comment.category AND (when the label has a
+ * `kind`) matches Comment.kind (`matchesLabel`). An `absent` label is a
  * known false-positive trap; any matching comment records a forbidden hit.
  * Unmatched comments increment `unlabeledComments` — used as the
  * false-positive gauge for clean fixtures.
@@ -787,27 +801,6 @@ function scoreOne(
   base.forbiddenLabels = [...forbiddenHits];
   base.unlabeledComments = result.comments.filter((c) => !matchedCommentIds.has(c.id)).length;
   return base;
-}
-
-function matchesLabel(
-  comment: { file: string; lineStart: number; lineEnd: number; category: string; claim: string },
-  label: FixtureLabel,
-): boolean {
-  if (comment.file !== label.path) return false;
-  if (label.line !== undefined) {
-    const drift = 5;
-    const lo = comment.lineStart - drift;
-    const hi = comment.lineEnd + drift;
-    if (label.line < lo || label.line > hi) return false;
-  }
-  if (label.category !== undefined && comment.category !== label.category) return false;
-  if (
-    label.claimIncludes !== undefined &&
-    !comment.claim.toLowerCase().includes(label.claimIncludes.toLowerCase())
-  ) {
-    return false;
-  }
-  return true;
 }
 
 function labelExpectation(label: FixtureLabel): "present" | "absent" {

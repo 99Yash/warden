@@ -1,0 +1,170 @@
+diff --git a/packages/api/src/modules/workflows/tick.ts b/packages/api/src/modules/workflows/tick.ts
+new file mode 100644
+index 000000000..af9f61190
+--- /dev/null
++++ b/packages/api/src/modules/workflows/tick.ts
+@@ -0,0 +1,164 @@
++import { db } from "@alfred/db";
++import { workflows, type WorkflowTrigger } from "@alfred/db/schemas";
++import { and, eq, sql } from "drizzle-orm";
++import { createRun } from "../agent/service";
++import { enqueueRun } from "../agent/queue";
++import { computeNextRunAt, resolveWorkflowTimezone } from "./scheduling";
++
++/**
++ * One tick of the generic workflow dispatcher (ADR-0027).
++ *
++ * Reads up to `BATCH` rows from the partial cron index, then per row:
++ *
++ *  1. **CAS-advance `next_run_at`** — `UPDATE … WHERE id=? AND
++ *     next_run_at=oldNext` returns 0 rows if another tick worker (or a
++ *     manual write) already advanced the row. We bail on miss without
++ *     creating a run, guaranteeing at-most-one fire per scheduled
++ *     instant across racing workers.
++ *  2. **`createRun`** with `trigger: { kind: 'cron', scheduledFor }`.
++ *  3. **`enqueueRun`** with `jobId: workflow:{id}:scheduled:{iso}` —
++ *     BullMQ's native dedup makes a retried tick (e.g. attempt 2 after
++ *     a Redis blip) a no-op on duplicate jobId.
++ *
++ * A crash between step 1 and step 2/3 produces a missed fire (row
++ * advanced, no run created). Personal-scale ADR-0027 documents this as
++ * acceptable — the next scheduled fire produces a fresh row. Mitigation
++ * via 2PC / outbox is deferred until missed-fire data shows it's worth
++ * the complexity.
++ */
++const BATCH = 100;
++
++export interface TickResult {
++  scanned: number;
++  enqueued: number;
++  raced: number;
++  failed: number;
++}
++
++interface DueRow {
++  id: string;
++  slug: string;
++  userId: string;
++  brief: string | null;
++  trigger: WorkflowTrigger;
++  nextRunAt: Date;
++}
++
++export async function dispatchDueCronWorkflows(now: Date = new Date()): Promise<TickResult> {
++  const due = await selectDueRows(now);
++
++  let enqueued = 0;
++  let raced = 0;
++  let failed = 0;
++
++  for (const row of due) {
++    try {
++      const result = await dispatchOne(row);
++      if (result === "enqueued") enqueued++;
++      else if (result === "raced") raced++;
++    } catch (err) {
++      failed++;
++      console.warn(
++        `[workflows:tick] failed for workflow=${row.slug} (${row.id}):`,
++        err instanceof Error ? err.message : String(err),
++      );
++    }
++  }
++
++  if (due.length > 0) {
++    console.log(
++      `[workflows:tick] scanned=${due.length} enqueued=${enqueued} raced=${raced} failed=${failed}`,
++    );
++  }
++  return { scanned: due.length, enqueued, raced, failed };
++}
++
++async function selectDueRows(now: Date): Promise<DueRow[]> {
++  // The partial `workflows_next_run_at_idx` covers exactly this WHERE
++  // clause; the planner returns the matching rows ordered by
++  // `next_run_at` ASC for free.
++  const rows = await db()
++    .select({
++      id: workflows.id,
++      slug: workflows.slug,
++      userId: workflows.userId,
++      brief: workflows.brief,
++      trigger: workflows.trigger,
++      nextRunAt: workflows.nextRunAt,
++    })
++    .from(workflows)
++    .where(
++      and(
++        eq(workflows.status, "active"),
++        sql`${workflows.trigger}->>'kind' = 'cron'`,
++        sql`${workflows.nextRunAt} <= ${now.toISOString()}`,
++      ),
++    )
++    .orderBy(workflows.nextRunAt)
++    .limit(BATCH);
++
++  return rows.flatMap((r) => (r.nextRunAt ? [{ ...r, nextRunAt: r.nextRunAt }] : []));
++}
++
++async function dispatchOne(row: DueRow): Promise<"enqueued" | "raced"> {
++  const scheduledFor = row.nextRunAt;
++  const scheduledForIso = scheduledFor.toISOString();
++
++  // Compute the *next* fire before the CAS so we can write both columns
++  // atomically. `cron-parser` runs in the workflow's resolved tz; a
++  // malformed schedule returns null and falls through to a clear log.
++  const timezone = await resolveWorkflowTimezone(row.userId, row.trigger);
++  const newNext = computeNextRunAt(row.trigger, { from: scheduledFor, timezone });
++  if (!newNext) {
++    console.warn(
++      `[workflows:tick] cron-parser returned null for workflow=${row.slug} (${row.id}); pausing partial-index entry`,
++    );
++    // Null `next_run_at` removes the row from the partial index until
++    // a user edit fixes the schedule — better than re-firing every
++    // tick on a broken expression.
++    await db()
++      .update(workflows)
++      .set({ nextRunAt: null, updatedAt: new Date() })
++      .where(and(eq(workflows.id, row.id), eq(workflows.nextRunAt, scheduledFor)));
++    return "raced";
++  }
++
++  // CAS: only this tick worker may advance the row from the instant we
++  // SELECTed. A racing worker hits 0 rows updated and bails. drizzle's
++  // `.update().returning()` is the cleanest way to read affected rows.
++  const updated = await db()
++    .update(workflows)
++    .set({
++      nextRunAt: newNext,
++      lastScheduledAt: scheduledFor,
++      updatedAt: new Date(),
++    })
++    .where(and(eq(workflows.id, row.id), eq(workflows.nextRunAt, scheduledFor)))
++    .returning({ id: workflows.id });
++
++  if (updated.length === 0) {
++    return "raced";
++  }
++
++  const { runId } = await createRun({
++    userId: row.userId,
++    workflowSlug: row.slug,
++    brief: row.brief ?? undefined,
++    trigger: { kind: "cron", scheduledFor: scheduledForIso },
++  });
++
++  // jobId dedup defends against a tick retry (BullMQ attempts) firing a
++  // second job for the same scheduled instant. Different `scheduledFor`
++  // values produce different jobIds, so the *next* fire isn't blocked.
++  //
++  // ADR-0027's literal example used `:` separators, but BullMQ's
++  // `Custom Id cannot contain :` check forbids them (see
++  // bullmq/.../job.js). We use `.` separators and the millisecond
++  // timestamp (sub-second uniqueness we never schedule at, but still
++  // colon-free + numerically sortable).
++  await enqueueRun(runId, {
++    jobId: `workflow.${row.id}.scheduled.${scheduledFor.getTime()}`,
++  });
++
++  return "enqueued";
++}
