@@ -1,0 +1,42 @@
+diff --git a/src/sms/reminder.ts b/src/sms/reminder.ts
+new file mode 100644
+index 0000000..8d4b1f0
+--- /dev/null
++++ b/src/sms/reminder.ts
+@@ -0,0 +1,14 @@
++import { formatReminderTime } from "./time";
++
++export interface Appointment {
++  startsAt: Date;
++  /** The client's UTC offset at `startsAt`, in minutes (from their saved time zone). */
++  utcOffsetMinutes: number;
++  clinicName: string;
++}
++
++/** The reminder SMS text. GSM-7 only, so one message stays one segment. */
++export function reminderText(appointment: Appointment): string {
++  const time = formatReminderTime(appointment.startsAt, appointment.utcOffsetMinutes);
++  return `Reminder: your visit at ${appointment.clinicName} is today at ${time}. Reply C to cancel.`;
++}
+diff --git a/src/sms/time.ts b/src/sms/time.ts
+new file mode 100644
+index 0000000..f1e6a25
+--- /dev/null
++++ b/src/sms/time.ts
+@@ -0,0 +1,16 @@
++/**
++ * "2:05 PM" for an SMS, in the client's local time.
++ *
++ * Not `toLocaleTimeString` or `Intl.DateTimeFormat`: their output follows
++ * the runtime's ICU data, and ICU 72 (Node 20) changed the space before
++ * "AM"/"PM" to U+202F. That character is not in the GSM-7 alphabet, so a
++ * reminder would switch to UCS-2 and split into more segments on a Node
++ * upgrade. These lines emit ASCII only, whatever the runtime.
++ */
++export function formatReminderTime(instant: Date, utcOffsetMinutes: number): string {
++  const local = new Date(instant.getTime() + utcOffsetMinutes * 60_000);
++  const hours24 = local.getUTCHours();
++  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
++  const minutes = String(local.getUTCMinutes()).padStart(2, "0");
++  return `${hours12}:${minutes} ${hours24 < 12 ? "AM" : "PM"}`;
++}

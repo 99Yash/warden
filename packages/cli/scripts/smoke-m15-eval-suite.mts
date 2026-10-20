@@ -18,6 +18,12 @@
  *   5. `checkThreshold()` returns `cleared: true` on a contrived "perfect"
  *      aggregate and `cleared: false` (with each failing criterion named)
  *      on a contrived "all-fail" aggregate.
+ *   6. ADR-0052 structural fixtures: 10 of them, none selected by the
+ *      PR #103 stage 1/2/4 regexes; recall and ladder fixtures carry
+ *      `meta.json` and one present label; traps carry only absent
+ *      labels; the ladder fixture pins `kind`. `m14-closeout` has its
+ *      `meta.json`. `matchesLabel` honors the optional `kind` key, and a
+ *      label without it matches any kind.
  *
  * Usage:
  *   pnpm --filter @warden/cli smoke:m15-eval-suite
@@ -26,6 +32,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVAL_DIR = resolve(HERE, "eval");
@@ -104,6 +111,7 @@ interface ParsedLabels {
     line?: number;
     category?: string;
     claimIncludes?: string;
+    kind?: string;
     description: string;
   }[];
   expectsEmpty: boolean;
@@ -138,6 +146,7 @@ function parseLabels(raw: string): ParsedLabels {
     }
     if (kv["category"]) entry.category = kv["category"];
     if (kv["claim_includes"]) entry.claimIncludes = kv["claim_includes"];
+    if (kv["kind"]) entry.kind = kv["kind"];
     labels.push(entry);
   }
   return { labels, expectsEmpty: false };
@@ -195,6 +204,70 @@ assert(
   falseposLabels.labels.every((l) => l.claimIncludes !== undefined),
   `${falseposDir} labels pin claim_includes`,
 );
+
+// -----------------------------------------------------------------------
+// 3b. ADR-0052 structural fixtures (Lever D eval legs i, ii, iv)
+// -----------------------------------------------------------------------
+process.stdout.write(`\n[3b] ADR-0052 structural fixtures\n`);
+
+// The eval plan's stage 3 selects these fixtures with `--fixture-regex
+// structural`. Stages 1, 2, and 4 (PR #103) use the regexes below, which
+// must not select them.
+const STAGE_REGEXES = [
+  /^(clean-|committability-|consistency-|correctness-|leverage-|scalability-|security-|alfred-pr131-)/,
+  /(misses|m14-closeout)/,
+  /^(clean-|committability-|consistency-|correctness-|leverage-|scalability-|security-|alfred-pr(131|14|235)-|m14-closeout-|m6-misses-)/,
+];
+// ADR-0052 routes structural findings to these categories by axis.
+const STRUCTURAL_CATEGORIES = new Set(["dedup", "consistency", "deadcode", "leverage", "clarity"]);
+const structuralDirs = [
+  ...syntheticDirs.map((name) => ({ name, dir: resolve(SYNTHETIC_DIR, name), real: false })),
+  ...realDirs.map((name) => ({ name, dir: resolve(REAL_PRS_DIR, name), real: true })),
+].filter(({ name }) => /structural/.test(name));
+assert(structuralDirs.length === 10, `10 structural fixtures (got ${structuralDirs.length})`);
+for (const { name, dir, real } of structuralDirs) {
+  assert(
+    STAGE_REGEXES.every((re) => !re.test(name)),
+    `${name} is outside the stage 1, 2, and 4 regexes`,
+  );
+  const parsed = parseLabels(readFileSync(resolve(dir, "labels.md"), "utf8"));
+  const present = parsed.labels.filter((l) => l.expect === "present");
+  const absent = parsed.labels.filter((l) => l.expect === "absent");
+  assert(
+    parsed.labels.every((l) => l.description.startsWith("[structural]")),
+    `${name}: every label is tagged [structural]`,
+  );
+  if (name.startsWith("structural-trap-")) {
+    assert(!real, `${name}: trap fixtures are synthetic`);
+    assert(present.length === 0 && absent.length >= 1, `${name}: only expect: absent labels`);
+  } else {
+    assert(real, `${name}: recall and ladder fixtures are real PRs`);
+    assert(existsSync(resolve(dir, "meta.json")), `${name}: has meta.json (real-repo tree)`);
+    assert(present.length === 1, `${name}: one present label (got ${present.length})`);
+    assert(
+      present.every((l) => l.line !== undefined && STRUCTURAL_CATEGORIES.has(l.category ?? "")),
+      `${name}: the present label pins a line and a structural category`,
+    );
+  }
+}
+const ladder = structuralDirs.find(({ name }) => name.startsWith("structural-ladder-"));
+assert(ladder !== undefined, `the leg (iv) ladder fixture exists`);
+if (ladder) {
+  const parsed = parseLabels(readFileSync(resolve(ladder.dir, "labels.md"), "utf8"));
+  assert(
+    parsed.labels.some((l) => l.expect === "present" && l.kind === "question") &&
+      parsed.labels.some((l) => l.expect === "absent" && l.kind === "assertion"),
+    `${ladder.name}: a present kind:question label and an absent kind:assertion trap`,
+  );
+}
+{
+  const metaPath = resolve(REAL_PRS_DIR, m14Dir ?? "", "meta.json");
+  const meta: unknown = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : null;
+  assert(
+    isDeepStrictEqual(meta, { repo: "warden", commit: "89bf988" }),
+    `m14-closeout has meta.json {repo: warden, commit: 89bf988}`,
+  );
+}
 
 // -----------------------------------------------------------------------
 // 4. score.mts math
@@ -489,6 +562,42 @@ assert(
 assert(
   noSyntheticVerdict.details.some((d) => d.includes("(b)") && d.includes("SKIPPED")),
   `(b) detail line reports SKIPPED`,
+);
+
+// -----------------------------------------------------------------------
+// 6. matchesLabel: the optional `kind` key (ADR-0052 leg iv)
+// -----------------------------------------------------------------------
+process.stdout.write(`\n[6] matchesLabel honors an optional kind\n`);
+
+const { matchesLabel } = await import("./eval/score.mjs");
+const at = {
+  file: "src/a.ts",
+  lineStart: 10,
+  lineEnd: 12,
+  category: "consistency",
+  claim: "LANE_SPECS and the down charter disagree",
+} as const;
+const asQuestion = { ...at, kind: "question" } as const;
+const asAssertion = { ...at, kind: "assertion" } as const;
+const noKind = { id: "k", path: "src/a.ts", line: 11, description: "" };
+assert(
+  matchesLabel(asQuestion, noKind) && matchesLabel(asAssertion, noKind),
+  `a label without kind matches both kinds (existing labels score as before)`,
+);
+assert(
+  matchesLabel(asQuestion, { ...noKind, kind: "question" }) &&
+    !matchesLabel(asAssertion, { ...noKind, kind: "question" }),
+  `kind: question matches only a question`,
+);
+assert(
+  matchesLabel(asAssertion, { ...noKind, kind: "assertion" }) &&
+    !matchesLabel(asQuestion, { ...noKind, kind: "assertion" }),
+  `kind: assertion matches only an assertion`,
+);
+assert(
+  !matchesLabel(asQuestion, { ...noKind, kind: "question", line: 30 }) &&
+    !matchesLabel(asQuestion, { ...noKind, kind: "question", category: "dedup" }),
+  `kind does not bypass the line window or the category`,
 );
 
 if (failed > 0) {

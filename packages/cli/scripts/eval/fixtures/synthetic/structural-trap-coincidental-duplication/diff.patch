@@ -1,0 +1,50 @@
+diff --git a/src/admin/activity-feed.ts b/src/admin/activity-feed.ts
+new file mode 100644
+index 0000000..4c1e2d9
+--- /dev/null
++++ b/src/admin/activity-feed.ts
+@@ -0,0 +1,16 @@
++import { formatInvoiceNumber } from "../billing/invoice-number";
++import { formatTicketNumber } from "../support/ticket-number";
++
++export type ActivityItem =
++  | { kind: "invoice"; sequence: number; customer: string }
++  | { kind: "ticket"; sequence: number; subject: string };
++
++/** One line of text for each item in the admin activity feed. */
++export function activityLine(item: ActivityItem): string {
++  switch (item.kind) {
++    case "invoice":
++      return `${formatInvoiceNumber(item.sequence)} issued to ${item.customer}`;
++    case "ticket":
++      return `${formatTicketNumber(item.sequence)} opened: ${item.subject}`;
++  }
++}
+diff --git a/src/billing/invoice-number.ts b/src/billing/invoice-number.ts
+new file mode 100644
+index 0000000..9a3f0c2
+--- /dev/null
++++ b/src/billing/invoice-number.ts
+@@ -0,0 +1,8 @@
++/**
++ * Invoice numbers as the accounting export reads them: "INV-" and the
++ * sequence, zero-padded to 6 digits. The accounting system parses this exact
++ * format, so a change to it needs a new export version and finance sign-off.
++ */
++export function formatInvoiceNumber(sequence: number): string {
++  return `INV-${String(sequence).padStart(6, "0")}`;
++}
+diff --git a/src/support/ticket-number.ts b/src/support/ticket-number.ts
+new file mode 100644
+index 0000000..d27be41
+--- /dev/null
++++ b/src/support/ticket-number.ts
+@@ -0,0 +1,8 @@
++/**
++ * Ticket numbers as the support inbox shows them: "TKT-" and the sequence,
++ * zero-padded to 6 digits. A display choice of the support team; they can
++ * change the prefix or the width at any time.
++ */
++export function formatTicketNumber(sequence: number): string {
++  return `TKT-${String(sequence).padStart(6, "0")}`;
++}

@@ -1,0 +1,39 @@
+diff --git a/src/config/load.ts b/src/config/load.ts
+new file mode 100644
+index 0000000..6f0a2d8
+--- /dev/null
++++ b/src/config/load.ts
+@@ -0,0 +1,15 @@
++import { parseRegion, REGIONS, type Region } from "./region";
++
++export interface AppConfig {
++  region: Region;
++}
++
++/** Read the app config from the environment. Throws on a value it does not know. */
++export function loadConfig(env: Record<string, string | undefined>): AppConfig {
++  const raw = env["APP_REGION"] ?? "us-east";
++  const region = parseRegion(raw);
++  if (region === undefined) {
++    throw new Error(`APP_REGION must be one of ${REGIONS.join(", ")} (got "${raw}")`);
++  }
++  return { region };
++}
+diff --git a/src/config/region.ts b/src/config/region.ts
+new file mode 100644
+index 0000000..c3d91e7
+--- /dev/null
++++ b/src/config/region.ts
+@@ -0,0 +1,12 @@
++export const REGIONS = ["us-east", "eu-west", "ap-south"] as const;
++export type Region = (typeof REGIONS)[number];
++
++/**
++ * The one place a string becomes a `Region`. `includes` on a readonly tuple
++ * does not narrow its argument, so the cast sits here, right after the
++ * membership check that proves it.
++ */
++export function parseRegion(raw: string): Region | undefined {
++  const known: readonly string[] = REGIONS;
++  return known.includes(raw) ? (raw as Region) : undefined;
++}

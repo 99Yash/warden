@@ -1,0 +1,64 @@
+diff --git a/src/accounts/welcome.ts b/src/accounts/welcome.ts
+new file mode 100644
+index 0000000..b8c13f6
+--- /dev/null
++++ b/src/accounts/welcome.ts
+@@ -0,0 +1,18 @@
++import type { SmtpMailer } from "../notify/smtp-mailer";
++
++export interface NewAccount {
++  email: string;
++  displayName: string;
++}
++
++/**
++ * Send the welcome email for a new account. Takes only `send`, so a test can
++ * pass a fake without an SMTP server.
++ */
++export async function sendWelcomeEmail(
++  mailer: Pick<SmtpMailer, "send">,
++  account: NewAccount,
++): Promise<void> {
++  const text = `Hi ${account.displayName},\n\nYour account is ready.\n`;
++  await mailer.send({ to: account.email, subject: "Welcome", text });
++}
+diff --git a/src/notify/smtp-mailer.ts b/src/notify/smtp-mailer.ts
+new file mode 100644
+index 0000000..2a9e71d
+--- /dev/null
++++ b/src/notify/smtp-mailer.ts
+@@ -0,0 +1,34 @@
++import nodemailer, { type Transporter } from "nodemailer";
++
++export interface MailMessage {
++  to: string;
++  subject: string;
++  text: string;
++}
++
++export interface SmtpConfig {
++  host: string;
++  port: number;
++  user: string;
++  password: string;
++  from: string;
++}
++
++/** The app's one mail transport: SMTP through the provider in `SmtpConfig`. */
++export class SmtpMailer {
++  private readonly transport: Transporter;
++
++  constructor(private readonly config: SmtpConfig) {
++    this.transport = nodemailer.createTransport({
++      host: config.host,
++      port: config.port,
++      secure: config.port === 465,
++      requireTLS: true,
++      auth: { user: config.user, pass: config.password },
++    });
++  }
++
++  async send(message: MailMessage): Promise<void> {
++    await this.transport.sendMail({ from: this.config.from, ...message });
++  }
++}
