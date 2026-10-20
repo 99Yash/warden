@@ -16,12 +16,14 @@ import {
   type SessionUsage,
   type ToolCallCount,
 } from "../../src/opencode/drive.js";
-import { DOWN_LANE_SPEC } from "../../src/opencode/materialize.js";
+import { DOWN_LANE_SPEC, type LaneSpec } from "../../src/opencode/materialize.js";
 
 /**
- * Eval-only: the down lane run by Claude Code (`claude -p`) instead of
- * OpenCode. Same system prompt (`warden-down.md`), same warden MCP tools,
- * same submission contract (`evaluateLane`), same `runPostPass`. The
+ * Eval-only: a lane (down by default, or up) run by Claude Code
+ * (`claude -p`) instead of OpenCode. The lane spec gives the system prompt
+ * (`warden-down.md` or `warden-up.md`), the envelope lane name, the
+ * built-in tools, and the turn cap. Same warden MCP tools, same
+ * submission contract (`evaluateLane`), same `runPostPass`. The
  * difference is the runtime and its auth: the child runs on the operator's
  * Claude subscription login, so every `ANTHROPIC_*` variable is stripped
  * from its env (warden's `.env` loader puts an API key there, and
@@ -40,14 +42,43 @@ const CLAUDE_CODE_DEFAULT_EFFORT = "high";
 /** Claude Code names MCP tools `mcp__<server>__<tool>`; OpenCode names them `<server>_<tool>`. */
 const MCP_PREFIX = "mcp__warden__";
 const MCP_TOOLS = ["run_det_priors", "lookup_type_def"] as const;
-const MAX_TURNS = 60;
+
+/**
+ * The OpenCode v2 read-only tool names that a lane spec allows
+ * (`LaneSpec.allowedTools`), mapped to the Claude Code built-in tool names.
+ */
+const CLAUDE_CODE_TOOL_NAMES = new Map([
+  ["read", "Read"],
+  ["grep", "Grep"],
+  ["glob", "Glob"],
+]);
+
+/**
+ * The Claude Code built-ins for a lane spec's `allowedTools`, in spec
+ * order. A tool with no Claude Code name throws, so a new lane tool
+ * cannot drop out of the allow list without notice.
+ */
+export function claudeCodeBuiltinTools(spec: LaneSpec): string[] {
+  return spec.allowedTools.map((tool) => {
+    const name = CLAUDE_CODE_TOOL_NAMES.get(tool);
+    if (name === undefined) {
+      throw new Error(`claude-code lane: ${spec.lane} lane tool "${tool}" has no Claude Code name`);
+    }
+    return name;
+  });
+}
 
 /** Variables the child must not inherit: API auth, and the parent session's own Claude Code state. */
 function isStrippedEnv(name: string): boolean {
   return name.startsWith("ANTHROPIC_") || name.startsWith("CLAUDE_CODE_") || name === "CLAUDECODE";
 }
 
-function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/**
+ * The child env: the parent env without any `ANTHROPIC_*` variable (so
+ * `claude` uses the subscription login, not an API key or a gateway) and
+ * without the parent session's Claude Code state.
+ */
+export function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(env)) {
     if (!isStrippedEnv(name)) out[name] = value;
@@ -55,13 +86,16 @@ function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return out;
 }
 
-function buildClaudeCodeArgv(opts: {
+/** The `claude -p` argv for one lane run. Everything lane-specific comes from `spec`. */
+export function buildClaudeCodeArgv(opts: {
+  spec: LaneSpec;
   model: string;
   effort: string;
-  systemPromptFile: string;
   mcpCommand: string[];
   message: string;
 }): string[] {
+  const { spec } = opts;
+  const builtins = claudeCodeBuiltinTools(spec);
   const [command, ...args] = opts.mcpCommand;
   const mcpConfig = JSON.stringify({ mcpServers: { warden: { command, args } } });
   // Read deny rules also cover Grep and Glob, but only inside the cwd:
@@ -79,7 +113,7 @@ function buildClaudeCodeArgv(opts: {
     "--effort",
     opts.effort,
     "--system-prompt-file",
-    opts.systemPromptFile,
+    claudeCodeSystemPromptFile(spec),
     "--setting-sources",
     "",
     "--restricted",
@@ -89,21 +123,26 @@ function buildClaudeCodeArgv(opts: {
     "--mcp-config",
     mcpConfig,
     "--tools",
-    "Read,Grep,Glob",
+    builtins.join(","),
     "--allowedTools",
-    ["Read", "Grep", "Glob", ...MCP_TOOLS.map((t) => `${MCP_PREFIX}${t}`)].join(","),
+    [...builtins, ...MCP_TOOLS.map((t) => `${MCP_PREFIX}${t}`)].join(","),
     "--permission-mode",
     "dontAsk",
-    // The OpenCode lane's `steps: 60`. A capped run ends `error_max_turns`,
-    // which fails the lane.
+    // The OpenCode lane's step cap (`spec.steps`). A capped run ends
+    // `error_max_turns`, which fails the lane.
     "--max-turns",
-    String(MAX_TURNS),
+    String(spec.steps),
     "--disable-slash-commands",
     "--no-session-persistence",
     "--output-format",
     "stream-json",
     "--verbose",
   ];
+}
+
+/** The lane's generated system prompt, next to its OpenCode config. */
+export function claudeCodeSystemPromptFile(spec: LaneSpec): string {
+  return resolve(dirname(resolveLaneConfigPath(spec)), spec.promptFilename);
 }
 
 /** The OpenCode message plus the tool-name mapping the shared prompt needs on this client. */
@@ -268,10 +307,14 @@ function parseResultUsage(
 
 export interface ClaudeCodeDriveOptions {
   repoRoot: string;
+  /** The lane to run. Absent means `DOWN_LANE_SPEC`. */
+  lane?: LaneSpec;
   baseRef?: string;
   model?: string;
   effort?: string;
   timeoutSecs?: number;
+  /** Override for the smoke's fake executable. Absent means `claude` on `PATH`. */
+  claudeBin?: string;
 }
 
 /**
@@ -279,8 +322,13 @@ export interface ClaudeCodeDriveOptions {
  * scope, run the lane, build the driver-owned envelope, and return the
  * `runPostPass` CommentSet. No MCP warmup step: `claude -p` connects MCP
  * servers before the first turn, and the init event reports the status.
+ *
+ * No scope ceiling: unlike `driveOpencodeLane`, this lane never applied
+ * `laneScopeOverCeiling`, and the down path keeps that behavior. A scope
+ * that the turn cap cannot fund ends `error_max_turns`, a failed lane.
  */
 export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise<DriveLaneResult> {
+  const spec = opts.lane ?? DOWN_LANE_SPEC;
   const resolved = await resolveDiff({
     repoRoot: opts.repoRoot,
     mode: "review",
@@ -314,7 +362,7 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
   if (scope.length === 0) {
     return await publish(
       {
-        lane: DOWN_LANE_SPEC.lane,
+        lane: spec.lane,
         status: "failed",
         reason: "empty review target",
         scope,
@@ -326,16 +374,14 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
 
   const baseRef = resolved.baseRef ?? opts.baseRef ?? "HEAD";
   const argv = buildClaudeCodeArgv({
+    spec,
     model: opts.model ?? CLAUDE_CODE_DEFAULT_MODEL,
     effort: opts.effort ?? CLAUDE_CODE_DEFAULT_EFFORT,
-    systemPromptFile: resolve(
-      dirname(resolveLaneConfigPath(DOWN_LANE_SPEC)),
-      DOWN_LANE_SPEC.promptFilename,
-    ),
     mcpCommand: resolveWardenMcpCommand(),
     message: buildClaudeCodeMessage(baseRef),
   });
   const processResult = await spawnClaude(
+    opts.claudeBin ?? "claude",
     argv,
     opts.repoRoot,
     buildClaudeCodeEnv(process.env),
@@ -345,7 +391,7 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
   const verdict = evaluateLane(parsed, processResult);
   return await publish(
     {
-      lane: DOWN_LANE_SPEC.lane,
+      lane: spec.lane,
       status: verdict.status,
       // `evaluateLane` names its process "opencode run"; name the real one.
       ...(verdict.reason !== undefined
@@ -360,6 +406,7 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
 }
 
 function spawnClaude(
+  bin: string,
   argv: string[],
   cwd: string,
   env: Record<string, string | undefined>,
@@ -367,7 +414,7 @@ function spawnClaude(
 ): Promise<LaneProcessResult> {
   return new Promise((resolveP) => {
     // stdin is closed: `claude -p` waits on an open stdin before it starts.
-    const child = spawn("claude", argv, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, argv, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderrTail = "";
     let settled = false;

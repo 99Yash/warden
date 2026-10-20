@@ -232,7 +232,7 @@ function selectConfigs(args: Args): EvalConfig[] {
   return compared ?? ALL_CONFIGS;
 }
 
-/** A driven down-lane runtime (OpenCode or Claude Code), not the in-process harness. */
+/** A driven lane runtime (OpenCode or Claude Code), not the in-process harness. */
 function isLaneRuntime(config: EvalConfig): boolean {
   return config.runtime === "opencode" || config.runtime === "claude-code";
 }
@@ -450,12 +450,12 @@ interface OpencodeScoreExtra {
   requestedModel?: string;
 }
 
-/** The spec of the lane a config names (`EvalConfig.lane`); `undefined` means the down lane. */
-function configLaneSpec(config: EvalConfig): LaneSpec | undefined {
-  if (config.lane === undefined) return undefined;
-  const spec = laneSpecFor(config.lane);
+/** The spec of the lane a config names (`EvalConfig.lane`, absent = the down lane). */
+function configLaneSpec(config: EvalConfig): LaneSpec {
+  const name = config.lane ?? "down";
+  const spec = laneSpecFor(name);
   if (spec === undefined) {
-    throw new Error(`eval: config "${config.name}" names lane "${config.lane}", not in LANE_SPECS`);
+    throw new Error(`eval: config "${config.name}" names lane "${name}", not in LANE_SPECS`);
   }
   return spec;
 }
@@ -471,21 +471,22 @@ async function runOnce(
       driveOpencodeLane({
         repoRoot: root,
         baseRef: baseSha,
+        lane,
         ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
-        ...(lane !== undefined ? { lane } : {}),
       }),
     );
   }
   if (config.runtime === "claude-code") {
+    const lane = configLaneSpec(config);
     return await runOnceLane(fixture, (root, baseSha) =>
-      driveClaudeCodeLane({ repoRoot: root, baseRef: baseSha }),
+      driveClaudeCodeLane({ repoRoot: root, baseRef: baseSha, lane }),
     );
   }
   return await runOnceHarness(fixture, config, repoRoot);
 }
 
 /**
- * Run a down-lane driver on a two-commit fixture repo. For OpenCode this
+ * Run a lane driver on a two-commit fixture repo. For OpenCode this
  * is the same driver code as `warden opencode-review`: the scored output
  * is the published `CommentSet` from `runPostPass`, not eval-only logic.
  */
@@ -912,6 +913,7 @@ async function main(): Promise<void> {
             `comments ${score.commentCount}, ` +
             `cost ${formatCost(score.costUsd, score.usageUnknownRequests)}, ` +
             `${score.durationMs}ms` +
+            (score.requestedModel !== undefined ? `, model ${score.requestedModel}` : "") +
             (error ? ` [error: ${error}]` : "") +
             "\n",
         );

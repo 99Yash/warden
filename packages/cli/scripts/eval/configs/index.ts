@@ -209,4 +209,19 @@ const opencodeUp: EvalConfig = {
   lane: "up",
 };
 
-export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp];
+/**
+ * The up lane (prompt `warden-up.md`, warden MCP tools, post-pass) run by
+ * `claude -p` on the operator's Claude subscription, so a tracer costs no
+ * API spend. Like `claude-code-down`, it measures the method on another
+ * MCP client; it does not stand in for the OpenCode go/no-go. Out of
+ * `ALL_CONFIGS`: only `--config claude-code-up` (or `--compare`) runs it.
+ */
+const claudeCodeUp: EvalConfig = {
+  name: "claude-code-up",
+  description:
+    "Up lane via claude -p (subscription login), same prompt, tools, and post-pass as opencode-up.",
+  runtime: "claude-code",
+  lane: "up",
+};
+
+export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp, claudeCodeUp];
