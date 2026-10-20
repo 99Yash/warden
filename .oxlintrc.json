@@ -103,6 +103,18 @@
     "typescript/no-unsafe-call": "error",
     "typescript/no-unsafe-member-access": "error",
     "typescript/no-unsafe-assignment": "error",
+    // no-unsafe-type-assertion: an `as T` (or a JSDoc cast) where `T` is narrower than the
+    // type of the value. The compiler then accepts a claim that no code checks. Fix in this
+    // order: delete the cast; parse the value at its owning boundary with zod, and reuse the
+    // schema that already exists (`packages/core/src/schema.ts` and its neighbours); narrow
+    // with a guard (`isRecord` and `errnoCode` in `packages/core/src/guards.ts`, or a
+    // `value is T` predicate). Where a parse can fail on a hot or security path, use
+    // `safeParse` and the path's existing degraded or unverified result, not a new throw.
+    // Keep a cast only for an SDK type gap or a generic walker, with
+    // `// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- <reason>`. Never
+    // `as unknown as T` (`anti-slop/no-chained-type-assertions`). It applies to every
+    // surface, JavaScript included, with no override.
+    "typescript/no-unsafe-type-assertion": "error",
     // no-useless-spread: `{ ...{ a } }` is `{ a }`, and `[...[a]]` is `[a]`.
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
