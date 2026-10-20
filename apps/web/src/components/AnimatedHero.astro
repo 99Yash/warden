@@ -12,18 +12,18 @@ const heroComments = commentSet.comments.slice(0, 3);
       <span class="dot"></span>
       <span class="dot"></span>
       <span class="dot"></span>
-      <span class="terminal-title">warden — review</span>
+      <span class="terminal-title">warden — opencode-review</span>
     </div>
     <div class="terminal-body">
       <p class="prompt">
-        <span class="prompt-sym">$</span><span class="prompt-cmd">warden review</span>
+        <span class="prompt-sym">$</span><span class="prompt-cmd">warden opencode-review</span>
         <span class="prompt-flag">--base main</span>
       </p>
-      <p class="phase ok"><span class="phase-tag">ok</span><span>ecosystem detected: TypeScript workspace</span></p>
-      <p class="phase ok"><span class="phase-tag">ok</span><span>detectors ran: tsc, eslint, audit, security, leverage</span></p>
-      <p class="phase ok"><span class="phase-tag">ok</span><span>sub-agents checked: committability, libraries, security residue</span></p>
-      <p class="phase ok"><span class="phase-tag">ok</span><span>sources verified: repo snippets, OSV, package .d.ts</span></p>
-      <p class="phase active"><span class="phase-tag">..</span><span>synthesizing cited CommentSet</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>mcp: warden connected · run_det_priors, lookup_type_def</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>det-priors: tsc, eslint, audit + OSV, jscpd, security lint</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>lane down · correctness · OpenCode, read-only tools</span></p>
+      <p class="phase ok"><span class="phase-tag">ok</span><span>post-pass: citations verified, scoped to diff, cap 5</span></p>
+      <p class="phase active"><span class="phase-tag">..</span><span>publishing CommentSet</span></p>
       <div class="finding-list">
         {
           heroComments.map((comment) => (

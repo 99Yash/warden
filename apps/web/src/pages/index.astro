@@ -1,222 +1,195 @@
 ---
 import AnimatedHero from "../components/AnimatedHero.astro";
-import MarketingShell from "../components/MarketingShell.astro";
+import HomeShell from "../components/HomeShell.astro";
 ---
 
-<MarketingShell
+<HomeShell
   title="Code review that brings receipts"
-  description="Warden is a local code review CLI that runs deterministic tools, verifies every external claim, and only lets the model phrase what the evidence already supports."
+  description="Warden gives your agent runtime the ground truth for code review over MCP — detectors, verified advisories, real type definitions — and publishes only what survives gates the model cannot skip."
 >
-  <main>
-    <section class="hero-section">
-      <div class="hero-copy reveal-in">
-        <p class="eyebrow">Local code review CLI</p>
-        <h1>
-          Reviews with <span class="accent">receipts.</span>
-        </h1>
-        <p class="hero-lede">
-          Most AI reviewers ask you to trust a paragraph. Warden starts with the boring evidence —
-          type errors, lint findings, dependency records, source snippets — and only then lets the
-          model <em>rank, clarify, and phrase</em>. Nothing reaches the comment without a cite.
-        </p>
-        <div class="hero-actions">
-          <a class="button primary" href="/docs/install/" data-astro-prefetch>
-            Install Warden
-            <span class="button-arrow" aria-hidden="true">→</span>
-          </a>
-          <a class="button secondary" href="/docs/review/" data-astro-prefetch>Understand review</a>
-        </div>
-        <p class="hero-meta">
-          <span>Default review spine</span>
-          <span>Leverage checks</span>
-          <span>Security triage</span>
-        </p>
-      </div>
-      <div class="reveal-in delay-2">
-        <AnimatedHero />
-      </div>
-    </section>
+  <main class="home-article">
+    <div class="home-topline">
+      <a class="home-status" href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">
+        <span class="home-status-dot" aria-hidden="true"></span>
+        More than 50 ADRs, every choice written down
+      </a>
+      <button class="home-command" type="button" data-copy="warden mcp" aria-label="Copy command: warden mcp">
+        <code>warden mcp</code>
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+          <path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5" fill="none" stroke="currentColor" stroke-width="1.3"></path>
+        </svg>
+      </button>
+    </div>
 
-    <section class="proof-strip" aria-label="Review contract">
-      <p><strong>Runs in your repo</strong><span>no hosted review backend, no upload</span></p>
-      <p><strong>Detectors before prose</strong><span>type, lint, audit, dedup, leverage, security</span></p>
-      <p><strong>Sub-agents ask</strong><span>committability, library leverage, security residue</span></p>
-      <p><strong>Verifier has veto</strong><span>unsupported snippets and API claims get cut</span></p>
-    </section>
+    <header>
+      <h1 class="home-sr-only">Code review that brings receipts</h1>
+      <p class="home-tagline">
+        Warden gives your agent the parts of a code review it cannot make up: type errors, lint
+        findings, advisories checked against OSV, and real <code>.d.ts</code> signatures. Your agent
+        runs the review over MCP. Then Warden's gates decide what gets published. The model never
+        gets the last word.
+      </p>
+    </header>
 
-    <section class="home-band">
-      <div class="section-heading">
-        <p class="eyebrow">The thesis</p>
-        <h2>A reviewer should know what it can <span class="accent">prove.</span></h2>
-        <p class="section-sub">
-          Confidence is cheap. The discipline is what makes a review worth reading. Warden splits the
-          work into three honest layers — evidence, verification, prose — and refuses to let the
-          model skip ahead.
-        </p>
-      </div>
-      <div class="feature-grid">
-        <article>
-          <span class="feature-kicker">01 · EVIDENCE</span>
-          <h3>The facts come <em>first.</em></h3>
-          <p>
-            TypeScript, ESLint, duplication checks, dependency audits, context selection, leverage
-            patterns, and Warden-managed security lint form the evidence layer. The review starts
-            with things that can point at a file, rule, lockfile, or advisory.
-          </p>
-        </article>
-        <article>
-          <span class="feature-kicker">02 · TRIAGE</span>
-          <h3>Sub-agents stay <em>scoped.</em></h3>
-          <p>
-            Cheap-tier LLM sub-agents handle the open-ended tails: committability questions, library
-            substitution opportunities, and security residue that deterministic security lint cannot
-            model cleanly.
-          </p>
-        </article>
-        <article>
-          <span class="feature-kicker">03 · VERIFICATION</span>
-          <h3>Claims earn <em>sources.</em></h3>
-          <p>
-            Repository snippets are substring-matched. Vulnerability claims are checked against OSV.
-            Library API claims use installed <code>.d.ts</code> files. If the source does not verify,
-            the comment does not ship.
-          </p>
-        </article>
-      </div>
-    </section>
+    <AnimatedHero />
 
-    <section class="workflow-band">
-      <div class="section-heading">
-        <p class="eyebrow">Default review</p>
-        <h2>The review spine is <span class="accent">explicit.</span></h2>
-        <p class="section-sub">
-          <code>warden review</code> is not the deep security harness. It is the everyday review path:
-          deterministic producers, bounded sub-agents, one synthesizer, then the citation verifier.
-        </p>
-      </div>
-      <ol class="review-spine">
+    <section>
+      <h2>How a review runs</h2>
+      <ol>
         <li>
-          <span>Diff gate</span>
-          <p>Detect the ecosystem, choose the diff source, and prune generated or irrelevant subtrees before any runner spends time.</p>
+          <strong>Diff.</strong> Warden resolves the base by merge-base, prunes generated files, and
+          stops on unsafe input, such as a symlink that leaves the repo.
         </li>
         <li>
-          <span>Detectors</span>
-          <p>Run TSC, ESLint, npm audit plus OSV, jscpd, context selection, consistency, deadcode, scalability, leverage, and security lint.</p>
+          <strong>Det-priors.</strong> The lane calls <code>run_det_priors</code> first and reads the
+          findings page by page, by handle.
         </li>
         <li>
-          <span>Sub-agents</span>
-          <p>Ask cheap-tier scoped questions for committability, library leverage, and security residue. Each source still has to verify.</p>
+          <strong>Lanes.</strong> The down lane proves invariants. The up lane searches for
+          structural drift and is opt-in. <span class="home-tag partial">partial</span>
         </li>
         <li>
-          <span>Synthesizer</span>
-          <p>Let the boss model rank and phrase the surviving findings into a stable <code>CommentSet</code>.</p>
+          <strong>Post-pass.</strong> Warden verifies citations, keeps each finding inside its lane's
+          file scope, demotes by confidence, and caps volume.
         </li>
         <li>
-          <span>Verifier</span>
-          <p>Drop citations that do not substring-match the repo, OSV record, or package type definition. Comments with no verified source are dropped.</p>
+          <strong>Publish.</strong> Warden emits one stable <code>CommentSet</code>. The scope
+          envelope comes from the driver, never from the model.
         </li>
       </ol>
-      <div class="review-boundary" role="note">
-        <strong>Deep security is not the default surface.</strong>
+      <aside class="home-callout">
         <p>
-          The deep security harness is design-locked for <code>warden security</code> and <code>warden review --deep</code>, but it is intentionally deferred until
-          the everyday review and init loops earn more dogfood signal.
+          <code>warden review</code> still runs the original in-process loop. It stays the default
+          until the parity eval shows that the MCP path matches it. The CI runner is a tracer and
+          does not comment on PRs yet.
         </p>
-      </div>
+      </aside>
     </section>
 
-    <section class="anatomy-band">
-      <div class="anatomy-wrap">
-        <div>
-          <p class="eyebrow">Anatomy</p>
-          <h2>What lands in a <span class="accent">comment.</span></h2>
-          <p class="section-sub">
-            Every Warden comment is a small receipt: a tiered claim, a category, a confidence
-            number, and the sources that earned it the right to interrupt you.
-          </p>
-          <ul>
-            <li>
-              <span class="anatomy-key">Tier</span>
-              <div>
-                <strong>Block · Fix · Consider</strong>
-                <p>Three steps of actionability, never inflated. Tier 1 is what would block a merge.</p>
-              </div>
-            </li>
-            <li>
-              <span class="anatomy-key">Category</span>
-              <div>
-                <strong>correctness, security, scalability, …</strong>
-                <p>Reading order, not severity. Leverage now sits before dedup because a library or stdlib swap can dissolve repeated code.</p>
-              </div>
-            </li>
-            <li>
-              <span class="anatomy-key">Sources</span>
-              <div>
-                <strong>Path, line, snippet — verified</strong>
-                <p>Every external claim must point at a real artifact. The verifier substring-matches before the comment ships.</p>
-              </div>
-            </li>
-            <li>
-              <span class="anatomy-key">Degraded</span>
-              <div>
-                <strong>What didn't run, said out loud</strong>
-                <p>If a worker fails, the run admits it. Silence is the failure mode Warden refuses.</p>
-              </div>
-            </li>
-          </ul>
+    <section>
+      <h2>What your agent gets</h2>
+      <p>
+        <code>warden mcp</code> is a local stdio server. Every result carries a schema version, stays
+        under a size bound, and returns a structured reason instead of throwing.
+      </p>
+      <ul>
+        <li>
+          <strong><code>run_det_priors</code></strong>: TSC, ESLint, npm audit with OSV, duplication,
+          security lint, and context selection, as a paged bundle
+        </li>
+        <li>
+          <strong><code>lookup_type_def</code></strong>: library API signatures from the installed
+          type definitions
+        </li>
+        <li>
+          <strong><code>search_index</code></strong>: semantic repo search
+          <span class="home-tag">next</span>
+        </li>
+      </ul>
+      <p>
+        Agent runtimes get better at sub-agents, model routing, and permissions with every release.
+        None of them ships a detector corpus, verified advisories, or a repo index. So Warden hands
+        the loop to the runtime and keeps the parts that have to be right.
+      </p>
+    </section>
+
+    <section>
+      <h2>Connect</h2>
+      <p>Add Warden as a local server in <code>opencode.jsonc</code>. Any MCP client works the same way.</p>
+      <pre class="home-code"><code><span class="tok-punct">&#123;</span>
+  <span class="tok-key">"mcp"</span><span class="tok-punct">: &#123;</span>
+    <span class="tok-key">"servers"</span><span class="tok-punct">: &#123;</span>
+      <span class="tok-key">"warden"</span><span class="tok-punct">: &#123;</span>
+        <span class="tok-key">"type"</span><span class="tok-punct">:</span> <span class="tok-str">"local"</span><span class="tok-punct">,</span>
+        <span class="tok-key">"command"</span><span class="tok-punct">: [</span><span class="tok-str">"warden"</span><span class="tok-punct">,</span> <span class="tok-str">"mcp"</span><span class="tok-punct">]</span>
+      <span class="tok-punct">&#125;</span>
+    <span class="tok-punct">&#125;</span>
+  <span class="tok-punct">&#125;</span>
+<span class="tok-punct">&#125;</span></code></pre>
+      <p>
+        Warden is not on npm yet. Point <code>command</code> at a local checkout.
+        <a href="/docs/mcp/" data-astro-prefetch>The MCP docs</a> show the exact form.
+      </p>
+    </section>
+
+    <section>
+      <h2>What lands in a comment</h2>
+      <p>Every Warden comment is a small receipt. It earns the right to interrupt you.</p>
+      <ul>
+        <li>
+          <strong>Tier</strong>: Block, Fix, or Consider. Tier 1 is what would block a merge, and it
+          always survives the volume cap.
+        </li>
+        <li>
+          <strong>Category</strong>: correctness, security, scalability, and others. This is the
+          reading order, not the severity.
+        </li>
+        <li>
+          <strong>Sources</strong>: a path, a line, and a snippet. The post-pass matches the snippet
+          before the comment ships.
+        </li>
+        <li>
+          <strong>Degraded</strong>: if a lane or a detector fails, the run says so.
+        </li>
+      </ul>
+      <aside class="receipt" aria-label="Sample comment receipt">
+        <div class="receipt-row">
+          <span class="receipt-key">tier</span>
+          <span class="receipt-val tier-1">1 · Block</span>
         </div>
-        <aside class="receipt" aria-label="Sample comment receipt">
-          <div class="receipt-row">
-            <span class="receipt-key">id</span>
-            <span class="receipt-val">w-7c8f3a · stable across runs</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">tier</span>
-            <span class="receipt-val tier-1">1 · Block</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">category</span>
-            <span class="receipt-val">security</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">confidence</span>
-            <span class="receipt-val">96%</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">file</span>
-            <span class="receipt-val">src/routes/session.ts:88</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">claim</span>
-            <span class="receipt-val">
-              <span class="receipt-emph">exec</span> receives request-controlled input before validation.
-            </span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">source</span>
-            <span class="receipt-val">security/detect-child-process · tool</span>
-          </div>
-          <div class="receipt-quote">
-            child_process.exec(req.query.command)
-          </div>
-        </aside>
-      </div>
+        <div class="receipt-row">
+          <span class="receipt-key">lane</span>
+          <span class="receipt-val">down · correctness · 91%</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-key">file</span>
+          <span class="receipt-val">src/billing/charge.ts:88</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-key">claim</span>
+          <span class="receipt-val">
+            <span class="receipt-emph">markPaid</span> runs before the charge result is checked, so a
+            declined card still ships the order.
+          </span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-key">source</span>
+          <span class="receipt-val">charge.ts:88 · quote verified</span>
+        </div>
+        <div class="receipt-quote">await markPaid(order.id);</div>
+      </aside>
     </section>
 
-    <section class="closing-band">
-      <div>
-        <p class="eyebrow">Design record</p>
-        <h2>Personal tool, <span class="accent">public</span> craft bar.</h2>
-        <p>
-          Warden is being built for one person first, but not as a throwaway. The decisions are
-          written down. The vocabulary is named. The review page follows the shipped spine before it
-          talks about deferred harnesses or future bot surfaces.
-        </p>
-      </div>
-      <div class="closing-actions">
-        <a class="button primary" href="/docs/review/" data-astro-prefetch>Read review docs</a>
-        <a class="button secondary" href="/notes/" data-astro-prefetch>Field notes</a>
-      </div>
+    <section>
+      <h2>Principles</h2>
+      <ul>
+        <li><strong>Runs in your repo</strong>: no hosted backend. Code goes only to the model provider you choose</li>
+        <li><strong>Gates are not tools</strong>: a model can skip a tool call, so verification runs after the model, every time</li>
+        <li><strong>Measured</strong>: an eval harness scores recall and precision, and a parity eval decides when the new path becomes the default</li>
+        <li><strong>Written down</strong>: ADR-0053 explains this page. Keep the method and the gates, and hand the loop to the runtime.</li>
+      </ul>
     </section>
+
+    <nav class="home-links" aria-label="Next steps">
+      <a href="/docs/mcp/" data-astro-prefetch>Connect over MCP <span aria-hidden="true">→</span></a>
+      <a href="/docs/review/" data-astro-prefetch>Read how a review runs <span aria-hidden="true">→</span></a>
+      <a href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">
+        Read the decisions <span aria-hidden="true">→</span>
+      </a>
+    </nav>
   </main>
-</MarketingShell>
+</HomeShell>
+
+<script>
+  // Copy the command chip. Re-bind after each view transition.
+  document.addEventListener("astro:page-load", () => {
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+      button.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(button.dataset.copy ?? "");
+        button.dataset.copied = "true";
+        setTimeout(() => delete button.dataset.copied, 1400);
+      });
+    }
+  });
+</script>

@@ -1,0 +1,72 @@
+---
+import HomeShell from "./HomeShell.astro";
+import { pageOrder } from "../navigation";
+import "../styles/docs.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+
+const position = pageOrder.findIndex((link) => link.href === Astro.url.pathname);
+const previous = position > 0 ? pageOrder[position - 1] : undefined;
+const next = position >= 0 ? pageOrder[position + 1] : undefined;
+---
+
+<HomeShell title={title} description={description}>
+  <main class="home-article doc-article">
+    <header class="doc-header">
+      <h1>{title}</h1>
+      <p>{description}</p>
+    </header>
+
+    <div class="doc-body">
+      <slot />
+    </div>
+
+    {
+      (previous || next) && (
+        <nav class="doc-pager" aria-label="Previous and next pages">
+          {previous && (
+            <a href={previous.href} data-astro-prefetch>
+              <span aria-hidden="true">←</span> {previous.label}
+            </a>
+          )}
+          {next && (
+            <a class="doc-pager-next" href={next.href} data-astro-prefetch>
+              {next.label} <span aria-hidden="true">→</span>
+            </a>
+          )}
+        </nav>
+      )
+    }
+  </main>
+</HomeShell>
+
+<script>
+  // Give each code block a copy button. Re-bind after each view transition.
+  document.addEventListener("astro:page-load", () => {
+    for (const pre of document.querySelectorAll<HTMLPreElement>(".doc-body pre")) {
+      if (pre.parentElement?.classList.contains("doc-code")) continue;
+      const frame = document.createElement("div");
+      frame.className = "doc-code";
+      pre.replaceWith(frame);
+      frame.append(pre);
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "doc-code-copy";
+      button.setAttribute("aria-label", "Copy the code");
+      button.innerHTML =
+        '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"></rect><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5" fill="none" stroke="currentColor" stroke-width="1.3"></path></svg>';
+      button.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(pre.innerText);
+        button.dataset.copied = "true";
+        setTimeout(() => delete button.dataset.copied, 1400);
+      });
+      frame.append(button);
+    }
+  });
+</script>

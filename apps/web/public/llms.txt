@@ -1,20 +1,23 @@
 # Warden
 
-> Warden is a local code review CLI that runs deterministic tools and scoped sub-agents, verifies every external claim through citable sources (repo snippets, OSV, .d.ts), and uses an LLM only as a triage and formatting layer. The CLI returns a stable comment contract; the model never invents assertions.
+> Warden is an AI code reviewer that has to show its work. It runs deterministic tools (TSC, ESLint, npm audit confirmed against OSV, duplication, security lint, Warden's detectors, and scans of added lines for credentials, hidden Unicode, and reviewer-directed instructions), serves them to an agent runtime over MCP (`warden mcp`; OpenCode first), and publishes only findings that pass a deterministic post-pass the model cannot skip: secret guard, lane scope, citation verification, added-line anchoring, confidence-to-question demotion, Tier 3 gating, and a volume cap. Every path returns the same CommentSet. Direction: ADR-0053; untrusted-input controls: ADR-0054. `warden review` (the in-process loop) stays the default until the parity eval clears. Not published to npm; run from a clone.
 
 ## Pages
 
-- [Home](https://wrdn.beauty/): Hero, thesis, pipeline, comment anatomy.
-- [Docs · Overview](https://wrdn.beauty/docs/): What Warden checks and what it explicitly does not.
-- [Docs · Install](https://wrdn.beauty/docs/install/): How to install and run the CLI locally.
-- [Docs · Configuration](https://wrdn.beauty/docs/configuration/): Environment variables and review modes.
-- [Docs · Reading comments](https://wrdn.beauty/docs/reading-comments/): How to read the tier/category/source shape of a comment.
-- [Docs · Review pipeline](https://wrdn.beauty/docs/review/): What `warden review` runs today, including leverage and security triage, and where the deferred deep-security harness fits.
-- [Docs · CI usage](https://wrdn.beauty/docs/ci/): Wiring Warden into a CI step.
+- [Home](https://wrdn.beauty/): The split between Warden and the agent runtime, the review path, MCP setup, comment anatomy.
+- [Docs · Introduction](https://wrdn.beauty/docs/): The problem Warden solves, what it does, why the review loop moved to the runtime, and current status.
+- [Docs · Install](https://wrdn.beauty/docs/install/): Run from a clone, `warden setup`, the deterministic check, which keys each command needs, the context index.
+- [Docs · Connect OpenCode](https://wrdn.beauty/docs/mcp/): The `opencode.jsonc` entry (keep `codemode: false`), the two MCP tools and their envelope rules, `warden opencode-review` and its flags, `warden post-pass` replay.
+- [Docs · CI usage](https://wrdn.beauty/docs/ci/): The deterministic gate and the opt-in tracer workflow for lane reviews.
+- [Docs · How a review runs](https://wrdn.beauty/docs/review/): One pull request from diff to published comments: pruning, pre-lane gates, evidence, lanes (down, up; surface and judge not built), the post-pass in order, exit codes.
+- [Docs · Reading a comment](https://wrdn.beauty/docs/reading-comments/): Tiers, assertion vs question, category reading order, source types, degradedWorkers notes.
+- [Docs · Untrusted input](https://wrdn.beauty/docs/untrusted-input/): Threat model, fixed lane authority, the nested-AGENTS.md and symlink gates, findings the lane cannot suppress, the secret guard, and what is not covered.
+- [Docs · Why Warden works this way](https://wrdn.beauty/docs/principles/): The dogfood failures and measurements behind each design rule, and what is still unsolved.
+- [Docs · Configuration](https://wrdn.beauty/docs/configuration/): Config layers, env load order, every environment variable, the local cache.
 - [Examples](https://wrdn.beauty/examples/): A rendered fixture from Warden reviewing its own codebase.
 - [Design](https://wrdn.beauty/design/): Links into decisions.md, vision.md, and CONTEXT.md.
 - [Notes](https://wrdn.beauty/notes/): Longer-form product and architecture writing.
-- [Notes · The reviewer should bring receipts](https://wrdn.beauty/notes/reviewer-with-receipts/): The product thesis.
+- [Notes · The reviewer should bring receipts](https://wrdn.beauty/notes/reviewer-with-receipts/): The original product thesis.
 
 ## Optional
 
