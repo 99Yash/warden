@@ -133,7 +133,10 @@ if (mode === "prompt") {
   let input = {};
   try {
     input = JSON.parse(readStdin() || "{}");
-  } catch {}
+  } catch {
+    // The hook only adds context. A malformed payload leaves `input` empty, so the hook
+    // exits 0 with no injection and never blocks the user's prompt.
+  }
   const prompt = (input.prompt || "").toLowerCase();
   if (!prompt) process.exit(0);
   const words = new Set(
@@ -175,7 +178,10 @@ if (mode === "pre-edit") {
   let input = {};
   try {
     input = JSON.parse(readStdin() || "{}");
-  } catch {}
+  } catch {
+    // The hook only adds context. A malformed payload leaves `input` empty, so the hook
+    // exits 0 with no injection and never blocks the edit.
+  }
   const fp = (input.tool_input && input.tool_input.file_path) || "";
   if (!fp) process.exit(0);
   const rel = fp.startsWith(ROOT) ? fp.slice(ROOT.length + 1) : fp;

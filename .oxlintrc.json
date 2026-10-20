@@ -62,6 +62,10 @@
     // MCP `Server`).
     "typescript/no-deprecated": "error",
     "unicorn/no-useless-spread": "error",
+    // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
+    // A `catch` handles the failure, logs safe fields, or holds a comment that says why the
+    // failure is safe to drop. A comment inside the block counts as content.
+    "no-empty": "error",
     // return-await, correctness option only: a promise returned without `await` inside a `try`
     // (or a `catch` that has a `finally`) settles after the block exits, so its `catch` never
     // sees the rejection and its `finally` runs too early. Write `return await`. The default
