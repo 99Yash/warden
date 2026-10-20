@@ -450,12 +450,20 @@ by default**. Nothing runs it unless an operator asks for it:
 ```
 warden opencode-review --lane up [--base <ref>] …
 pnpm --filter @warden/cli eval --config opencode-up --fixture <name> --samples 1 --max-cost <usd>
+pnpm --filter @warden/cli eval --config claude-code-up --fixture <name> --samples 1
+pnpm --filter @warden/cli eval --config opencode-up --opencode-model opencode/<model>-free --fixture <synthetic name> --samples 1 --max-cost 0.01
 ```
 
 `--lane` accepts `down` (the default) and `up`. An unknown value fails
 before any spawn. The CI tracer workflow does not pass `--lane`, so it
-runs only the down lane. The `opencode-up` eval config is outside
-`ALL_CONFIGS`, so a bare `pnpm eval` does not run it.
+runs only the down lane. The `opencode-up` and `claude-code-up` eval
+configs are outside `ALL_CONFIGS`, so a bare `pnpm eval` does not run
+them. `claude-code-up` runs the same `warden-up.md` prompt in `claude -p`
+on the Claude subscription login ($0 API). The
+`--opencode-model` flag runs an OpenCode config on another model, for
+example a free model for a $0 plumbing check. For the model each runtime
+runs and the cost of each, see
+[Which runtime runs which model](./opencode-parity.md#which-runtime-runs-which-model).
 
 Option A (the user's choice, 2026-10-20): the down lane keeps its read
 cap, and the up lane has its own charter, spec, and bound. The up lane
