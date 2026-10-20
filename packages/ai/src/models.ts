@@ -67,6 +67,19 @@ export interface ResolvedLlmModel {
 // model ships. 2026-10-09: Opus 5.5 ($4/$20) and Sonnet 5.5 ($2/$10) are
 // cheaper than Opus 4.8 ($5/$25) and Sonnet 4.6 ($3/$15). `high` effort
 // matches the OpenCode lane's `anthropic/claude-opus-5-5#high`.
+//
+// The `@ai-sdk/anthropic` version must know each Anthropic model ID below.
+// For an unknown ID, the SDK sends `max_tokens: 4096` and turns off native
+// structured output (`getModelCapabilities` in its `dist/index.mjs`).
+// Opus 5.5 always uses adaptive thinking, and thinking tokens count toward
+// `max_tokens`, so a long `submit_review` was cut off (finishReason
+// `length`). 3.0.120 added `claude-opus-5-5` and 3.0.125 added
+// `claude-sonnet-5-5`, each with 128,000 max output tokens. That is the
+// limit in https://platform.claude.com/docs/en/about-claude/models/overview
+// ("Max output: 128K tokens", checked 2026-10-20). Haiku 4.5 is known with
+// 64,000. A higher limit costs nothing unless the model writes the tokens.
+// Check the SDK when you change a model ID here (ADR-0030 amendment
+// 2026-10-20, Anthropic max output).
 const ANTHROPIC_OPUS_5_5 = {
   provider: "anthropic",
   modelId: "claude-opus-5-5",
@@ -386,9 +399,10 @@ function modelFromInfo(info: ResolvedLlmModel): LanguageModel {
  * covers only the `Output.object` response format (ADR-0030 amendment
  * 2026-10-20, OpenAI tool strict).
  *
- * It is OpenAI-only on purpose: `@ai-sdk/anthropic` 3.0.74 logs a warning
- * for each tool with `strict` set when it does not know the model's
- * structured-output support (it does not know `claude-opus-5-5`).
+ * It is OpenAI-only on purpose. The Anthropic API does not make a tool
+ * strict when the request omits `strict`, so the Anthropic path needs no
+ * change. (`@ai-sdk/anthropic` 3.0.74 also logged a warning for each tool
+ * with `strict` set, because it did not know `claude-opus-5-5`.)
  */
 const OPENAI_NON_STRICT_TOOLS: LanguageModelMiddleware = {
   specificationVersion: "v3",

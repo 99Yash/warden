@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@ai-sdk/anthropic':
-      specifier: ^3.0.0
-      version: 3.0.74
+      specifier: ^3.0.134
+      version: 3.0.134
     '@ai-sdk/google':
       specifier: ^3.0.0
       version: 3.0.67
@@ -128,7 +128,7 @@ importers:
     dependencies:
       '@ai-sdk/anthropic':
         specifier: 'catalog:'
-        version: 3.0.74(zod@4.3.6)
+        version: 3.0.134(zod@4.3.6)
       '@ai-sdk/google':
         specifier: 'catalog:'
         version: 3.0.67(zod@4.3.6)
@@ -149,7 +149,7 @@ importers:
         version: 6.0.77(zod@4.3.6)
       ai-retry:
         specifier: 'catalog:'
-        version: 1.7.3(@ai-sdk/provider-utils@4.0.30(zod@4.3.6))(@ai-sdk/provider@3.0.10)(ai@6.0.77(zod@4.3.6))(zod@4.3.6)
+        version: 1.7.3(@ai-sdk/provider-utils@4.0.61(zod@4.3.6))(@ai-sdk/provider@3.0.19)(ai@6.0.77(zod@4.3.6))(zod@4.3.6)
       langfuse-vercel:
         specifier: 'catalog:'
         version: 3.38.20(ai@6.0.77(zod@4.3.6))
@@ -326,8 +326,8 @@ importers:
 
 packages:
 
-  '@ai-sdk/anthropic@3.0.74':
-    resolution: {integrity: sha512-Xew9rfz9WWhDSyF8rNhjT/XWOWelNfJrMlmG0Ahw210hStisRpQZ1s+7VeI9JTJOZ5y5tXqBi5kfPwYnCfyRTA==}
+  '@ai-sdk/anthropic@3.0.134':
+    resolution: {integrity: sha512-G+U+KXy+h8VZHYKRLFuIY9TQkajOZhS2SZGTDqPwgaXe76YuT/pBskib6h3zQ8GAQFavaIpOcVStygZ8acKF2w==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -368,8 +368,18 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/provider-utils@4.0.61':
+    resolution: {integrity: sha512-spROQutwsgm9ezXdoKP5PUPuHnNqMnuFqjioihmYDMJaaJnknYiEXYctH9hL4NJjaHuQBIl4ageCNsIZrQ+yCg==}
+    engines: {node: '>=18.17'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider@3.0.10':
     resolution: {integrity: sha512-Q3BZ27qfpYqnCYGvE3vt+Qi6LGOF9R5Nmzn+9JoM1lCRsD9mYaIhfJLkSunN48nfGXJ6n+XNV0J/XVpqGQl7Dw==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@3.0.19':
+    resolution: {integrity: sha512-5lWq7zSfRaU5ylDESn3sDQjgGl2AI1vjZKO/6JY3aFW70ct4zcP1kN+ZUYOuTXr28fVsYbyu2YFhddLdIgQFZQ==}
     engines: {node: '>=18'}
 
   '@ai-sdk/provider@3.0.8':
@@ -4448,6 +4458,10 @@ packages:
   undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
+  undici@6.29.1:
+    resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
+    engines: {node: '>=18.17'}
+
   unified@11.0.5:
     resolution: {integrity: sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==}
 
@@ -4817,10 +4831,10 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/anthropic@3.0.74(zod@4.3.6)':
+  '@ai-sdk/anthropic@3.0.134(zod@4.3.6)':
     dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.26(zod@4.3.6)
+      '@ai-sdk/provider': 3.0.19
+      '@ai-sdk/provider-utils': 4.0.61(zod@4.3.6)
       zod: 4.3.6
 
   '@ai-sdk/gateway@3.0.39(zod@4.3.6)':
@@ -4863,7 +4877,19 @@ snapshots:
       eventsource-parser: 3.0.8
       zod: 4.3.6
 
+  '@ai-sdk/provider-utils@4.0.61(zod@4.3.6)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.19
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.0.8
+      undici: 6.29.1
+      zod: 4.3.6
+
   '@ai-sdk/provider@3.0.10':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@3.0.19':
     dependencies:
       json-schema: 0.4.0
 
@@ -6475,10 +6501,10 @@ snapshots:
 
   acorn@8.16.0: {}
 
-  ai-retry@1.7.3(@ai-sdk/provider-utils@4.0.30(zod@4.3.6))(@ai-sdk/provider@3.0.10)(ai@6.0.77(zod@4.3.6))(zod@4.3.6):
+  ai-retry@1.7.3(@ai-sdk/provider-utils@4.0.61(zod@4.3.6))(@ai-sdk/provider@3.0.19)(ai@6.0.77(zod@4.3.6))(zod@4.3.6):
     dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@4.3.6)
+      '@ai-sdk/provider': 3.0.19
+      '@ai-sdk/provider-utils': 4.0.61(zod@4.3.6)
       ai: 6.0.77(zod@4.3.6)
       zod: 4.3.6
 
@@ -9414,6 +9440,8 @@ snapshots:
   undici-types@6.21.0: {}
 
   undici-types@7.16.0: {}
+
+  undici@6.29.1: {}
 
   unified@11.0.5:
     dependencies:

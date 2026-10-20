@@ -58,6 +58,7 @@
     "smoke:cost-gaps": "node --import tsx/esm scripts/smoke-cost-gaps.mts",
     "smoke:boss-final-step": "node --import tsx/esm scripts/smoke-boss-final-step.mts",
     "smoke:openai-tool-strict": "node --import tsx/esm scripts/smoke-openai-tool-strict.mts",
+    "smoke:anthropic-max-output": "node --import tsx/esm scripts/smoke-anthropic-max-output.mts",
     "smoke:rd-cli": "node --import tsx/esm scripts/smoke-rd-cli.mts",
     "smoke:m14-verify-drop": "node --import tsx/esm scripts/smoke-m14-verify-drop.mts",
     "smoke:m14-diff-scope": "node --import tsx/esm scripts/smoke-m14-diff-scope.mts",

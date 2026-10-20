@@ -30,6 +30,7 @@ import {
   type BossPromptVariant,
   type WorkerPromptVariant,
 } from "./prompts/loader.js";
+import { OutputCutoffLog } from "./output-cutoff.js";
 import { CallUsageMeter, type ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import {
   makeDispatchWorkerTool,
@@ -543,6 +544,9 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   // tokens it spent (see `CallUsageMeter`). The record happens once: on
   // success, or in the catch before the hard fail.
   const meter = new CallUsageMeter();
+  // A step cut off at the output token limit makes the review fail, or
+  // (when a later step submits a valid review) adds a warning entry.
+  const cutoffs = new OutputCutoffLog();
   let usageRecorded = false;
   const recordBossUsage = (): TokenUsage => {
     const usage = meter.snapshot();
@@ -631,7 +635,10 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       },
       stopWhen: bossStopConditions(stepCap, () => submittedRaw !== undefined),
       prepareStep: makeBossPrepareStep({ stepCap, meter }),
-      onStepFinish: meter.onStepFinish,
+      onStepFinish: (step) => {
+        meter.onStepFinish(step);
+        cutoffs.onStepFinish(step);
+      },
       ...(primaryInfo.providerOptions !== undefined
         ? { providerOptions: primaryInfo.providerOptions }
         : {}),
@@ -697,6 +704,16 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
         message: `llm: ${primaryInfo.label} ${errorSummaries[0]}, retried successfully`,
       });
     }
+    // A later step submitted a valid review, but an earlier step was cut
+    // off. Say so: the boss did not see its whole output of that step.
+    const cutoff = cutoffs.describe();
+    if (cutoff !== undefined) {
+      degraded.push({
+        kind: "warning",
+        topic: "llm",
+        message: `llm: ${primaryInfo.label} ${cutoff}; a later step submitted the review`,
+      });
+    }
 
     const comments = normalizeBossComments(output.comments);
 
@@ -719,7 +736,11 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     // Keep the spend of the failed boss call. The harness writes it to the
     // review-run row before it rethrows.
     recordBossUsage();
-    const primarySummary = lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
+    const failure = lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
+    // A cut-off step is the likely cause of a missing or unparsable
+    // `submit_review` call, so it goes first in the message.
+    const cutoff = cutoffs.describe();
+    const primarySummary = cutoff === undefined ? failure : `${cutoff}; ${failure}`;
     // Per ADR-0017 2026-05-17 amendment: tool-using call sites do not fall
     // back to Gemini. Hard-fail cleanly with a legible message.
     throw new Error(
