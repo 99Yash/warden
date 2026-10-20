@@ -27,17 +27,50 @@
  *       a model without a variant; missing `data`;
  *       non-number `cost`; negative `cost`; a `data.id` that is not the
  *       requested ID; missing `tokens.cache` → `undefined`.
+ *   (f) the Claude Code lane takes a lane spec: the down argv is pinned
+ *       byte for byte to the argv from before the lane seam; the up argv
+ *       loads `warden-up.md`; tools map from `allowedTools` (an unmapped
+ *       tool throws); `buildClaudeCodeEnv` strips every `ANTHROPIC_*`
+ *       variable. A fake `claude` on a fixture repo then proves the
+ *       envelope lane name (down and up), the recorded model, and that the
+ *       child env holds no `ANTHROPIC_*` variable while the parent has
+ *       three. `claude-code-up` is a lane config outside `ALL_CONFIGS`.
+ *   (g) `--opencode-model`: the id shape, the override on OpenCode
+ *       configs only, the usage errors (exit 2, no spend) from `run.mts`,
+ *       and the recorded model on a no-spawn OpenCode up-lane run.
  *
  * Usage:
  *   pnpm --filter @warden/cli smoke:eval-opencode
  */
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSessionUsage } from "../src/opencode/drive.js";
+import { z } from "zod";
+import { driveOpencodeLane, parseSessionUsage } from "../src/opencode/drive.js";
+import { DOWN_LANE_SPEC, UP_LANE_SPEC } from "../src/opencode/materialize.js";
+import {
+  buildClaudeCodeArgv,
+  buildClaudeCodeEnv,
+  claudeCodeBuiltinTools,
+  driveClaudeCodeLane,
+} from "./eval/claude-code-lane.mjs";
+import {
+  ALL_CONFIGS,
+  isOpencodeModelId,
+  LANE_CONFIGS,
+  withOpencodeModel,
+} from "./eval/configs/index.js";
 import {
   binaryPatchPaths,
   buildFixtureRepo,
@@ -668,6 +701,295 @@ process.stdout.write("\n(e) parseSessionUsage\n");
       undefined,
     `missing tokens.cache → undefined`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// (f) Claude Code lane: the lane spec seam
+// ---------------------------------------------------------------------------
+process.stdout.write("\n(f) Claude Code lane takes a lane spec\n");
+const PROMPT_DIR = resolve(HERE, "..", "opencode");
+const MCP_COMMAND = ["warden", "mcp"];
+{
+  // The down argv from before the lane seam, byte for byte.
+  const pinnedDown = [
+    "-p",
+    "msg",
+    "--model",
+    "claude-opus-5-5",
+    "--effort",
+    "high",
+    "--system-prompt-file",
+    resolve(PROMPT_DIR, "warden-down.md"),
+    "--setting-sources",
+    "",
+    "--restricted",
+    "--settings",
+    JSON.stringify({
+      permissions: { deny: ["Read(**/.env)", "Read(**/.env.*)", "Read(**/*.env)"] },
+    }),
+    "--strict-mcp-config",
+    "--mcp-config",
+    JSON.stringify({ mcpServers: { warden: { command: "warden", args: ["mcp"] } } }),
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob,mcp__warden__run_det_priors,mcp__warden__lookup_type_def",
+    "--permission-mode",
+    "dontAsk",
+    "--max-turns",
+    "60",
+    "--disable-slash-commands",
+    "--no-session-persistence",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+  ];
+  const argvFor = (spec: typeof DOWN_LANE_SPEC): string[] =>
+    buildClaudeCodeArgv({
+      spec,
+      model: "claude-opus-5-5",
+      effort: "high",
+      mcpCommand: MCP_COMMAND,
+      message: "msg",
+    });
+  const down = argvFor(DOWN_LANE_SPEC);
+  assert(
+    JSON.stringify(down) === JSON.stringify(pinnedDown),
+    `down argv is unchanged from before the lane seam`,
+  );
+  const up = argvFor(UP_LANE_SPEC);
+  const flag = (argv: string[], name: string): string | undefined => argv[argv.indexOf(name) + 1];
+  const upPrompt = flag(up, "--system-prompt-file") ?? "";
+  assert(
+    upPrompt === resolve(PROMPT_DIR, "warden-up.md") && existsSync(upPrompt),
+    `up argv loads the committed warden-up.md (got ${upPrompt})`,
+  );
+  assert(
+    flag(up, "--max-turns") === String(UP_LANE_SPEC.steps) &&
+      flag(up, "--tools") === "Read,Grep,Glob",
+    `up argv: --max-turns from spec.steps, --tools from spec.allowedTools`,
+  );
+  let threw = false;
+  try {
+    claudeCodeBuiltinTools({ ...UP_LANE_SPEC, allowedTools: ["read", "shell"] });
+  } catch {
+    threw = true;
+  }
+  assert(threw, `a lane tool with no Claude Code name throws`);
+
+  const childEnv = buildClaudeCodeEnv({
+    PATH: "/usr/bin",
+    HOME: "/home/x",
+    ANTHROPIC_API_KEY: "sk-ant-fake",
+    ANTHROPIC_BASE_URL: "https://gateway.invalid",
+    ANTHROPIC_AUTH_TOKEN: "fake",
+    CLAUDE_CODE_SESSION_ID: "s",
+    CLAUDECODE: "1",
+  });
+  assert(
+    Object.keys(childEnv).sort().join(",") === "HOME,PATH",
+    `buildClaudeCodeEnv strips ANTHROPIC_*, CLAUDE_CODE_*, CLAUDECODE (kept: ${Object.keys(childEnv).sort().join(",")})`,
+  );
+
+  const upConfig = LANE_CONFIGS.find((c) => c.name === "claude-code-up");
+  assert(
+    upConfig?.runtime === "claude-code" && upConfig.lane === "up",
+    `claude-code-up is a claude-code config for the up lane`,
+  );
+  assert(
+    !ALL_CONFIGS.some((c) => c.name === "claude-code-up"),
+    `claude-code-up is outside ALL_CONFIGS`,
+  );
+}
+
+const SeenSchema = z.object({ argv: z.array(z.string()), env: z.array(z.string()) });
+const cleanRename = loaded.find((l) => l.fixture.name === "clean-rename")?.fixture;
+assert(cleanRename !== undefined, `clean-rename fixture is present`);
+if (cleanRename !== undefined) {
+  const fakeDir = mkdtempSync(join(tmpdir(), "warden-eval-fake-claude-"));
+  const fakeBin = join(fakeDir, "claude");
+  const seenPath = join(fakeDir, "seen.json");
+  const submission = "Done.\n```json\n" + JSON.stringify({ findings: [] }) + "\n```";
+  const events = [
+    {
+      type: "system",
+      subtype: "init",
+      model: "claude-opus-5-5",
+      mcp_servers: [{ name: "warden", status: "connected" }],
+    },
+    {
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "t1", name: "mcp__warden__run_det_priors", input: {} }],
+      },
+    },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: false }] },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: submission,
+      total_cost_usd: 0,
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      modelUsage: { "claude-opus-5-5": {} },
+    },
+  ];
+  writeFileSync(
+    fakeBin,
+    [
+      "#!/usr/bin/env node",
+      'const { writeFileSync } = require("node:fs");',
+      `writeFileSync(${JSON.stringify(seenPath)}, JSON.stringify({ argv: process.argv.slice(2), env: Object.keys(process.env) }));`,
+      `for (const e of ${JSON.stringify(events)}) process.stdout.write(JSON.stringify(e) + "\\n");`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeBin, 0o755);
+  // The parent holds API auth: the child must not see it.
+  const planted = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"];
+  for (const name of planted) process.env[name] = "planted-by-smoke";
+  try {
+    for (const spec of [DOWN_LANE_SPEC, UP_LANE_SPEC]) {
+      rmSync(seenPath, { force: true });
+      const repo = buildFixtureRepo(cleanRename);
+      try {
+        const driven = await driveClaudeCodeLane({
+          repoRoot: repo.root,
+          baseRef: repo.baseSha,
+          lane: spec,
+          claudeBin: fakeBin,
+        });
+        const lane = driven.lanes[0];
+        assert(
+          driven.lanes.length === 1 && lane?.lane === spec.lane && lane.status === "ok",
+          `${spec.lane}: fake claude → one ${spec.lane} lane, ok (got ${lane?.lane} ${lane?.status} ${lane?.reason ?? ""})`,
+        );
+        assert(
+          driven.runSpawned && driven.model === "claude-opus-5-5#high",
+          `${spec.lane}: runSpawned, model recorded as claude-opus-5-5#high (got ${driven.model})`,
+        );
+        const seen = SeenSchema.parse(JSON.parse(readFileSync(seenPath, "utf8")));
+        const prompt = seen.argv[seen.argv.indexOf("--system-prompt-file") + 1] ?? "";
+        assert(
+          basename(prompt) === spec.promptFilename,
+          `${spec.lane}: child got --system-prompt-file ${spec.promptFilename} (got ${basename(prompt)})`,
+        );
+        const leaked = seen.env.filter((n) => n.startsWith("ANTHROPIC_"));
+        assert(
+          planted.every((n) => process.env[n] !== undefined) && leaked.length === 0,
+          `${spec.lane}: parent has ${planted.length} ANTHROPIC_* vars, child env has none (got [${leaked.join(",")}])`,
+        );
+      } finally {
+        removeFixtureRepo(repo);
+      }
+    }
+  } finally {
+    for (const name of planted) delete process.env[name];
+    rmSync(fakeDir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (g) --opencode-model
+// ---------------------------------------------------------------------------
+process.stdout.write("\n(g) --opencode-model\n");
+{
+  for (const ok of [
+    "opencode/glm-5.3-flash-free",
+    "anthropic/claude-opus-5-5#high",
+    "openrouter/vendor/model",
+  ]) {
+    assert(isOpencodeModelId(ok), `"${ok}" is a model id`);
+  }
+  for (const bad of ["glm-5.3-flash-free", "/x", "opencode/", "a/b#", "a b/c", "a/b#c#d"]) {
+    assert(!isOpencodeModelId(bad), `"${bad}" is not a model id`);
+  }
+  const byName = (name: string) => {
+    const config = [...ALL_CONFIGS, ...LANE_CONFIGS].find((c) => c.name === name);
+    if (config === undefined) throw new Error(`smoke: no config ${name}`);
+    return config;
+  };
+  const mixed = withOpencodeModel(
+    [byName("baseline"), byName("opencode-up"), byName("claude-code-up")],
+    "opencode/glm-5.3-flash-free",
+  );
+  assert(
+    mixed !== undefined &&
+      mixed[0]?.opencodeModel === undefined &&
+      mixed[1]?.opencodeModel === "opencode/glm-5.3-flash-free" &&
+      mixed[2]?.opencodeModel === undefined,
+    `the override reaches only the OpenCode-runtime config`,
+  );
+  assert(
+    byName("opencode-up").opencodeModel === undefined,
+    `the override does not change the shared config object`,
+  );
+  assert(
+    withOpencodeModel([byName("claude-code-up"), byName("baseline")], "opencode/x") === undefined,
+    `no OpenCode-runtime config → undefined (usage error in run.mts)`,
+  );
+
+  // run.mts rejects these before the runtime load, the preflights, or any spend.
+  const runEval = (args: string[]) =>
+    spawnSync(process.execPath, ["--import", "tsx/esm", resolve(EVAL_DIR, "run.mts"), ...args], {
+      cwd: resolve(HERE, ".."),
+      encoding: "utf8",
+    });
+  for (const [label, args, want] of [
+    [
+      "a claude-code config",
+      ["--config", "claude-code-up", "--opencode-model", "opencode/glm-5.3-flash-free"],
+      "applies only to OpenCode-runtime configs",
+    ],
+    [
+      "a bare run (harness configs only)",
+      ["--opencode-model", "opencode/glm-5.3-flash-free"],
+      "applies only to OpenCode-runtime configs",
+    ],
+    [
+      "a model id without a provider",
+      ["--config", "opencode-up", "--opencode-model", "glm-5.3-flash-free"],
+      "needs <provider>/<model>",
+    ],
+    ["a missing value", ["--config", "opencode-up", "--opencode-model"], "needs a value"],
+  ] as const) {
+    const r = runEval([...args]);
+    assert(
+      r.status === 2 && r.stdout.includes("[eval] usage error:") && r.stdout.includes(want),
+      `--opencode-model with ${label} → exit 2 "${want}" (got ${r.status}: ${r.stdout.trim()})`,
+    );
+  }
+
+  // The driver records the override as the requested model. HEAD...HEAD is
+  // an empty scope, so no `opencode` process starts.
+  const fixture = cleanRename;
+  if (fixture !== undefined) {
+    const repo = buildFixtureRepo(fixture);
+    try {
+      const driven = await driveOpencodeLane({
+        repoRoot: repo.root,
+        baseRef: "HEAD",
+        lane: UP_LANE_SPEC,
+        model: "opencode/glm-5.3-flash-free",
+      });
+      assert(
+        !driven.runSpawned &&
+          driven.model === "opencode/glm-5.3-flash-free" &&
+          driven.lanes[0]?.lane === "up",
+        `OpenCode up lane, no spawn → model recorded as the override (got ${driven.model}, lane ${driven.lanes[0]?.lane})`,
+      );
+    } finally {
+      removeFixtureRepo(repo);
+    }
+  }
 }
 
 if (failed > 0) {
