@@ -36,8 +36,15 @@ with `--` (`--samples --max-cost 0`); an unknown config name in
 `--parity`; `--parity` with `--config` or `--compare`; a `--parity`
 reference that is an OpenCode config or a candidate that is not one (the
 roles reversed); a `--max-cost` value that is negative or not a number;
-and a `--samples` value that is not an integer ≥ 1. A typo therefore
-cannot silently restore the default ceiling.
+a `--samples` value that is not an integer ≥ 1; and an
+`--opencode-model` value that is not `<provider>/<model>[#<variant>]`,
+that no selected config can use (no OpenCode-runtime config), or that
+has no `#<variant>` under `--parity`. A typo therefore cannot silently
+restore the default ceiling.
+
+`--max-cost 0` is valid, but it runs no sample: the ceiling check is
+`spent >= ceiling`, so it stops before the first sample. For a free-model
+plumbing check, use a small positive value such as `--max-cost 0.01`.
 
 `eval:parity` is `eval --parity programmatic-dispatch-multi opencode-down`:
 the reference is the production default harness config, the candidate is
@@ -47,7 +54,31 @@ run cannot start paying for OpenCode sessions. `LANE_CONFIGS` also holds
 `claude-code-down`, the same lane run by `claude -p` on a Claude
 subscription login (see Results). It is not a `--parity` candidate:
 `claude -p` reports the session model without an effort variant, so P6
-would fail every sample. Run it with `--config`.
+would fail every sample. Run it with `--config`. The up lane has the
+same two configs: `opencode-up` and `claude-code-up`.
+
+### Which runtime runs which model
+
+| Model | Config and flag | Cost | Use |
+| --- | --- | --- | --- |
+| Claude (`claude-opus-5-5#high`) | `claude-code-down`, `claude-code-up` | The Claude subscription login: $0 API. `total_cost_usd` is the API price equivalent, and no money moves. | Evidence about a lane's method. It does not decide the OpenCode go/no-go. |
+| A free OpenCode model (`opencode/*-free`) | `opencode-down` or `opencode-up` with `--opencode-model <provider>/<model>` | $0 | A plumbing check only. These models are weak. The free Zen models can train on prompts, so use only synthetic fixtures. |
+| The paid default (`anthropic/claude-opus-5-5#high`) through the gateway | `opencode-down` or `opencode-up`, no `--opencode-model` | Paid | The final OpenCode go/no-go. Run it only with the user's approval. |
+
+`claude-code-*` removes every `ANTHROPIC_*` variable from the `claude`
+child env (`buildClaudeCodeEnv`), so the child cannot use an API key or a
+gateway. `smoke:eval-opencode` checks this with a fake `claude`.
+
+`--opencode-model` changes only the OpenCode-runtime configs. The
+scorecard records the requested model and the session model of each
+sample (`requestedModel`, `sessionModel`). The session always reports a
+variant: a request without one runs as `#default`. P6 compares the two
+strings exactly, so under `--parity` the flag needs a `#<variant>`.
+
+A free model reports `cost 0` with tokens above 0. The cost gate (below)
+reads that as unmeasured spend, so the run stops after the first sample
+with `stopReason: "unmeasured-spend"` and exits 1. Thus a free-model run
+never reads `PARITY: MET`.
 
 ### Operator notes
 
@@ -62,6 +93,13 @@ would fail every sample. Run it with `--config`.
   lane. `meta/muse-spark-1.3` on the Meta provider hung after the first
   step, also on a one-word prompt. Do not plan a free-model tracer;
   budget a paid one.
+- On 2026-10-20 (OpenCode v2.0.32), `opencode/glm-5.3-flash-free` ran on
+  the driven path through `--opencode-model`: `opencode-up` on
+  `clean-rename`, one sample. The serve, the MCP warm-up, and the run
+  worked, at $0. The lane failed with "no completed
+  `warden_run_det_priors` call", and the run stopped with
+  `unmeasured-spend`. A free model can prove the plumbing. It cannot
+  measure a lane.
 
 ## How a fixture becomes a two-commit repo
 

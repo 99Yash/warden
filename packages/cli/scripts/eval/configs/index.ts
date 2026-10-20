@@ -209,4 +209,42 @@ const opencodeUp: EvalConfig = {
   lane: "up",
 };
 
-export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp];
+/**
+ * The up lane (prompt `warden-up.md`, warden MCP tools, post-pass) run by
+ * `claude -p` on the operator's Claude subscription, so a tracer costs no
+ * API spend. Like `claude-code-down`, it measures the method on another
+ * MCP client; it does not stand in for the OpenCode go/no-go. Out of
+ * `ALL_CONFIGS`: only `--config claude-code-up` (or `--compare`) runs it.
+ */
+const claudeCodeUp: EvalConfig = {
+  name: "claude-code-up",
+  description:
+    "Up lane via claude -p (subscription login), same prompt, tools, and post-pass as opencode-up.",
+  runtime: "claude-code",
+  lane: "up",
+};
+
+export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp, claudeCodeUp];
+
+/**
+ * Whether `--opencode-model` has the OpenCode `--model` shape:
+ * `<provider>/<model>`, with an optional `#<variant>`. The model part can
+ * hold more slashes (`openrouter/vendor/model`).
+ */
+export function isOpencodeModelId(raw: string): boolean {
+  return /^[^/\s#]+\/[^\s#]+(#[^\s#]+)?$/.test(raw);
+}
+
+/**
+ * Apply `--opencode-model`: every OpenCode-runtime config runs `model`;
+ * harness and Claude Code configs are unchanged. `undefined` when no
+ * config is an OpenCode runtime, so the flag would change nothing (a
+ * usage error in `run.mts`).
+ */
+export function withOpencodeModel(
+  configs: readonly EvalConfig[],
+  model: string,
+): EvalConfig[] | undefined {
+  if (!configs.some((c) => c.runtime === "opencode")) return undefined;
+  return configs.map((c) => (c.runtime === "opencode" ? { ...c, opencodeModel: model } : c));
+}

@@ -26,16 +26,19 @@ export interface EvalConfig {
   bossLoop?: BossLoopConfig;
   /**
    * Eval runtime: absent means the in-process boss-loop harness.
-   * `claude-code` runs the OpenCode down lane's prompt and tools in
-   * `claude -p` on the operator's subscription login (eval-only).
+   * `claude-code` runs an OpenCode lane's prompt and tools in `claude -p`
+   * on the operator's subscription login (eval-only).
    */
   runtime?: "harness" | "opencode" | "claude-code";
-  /** OpenCode lane model override; absent means the driver default. */
+  /**
+   * OpenCode lane model override; absent means the driver default. The
+   * `--opencode-model` flag sets it on every selected OpenCode config.
+   */
   opencodeModel?: string;
   /**
    * The lane a lane runtime runs (`laneSpecFor`); absent means the down
    * lane. The up lane (ADR-0052, not ratified) runs only through a config
-   * that sets it. Only the `opencode` runtime reads it now.
+   * that sets it. The `opencode` and `claude-code` runtimes read it.
    */
   lane?: LaneSpec["lane"];
 }
