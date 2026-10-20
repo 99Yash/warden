@@ -110,6 +110,14 @@ function buildClaudeCodeMessage(baseRef: string): string {
   return `${buildLaneMessage(baseRef)} Tool names on this client: ${mapping}.`;
 }
 
+/**
+ * A JSON object (not an array) from the claude stream. The stream has no
+ * schema that warden owns, so each field is checked where it is read.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 interface ParsedClaudeCodeLane {
   parsed: ParsedLane;
   usage?: SessionUsage;
@@ -141,27 +149,24 @@ function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
     } catch {
       continue;
     }
-    if (typeof event !== "object" || event === null) continue;
-    const record = event as Record<string, unknown>;
+    if (!isRecord(event)) continue;
+    const record = event;
     const type = record["type"];
     if (type === "system" && record["subtype"] === "init") {
       if (typeof record["model"] === "string") initModel = record["model"];
       const servers = Array.isArray(record["mcp_servers"]) ? record["mcp_servers"] : [];
       const warden = servers.find(
-        (s): s is Record<string, unknown> =>
-          typeof s === "object" &&
-          s !== null &&
-          (s as Record<string, unknown>)["name"] === "warden",
+        (s: unknown): s is Record<string, unknown> => isRecord(s) && s["name"] === "warden",
       );
       if (warden?.["status"] !== "connected") {
         errors.push(`warden MCP server not connected (status: ${String(warden?.["status"])})`);
       }
     } else if (type === "assistant" || type === "user") {
-      const message = record["message"] as Record<string, unknown> | undefined;
-      const content = Array.isArray(message?.["content"]) ? message["content"] : [];
-      for (const block of content) {
-        if (typeof block !== "object" || block === null) continue;
-        const b = block as Record<string, unknown>;
+      const message = record["message"];
+      const content =
+        isRecord(message) && Array.isArray(message["content"]) ? message["content"] : [];
+      for (const b of content) {
+        if (!isRecord(b)) continue;
         if (b["type"] === "tool_use" && typeof b["name"] === "string") {
           const name = normalizeToolName(b["name"]);
           if (typeof b["id"] === "string") toolNameById.set(b["id"], name);
@@ -216,10 +221,10 @@ function parseResultUsage(
 ): SessionUsage | undefined {
   const cost = record["total_cost_usd"];
   const u = record["usage"];
-  if (typeof cost !== "number" || cost < 0 || typeof u !== "object" || u === null) {
+  if (typeof cost !== "number" || cost < 0 || !isRecord(u)) {
     return undefined;
   }
-  const usage = u as Record<string, unknown>;
+  const usage = u;
   const input = usage["input_tokens"];
   const output = usage["output_tokens"];
   const cacheRead = usage["cache_read_input_tokens"];
@@ -233,10 +238,7 @@ function parseResultUsage(
     return undefined;
   }
   const details = usage["output_tokens_details"];
-  const thinking =
-    typeof details === "object" && details !== null
-      ? (details as Record<string, unknown>)["thinking_tokens"]
-      : undefined;
+  const thinking = isRecord(details) ? details["thinking_tokens"] : undefined;
   const modelUsage = record["modelUsage"];
   const models =
     typeof modelUsage === "object" && modelUsage !== null ? Object.keys(modelUsage) : [];

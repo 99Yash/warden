@@ -67,16 +67,17 @@ import {
   renderMarkdownTable,
   scoreFixtureRun,
 } from "./score.mjs";
-import type {
-  AggregateScore,
-  EvalConfig,
-  Fixture,
-  FixtureLabel,
-  FixtureMeta,
-  FixtureSample,
-  FixtureScore,
-  ParityVerdict,
-  StopReason,
+import {
+  FixtureMetaSchema,
+  type AggregateScore,
+  type EvalConfig,
+  type Fixture,
+  type FixtureLabel,
+  type FixtureMeta,
+  type FixtureSample,
+  type FixtureScore,
+  type ParityVerdict,
+  type StopReason,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -264,7 +265,7 @@ function resolveRealRepo(fixtureDir: string): Pick<Fixture, "realRepo" | "sparse
   if (!existsSync(metaPath)) return {};
   let meta: FixtureMeta;
   try {
-    meta = JSON.parse(readFileSync(metaPath, "utf8")) as FixtureMeta;
+    meta = FixtureMetaSchema.parse(JSON.parse(readFileSync(metaPath, "utf8")));
   } catch {
     process.stdout.write(`[eval] ${fixtureDir}: malformed meta.json — sparse fallback.\n`);
     return { sparseReason: "malformed meta.json" };

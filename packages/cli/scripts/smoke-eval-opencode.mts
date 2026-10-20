@@ -45,7 +45,12 @@ import {
   removeFixtureRepo,
 } from "./eval/fixture-repo.mjs";
 import { aggregateScores, checkParity, scoreFixtureRun, type ParityRun } from "./eval/score.mjs";
-import type { Fixture, FixtureSample, FixtureScore } from "./eval/types.js";
+import {
+  FixtureMetaSchema,
+  type Fixture,
+  type FixtureSample,
+  type FixtureScore,
+} from "./eval/types.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVAL_DIR = resolve(HERE, "eval");
@@ -104,10 +109,7 @@ function loadFixtures(): LoadedFixture[] {
       const metaPath = resolve(fixtureDir, "meta.json");
       if (existsSync(metaPath)) {
         try {
-          const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
-            repo: string;
-            commit: string;
-          };
+          const meta = FixtureMetaSchema.parse(JSON.parse(readFileSync(metaPath, "utf8")));
           const resolved = resolveRepoPath(meta.repo);
           if (resolved === null || !existsSync(resolve(resolved, ".git"))) {
             how = `sparse fallback (${meta.repo} checkout missing)`;

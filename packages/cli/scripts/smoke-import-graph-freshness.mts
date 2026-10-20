@@ -42,7 +42,7 @@
  *
  * Usage: pnpm --filter @warden/cli smoke:import-graph-freshness
  */
-import { execFileSync } from "node:child_process";
+import childProcess, { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -53,8 +53,9 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { createRequire, syncBuiltinESMExports } from "node:module";
-import type { spawn as spawnFn } from "node:child_process";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { mock } from "node:test";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 
@@ -190,20 +191,18 @@ const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(
  * Builtin ESM exports follow the CommonJS object after a sync.
  */
 async function countGraphLoads<T>(fn: () => Promise<T>): Promise<{ result: T; loads: number }> {
-  const cp = createRequire(import.meta.url)("node:child_process") as {
-    spawn: typeof spawnFn;
-  };
-  const realSpawn = cp.spawn;
-  let loads = 0;
-  cp.spawn = ((cmd: string, args: readonly string[], ...rest: unknown[]) => {
-    if (cmd === "git" && args.length === 2 && args[0] === "ls-files" && args[1] === "-z") loads++;
-    return (realSpawn as (...a: unknown[]) => unknown)(cmd, args, ...rest);
-  }) as typeof realSpawn;
+  // The spy calls the real `spawn` and records each call's arguments.
+  const spawnSpy = mock.method(childProcess, "spawn");
   syncBuiltinESMExports();
   try {
-    return { result: await fn(), loads };
+    const result = await fn();
+    const loads = spawnSpy.mock.calls.filter(({ arguments: [cmd, args] }) => {
+      if (cmd !== "git" || !Array.isArray(args)) return false;
+      return args.length === 2 && args[0] === "ls-files" && args[1] === "-z";
+    }).length;
+    return { result, loads };
   } finally {
-    cp.spawn = realSpawn;
+    spawnSpy.mock.restore();
     syncBuiltinESMExports();
   }
 }
@@ -517,17 +516,18 @@ ${target
   // Builtin ESM exports follow the CommonJS object after a sync, so the
   // runner's `readFile` import picks up this wrapper: the first read of the
   // passer (graph load) succeeds, and later reads fail.
-  const fsp = createRequire(import.meta.url)(
-    "node:fs/promises",
-  ) as typeof import("node:fs/promises");
-  const realReadFile = fsp.readFile;
+  const realReadFile = fsPromises.readFile;
   let passerReads = 0;
-  fsp.readFile = ((path: Parameters<typeof realReadFile>[0], ...rest: unknown[]) => {
-    if (typeof path === "string" && resolve(path) === passerAbs && ++passerReads > 1) {
-      return Promise.reject(Object.assign(new Error("EACCES: simulated"), { code: "EACCES" }));
-    }
-    return (realReadFile as (...a: unknown[]) => Promise<unknown>)(path, ...rest);
-  }) as typeof realReadFile;
+  const readFileSpy = mock.method(
+    fsPromises,
+    "readFile",
+    (path: Parameters<typeof realReadFile>[0], options?: Parameters<typeof realReadFile>[1]) => {
+      if (typeof path === "string" && resolve(path) === passerAbs && ++passerReads > 1) {
+        return Promise.reject(Object.assign(new Error("EACCES: simulated"), { code: "EACCES" }));
+      }
+      return realReadFile(path, options);
+    },
+  );
   syncBuiltinESMExports();
   try {
     const failedRead = await runDeadcode({
@@ -546,7 +546,7 @@ ${target
       `caller read failure: info entry names the skip (got ${readSkip?.message ?? "none"})`,
     );
   } finally {
-    fsp.readFile = realReadFile;
+    readFileSpy.mock.restore();
     syncBuiltinESMExports();
   }
 

@@ -71,7 +71,11 @@ async function probe(
   rmSync(projectPlugin, { force: true });
   const port = await allocFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const providerPort = (provider.address() as { port: number }).port;
+  const providerAddress = provider.address();
+  if (providerAddress === null || typeof providerAddress === "string") {
+    throw new Error("smoke: the fake provider is not listening on a TCP port");
+  }
+  const providerPort = providerAddress.port;
   const env = {
     ...process.env,
     HOME: home,

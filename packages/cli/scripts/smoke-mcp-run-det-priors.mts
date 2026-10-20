@@ -27,6 +27,7 @@ import {
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import {
   BUNDLE_LIMITS,
   REVIEW_BUNDLE_VERSION,
@@ -140,6 +141,37 @@ interface Envelope {
   isError: boolean;
 }
 
+/** The page of an `ok` envelope. Every later check reads the page, so a failed call throws here. */
+function okPage(envelope: Envelope, what: string): ReviewBundlePage {
+  if (envelope.data === undefined) {
+    throw new Error(
+      `${what}: no ok page (status ${envelope.status}, ${envelope.reason ?? "no reason"})`,
+    );
+  }
+  return envelope.data;
+}
+
+/** One variant of the advertised `request` union, as far as section [1] reads it. */
+const RequestVariantViewSchema = z.looseObject({
+  properties: z
+    .looseObject({ target: z.looseObject({ const: z.string().optional() }).optional() })
+    .optional(),
+});
+
+/** The advertised `run_det_priors` input JSON Schema, as far as section [1] reads it. */
+const DetPriorsInputSchemaViewSchema = z.looseObject({
+  type: z.string().optional(),
+  properties: z
+    .record(
+      z.string(),
+      z.looseObject({
+        anyOf: z.array(RequestVariantViewSchema).optional(),
+        oneOf: z.array(RequestVariantViewSchema).optional(),
+      }),
+    )
+    .optional(),
+});
+
 function readEnvelope(result: unknown, tool: string): Envelope {
   const parsed = CallToolResultSchema.parse(result);
   const content = parsed.content;
@@ -192,23 +224,14 @@ try {
     `both tools discovered (${names.join(", ")})`,
   );
   const det = tools.find((t) => t.name === TOOL_NAME_RUN_DET_PRIORS);
-  const inputSchema = det?.inputSchema as
-    | {
-        type?: string;
-        properties?: Record<string, { description?: string; anyOf?: unknown[]; oneOf?: unknown[] }>;
-      }
-    | undefined;
+  const inputSchema =
+    det === undefined ? undefined : DetPriorsInputSchemaViewSchema.parse(det.inputSchema);
   assert(inputSchema?.type === "object", "input schema is a JSON Schema object at the root");
   // The request union is nested under `request` so MCP's object-root
   // requirement is satisfied while the discriminated union survives.
   const requestProp = inputSchema?.properties?.["request"];
-  const requestVariants = [...(requestProp?.anyOf ?? []), ...(requestProp?.oneOf ?? [])] as Array<{
-    properties?: Record<string, unknown>;
-    required?: string[];
-  }>;
-  const variantTargets = requestVariants.map(
-    (v) => (v.properties?.["target"] as { const?: string } | undefined)?.const,
-  );
+  const requestVariants = [...(requestProp?.anyOf ?? []), ...(requestProp?.oneOf ?? [])];
+  const variantTargets = requestVariants.map((v) => v.properties?.target?.const);
   assert(
     requestVariants.length === 3 &&
       variantTargets.includes("diff") &&
@@ -243,7 +266,7 @@ try {
     TOOL_NAME_RUN_DET_PRIORS,
   );
   assert(first.status === "ok" && first.data !== undefined, "fixture diff returns status: ok");
-  const page = first.data as ReviewBundlePage;
+  const page = okPage(first, "fixture diff");
   assert(page.schemaVersion === REVIEW_BUNDLE_VERSION, "bundle carries its own schema version");
   assert(page.reviewHandle.startsWith("rb_"), "result carries an opaque review handle");
   assert(
@@ -431,7 +454,7 @@ try {
       TOOL_NAME_RUN_DET_PRIORS,
     );
     assert(next.status === "ok", `page ${pages + 1} returns status: ok`);
-    const np = next.data as ReviewBundlePage;
+    const np = okPage(next, `page ${pages + 1}`);
     for (const f of np.findings) seen.push(`${f.file}:${f.lineStart}:${f.detector}`);
     // Progress guard: a cursor that does not advance would hang this loop, so
     // assert the offset moved rather than trusting the server to terminate.
@@ -806,7 +829,7 @@ try {
     emptyDiff.status === "ok" && emptyDiff.data !== undefined,
     "an empty literal diff returns status: ok rather than invalid_input",
   );
-  const emptyData = emptyDiff.data as ReviewBundlePage;
+  const emptyData = okPage(emptyDiff, "empty diff");
   assert(
     emptyData.changedFiles.length === 0 && emptyData.changedFilesTotal === 0,
     "an empty diff contributes no changed files (detectors still run repo-wide, so findings may remain)",
