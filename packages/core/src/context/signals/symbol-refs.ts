@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { gitProcessEnv } from "@warden/env";
 import type { ExportRef } from "../parser.js";
 import type { Evidence } from "../index.js";
 
@@ -79,6 +80,7 @@ function gitGrep(repoRoot: string, symbol: string): Promise<GrepMatch[]> {
   return new Promise((resolveP) => {
     const child = spawn("git", ["grep", "-wn", "-F", "--", symbol, ...SOURCE_GLOBS], {
       cwd: repoRoot,
+      env: gitProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

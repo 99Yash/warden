@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { gitProcessEnv } from "@warden/env";
 import { resolve as resolvePath, sep as pathSep } from "node:path";
 
 /**
@@ -112,6 +113,7 @@ export function isGitIgnored(repoRoot: string, relativePath: string): Promise<bo
   return new Promise((resolveP) => {
     const child = spawn("git", ["check-ignore", "--quiet", "--", relativePath], {
       cwd: repoRoot,
+      env: gitProcessEnv(),
       stdio: ["ignore", "ignore", "ignore"],
     });
     child.on("error", () => resolveP(false));

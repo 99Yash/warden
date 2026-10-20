@@ -25,6 +25,21 @@ forwarded. OpenCode itself still receives the model credentials it needs.
 This policy does not prevent access to secrets in runner files or other
 same-user processes. CI det-priors must run with no accessible secrets.
 
+Each `git` child gets `gitProcessEnv()` (ADR-0054 amendment 2026-10-20). This
+is the deterministic set plus a named list of git keys: `HOME` and
+`XDG_CONFIG_HOME` (global config and global ignore file), the Windows home
+keys `HOMEDRIVE`, `HOMEPATH`, and `USERPROFILE`, the repository location keys
+that git exports to hooks (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`),
+the discovery limits `GIT_CEILING_DIRECTORIES` and
+`GIT_DISCOVERY_ACROSS_FILESYSTEM`, the config selectors `GIT_CONFIG_GLOBAL`,
+`GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_COUNT` with its
+`GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` pairs, and `SSH_AUTH_SOCK`,
+`GIT_SSH_COMMAND`, `GIT_SSH` for a partial-clone fetch. Provider keys do not
+reach git, git hooks, config-defined programs, or credential helpers.
+`packages/env/src/subprocess.ts` gives the reason and the git docs link for
+each key. `pnpm --filter @warden/cli smoke:git-env` proves the policy offline.
+
 The OpenCode driver also owns config-discovery overrides (ADR-0054 §2(c)).
 Both `OPENCODE_DISABLE_PROJECT_CONFIG` and `OPENCODE_CONFIG_PROJECT_DISABLE`
 are forced to `1`. `OPENCODE_CONFIG_DIR` and `OPENCODE_TEST_HOME` point to

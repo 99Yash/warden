@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { gitProcessEnv } from "@warden/env";
 import type { DegradedEntry } from "../schema.js";
 
 /**
@@ -185,8 +186,7 @@ function runGit(repoRoot: string, args: string[]): Promise<GitResult> {
   return new Promise((resolveP) => {
     const child = spawn("git", args, {
       cwd: repoRoot,
-      // oxlint-disable-next-line node/no-process-env -- open question, queued in docs/gate-design.md: git reads the user's own config and credentials, but ADR-0054 gives other tools only deterministicProcessEnv()
-      env: process.env,
+      env: gitProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
