@@ -132,12 +132,12 @@ function stripJsonComments(text) {
 
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i];
-    const next = text[i + 1];
+    const next = text.charAt(i + 1);
 
     if (inString) {
       out += char;
       if (char === "\\") {
-        out += next ?? "";
+        out += next;
         i += 1;
       } else if (char === '"') {
         inString = false;

@@ -647,7 +647,7 @@ function fenceGroups(value) {
  */
 function builtinInfo(name) {
   const [prefix, rule] = name.includes("/") ? name.split("/", 2) : ["eslint", name];
-  const scope = (prefix ?? "").replaceAll("-", "_");
+  const scope = prefix.replaceAll("-", "_");
   const info = builtins.get(`${scope}/${rule}`);
 
   if (!info) {
@@ -675,7 +675,7 @@ function collectCheckScripts() {
     .join("\n");
 
   const ciRoots = [...workflow.matchAll(/\bpnpm\s+([\w:-]+)/g)]
-    .map((match) => match[1] ?? "")
+    .map((match) => match[1])
     .filter((name) => commands.has(name));
 
   const inCheck = reachableScripts(["check"], commands);
@@ -731,7 +731,7 @@ function reachableScripts(roots, commands) {
     seen.add(name);
 
     for (const match of (commands.get(name) ?? "").matchAll(/\bpnpm\s+([\w:-]+)/g)) {
-      queue.push(match[1] ?? "");
+      queue.push(match[1]);
     }
   }
 
@@ -759,9 +759,9 @@ function commandSummary(dir, command) {
   const filtered = /^pnpm\s+--filter\s+(\S+)\s+([\w:-]+)\s*$/.exec(command);
 
   if (filtered) {
-    const packageDir = workspaceDir(filtered[1] ?? "");
+    const packageDir = workspaceDir(filtered[1]);
     const inner =
-      packageDir === undefined ? undefined : scriptCommands(packageDir).get(filtered[2] ?? "");
+      packageDir === undefined ? undefined : scriptCommands(packageDir).get(filtered[2]);
 
     return packageDir === undefined || inner === undefined ? "" : commandSummary(packageDir, inner);
   }
@@ -808,7 +808,7 @@ function fileSummary(file) {
 
     if (!text) break;
 
-    const content = (text[1] ?? "").trim();
+    const content = text[1].trim();
 
     if (content === "") {
       if (paragraph.length > 0) break;

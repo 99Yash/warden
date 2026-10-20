@@ -132,8 +132,7 @@ function exportedName(sourceCode: SourceCode, start: ESTree.Node): string | null
         node.type === "ClassDeclaration" ||
         node.type === "ClassExpression" ||
         node.type === "FunctionExpression") &&
-      node.id !== null &&
-      node.id !== undefined
+      node.id !== null
         ? node.id.name
         : null;
 
