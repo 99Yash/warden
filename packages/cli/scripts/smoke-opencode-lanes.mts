@@ -98,8 +98,14 @@ const ExecFailureSchema = z.object({
   stdout: z.string().optional(),
 });
 
+/** The exit status and stdout of one CLI run. */
+interface ExecResult {
+  exit: number;
+  out: string;
+}
+
 /** Exit status and stdout of a failed `execFileSync`; -1 and "" when the error does not carry them. */
-function execFailure(err: unknown): { exit: number; out: string } {
+function execFailure(err: unknown): ExecResult {
   const parsed = ExecFailureSchema.safeParse(err);
   return { exit: parsed.data?.status ?? -1, out: parsed.data?.stdout ?? "" };
 }
@@ -1292,7 +1298,7 @@ if (mode === "runfail") {
     command: "opencode-review" | "post-pass",
     args: string[],
     extraEnv: Record<string, string> = {},
-  ): { exit: number; out: string } => {
+  ): ExecResult => {
     try {
       const out = execFileSync(
         process.execPath,

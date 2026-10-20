@@ -179,11 +179,11 @@ const WORKTREES_DIR = resolve(EVAL_DIR, ".eval-worktrees");
 function resolveRepoPath(repo: string): string | null {
   const envOverride = process.env[`WARDEN_EVAL_${repo.toUpperCase()}_REPO`];
   if (envOverride) return resolve(envOverride);
-  const defaults: Record<string, string> = {
-    warden: WARDEN_ROOT,
-    alfred: resolve(WARDEN_ROOT, "..", "alfred"),
-  };
-  return defaults[repo] ?? null;
+  const defaults = new Map([
+    ["warden", WARDEN_ROOT],
+    ["alfred", resolve(WARDEN_ROOT, "..", "alfred")],
+  ]);
+  return defaults.get(repo) ?? null;
 }
 
 /**
@@ -339,6 +339,12 @@ function removeWorktree(repoPath: string, dest: string): void {
   }
 }
 
+/** The labels of one fixture, and whether it expects no comments. */
+interface ParsedLabels {
+  labels: FixtureLabel[];
+  expectsEmpty: boolean;
+}
+
 /**
  * Parse `labels.md`. Two shapes:
  *   1. `expected: zero comments` (clean-control). Returns `expectsEmpty: true`.
@@ -348,7 +354,7 @@ function removeWorktree(repoPath: string, dest: string): void {
  *      key:value format inside fenced ```yaml``` blocks to keep authoring
  *      trivial.
  */
-function parseLabels(raw: string): { labels: FixtureLabel[]; expectsEmpty: boolean } {
+function parseLabels(raw: string): ParsedLabels {
   if (/expected:\s*(zero|no)\s+comments/i.test(raw)) {
     return { labels: [], expectsEmpty: true };
   }

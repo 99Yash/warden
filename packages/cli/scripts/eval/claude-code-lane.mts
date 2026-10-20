@@ -45,8 +45,8 @@ function isStrippedEnv(name: string): boolean {
   return name.startsWith("ANTHROPIC_") || name.startsWith("CLAUDE_CODE_") || name === "CLAUDECODE";
 }
 
-function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = {};
+function buildClaudeCodeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(env)) {
     if (!isStrippedEnv(name)) out[name] = value;
   }

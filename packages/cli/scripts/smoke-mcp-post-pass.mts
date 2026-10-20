@@ -77,7 +77,7 @@ const DIFF_PATH = resolve(TMP_ROOT, "review.diff");
 writeFileSync(DIFF_PATH, DIFF);
 
 let claimSeq = 0;
-function mkFinding(overrides: Partial<Comment> = {}): Record<string, unknown> {
+function mkFinding(overrides: Partial<Comment> = {}) {
   claimSeq += 1;
   return {
     file: SRC,
@@ -119,8 +119,14 @@ const ExecFailureSchema = z.object({
   stdout: z.string().optional(),
 });
 
+/** The exit status and stdout of one CLI run. */
+interface ExecResult {
+  exit: number;
+  out: string;
+}
+
 /** Exit status and stdout of a failed `execFileSync`; -1 and "" when the error does not carry them. */
-function execFailure(err: unknown): { exit: number; out: string } {
+function execFailure(err: unknown): ExecResult {
   const parsed = ExecFailureSchema.safeParse(err);
   return { exit: parsed.data?.status ?? -1, out: parsed.data?.stdout ?? "" };
 }
@@ -608,7 +614,7 @@ try {
   // [11] volumeCap validation.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[11] volumeCap validation — RangeError\n");
-  let threw: unknown = null;
+  let threw: unknown;
   try {
     await runPostPass({
       repoRoot: TMP_ROOT,

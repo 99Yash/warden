@@ -71,11 +71,11 @@ function assert(cond: unknown, msg: string): void {
 function resolveRepoPath(repo: string): string | null {
   const envOverride = process.env[`WARDEN_EVAL_${repo.toUpperCase()}_REPO`];
   if (envOverride) return resolve(envOverride);
-  const defaults: Record<string, string> = {
-    warden: WARDEN_ROOT,
-    alfred: resolve(WARDEN_ROOT, "..", "alfred"),
-  };
-  return defaults[repo] ?? null;
+  const defaults = new Map([
+    ["warden", WARDEN_ROOT],
+    ["alfred", resolve(WARDEN_ROOT, "..", "alfred")],
+  ]);
+  return defaults.get(repo) ?? null;
 }
 
 interface LoadedFixture {

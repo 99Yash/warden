@@ -172,10 +172,7 @@ assert(
 );
 
 // Wrap the route to record every dispatch with a timestamp.
-function makeRecordingRoute(): {
-  route: Awaited<ReturnType<typeof makeWorkerRoute>>;
-  records: { file: string; concern: string; phase: string; ts: number }[];
-} {
+function makeRecordingRoute() {
   const apiClaimDegraded: import("@warden/core").DegradedEntry[] = [];
   const inner = makeWorkerRoute({
     repoRoot: TMP_ROOT,

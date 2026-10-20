@@ -48,7 +48,7 @@ function assert(cond: unknown, msg: string): void {
   }
 }
 
-function git(args: string[]): { ok: boolean; stdout: string; stderr: string } {
+function git(args: string[]) {
   const r = spawnSync("git", args, { cwd: TMP_ROOT, encoding: "utf8" });
   return { ok: r.status === 0, stdout: r.stdout, stderr: r.stderr };
 }
