@@ -480,8 +480,15 @@ submission contract. What differs is the charter:
   remaining gap). Confidence reaches 0.7 only when the fix reaches tier
   1–3 of the enforcement ladder, so the post-pass demotes a tier 4–5
   closure to a question.
-- **Output.** `category` is `dedup` for the repetition axis and
-  `clarity` for the other axes; `tier` is 2. The anchor is an added line
+- **Output.** `category` comes from the axis and from the homes:
+  `dedup` when the repeated homes agree, `consistency` when they already
+  disagree (a doc or comment home that contradicts the code counts),
+  `deadcode` for a home that the change leaves unreachable or unused,
+  `leverage` for the reinvention axis, and `clarity` for the other four
+  axes. When two fit, the lane uses the one that comes first in
+  `PRIORITY_ORDER` (`packages/core/src/priority.ts`). The post-pass has
+  no rule for one of these categories: each one demotes to a question
+  below 0.7 and sorts by priority. `tier` is 2. The anchor is an added line
   in a changed file. Other homes can be cited as extra sources, because
   `commentInScope` needs only one in-scope source and `verifyCitations`
   checks each snippet against the file on disk.

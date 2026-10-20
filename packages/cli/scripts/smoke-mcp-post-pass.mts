@@ -469,6 +469,39 @@ try {
     "down lane: the same verified api_def finding stays an assertion",
   );
 
+  // ADR-0052 (2026-10-20, second amendment): the up charter emits five
+  // categories. None of them has a category rule on this path: each one
+  // posts, demotes below 0.7, stays an assertion at 0.7 or more, and sorts
+  // by `PRIORITY_ORDER`.
+  const upCategories = ["dedup", "consistency", "deadcode", "leverage", "clarity"] as const;
+  const upCategoryFindings = upCategories.flatMap((category) => [
+    mkFinding({ category, confidence: 0.6, claim: `smoke up ${category} low` }),
+    mkFinding({ category, confidence: 0.8, claim: `smoke up ${category} high` }),
+  ]);
+  const r5cat = await runPostPass({
+    repoRoot: TMP_ROOT,
+    diff: DIFF,
+    lanes: [mkLane("up", upCategoryFindings)],
+    config: { volumeCap: Infinity },
+  });
+  const kindFor = (claim: string): string | undefined =>
+    r5cat.comments.find((c) => c.claim === claim)?.kind;
+  for (const category of upCategories) {
+    assert(
+      kindFor(`smoke up ${category} low`) === "question",
+      `up lane ${category}: 0.6 assertion posts as a question`,
+    );
+    assert(
+      kindFor(`smoke up ${category} high`) === "assertion",
+      `up lane ${category}: 0.8 assertion stays an assertion`,
+    );
+  }
+  const order5cat = [...new Set(r5cat.comments.map((c) => c.category))].join(",");
+  assert(
+    order5cat === "consistency,deadcode,clarity,leverage,dedup",
+    `up-lane categories sort by PRIORITY_ORDER (${order5cat})`,
+  );
+
   // ---------------------------------------------------------------------------
   // [6] Tier-3 gate.
   // ---------------------------------------------------------------------------

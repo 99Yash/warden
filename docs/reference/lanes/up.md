@@ -92,8 +92,21 @@ Each finding matches the finding JSON schema appended to this prompt (no
   verifies every snippet against the file. A `lookup_type_def`
   `suggestedSource` (a path under `node_modules/`) also needs the in-scope
   companion source.
-- `category`: `dedup` for the repetition axis (one truth in N homes);
-  `clarity` for the other five axes.
+- `category`: set by the axis and by what the homes show now.
+  - `dedup`: the repetition axis (one truth in N homes), and the homes
+    still agree.
+  - `consistency`: the repetition axis, and the homes already disagree:
+    two homes hold different values, or a doc, comment, or docstring home
+    contradicts the code home.
+  - `deadcode`: a home that the change leaves unreachable or unused, such
+    as a dead branch or an orphaned copy that you find when you count homes.
+  - `leverage`: the reinvention axis (a substrate, library, or stdlib
+    primitive one import away).
+  - `clarity`: the conflation, misplacement, wrong dependency direction,
+    and loose representation axes.
+
+  When a finding fits two categories, use the one that comes first in
+  this order: `consistency`, `deadcode`, `clarity`, `leverage`, `dedup`.
 - `tier`: `2`.
 - `claim`: names the axis and the change that the restructure de-risks.
 - `explanation`: gate A (the named change and its coordinated edits), gate B
