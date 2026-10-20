@@ -13,7 +13,7 @@ A local shape that mirrors a schema drifts from it at the next change.
 - **Drizzle rows → `$inferSelect` / `$inferInsert`.** Use `Pick<typeof table.$inferSelect, …>` for a subset. Only `.notNull()` controls select-nullability; `.default()` does not. An untyped JSON column infers `unknown`, not your shape. _Review._
 - **Zod schemas → `z.infer`.** A value validated by a schema takes its type from the schema, never from a parallel `interface`. _Review._
 - **A literal shape is right when it deliberately differs** from the source, such as a wire reshape or a model-facing projection. Say why in one comment line. _Review._
-- **`import type` for type-only imports.** _Gate: `verbatimModuleSyntax` (`pnpm check-types`)._
+- **`import type` for type-only imports.** A declaration whose every name is a type is `import type { X }`; a mixed import marks each type inline, `import { f, type X }`. A value imported only for `typeof` takes `type` too. _Partly: `verbatimModuleSyntax` (`pnpm check-types`) and `typescript/consistent-type-imports` fail a type-only import with no `type`; the `import type { X }` form over `import { type X }` is review._
 - **An optional property means the key is absent.** `k?: T` does not accept `undefined`. When the value may be missing, omit the key: `...(x !== undefined ? { k: x } : {})`. Write `k?: T | undefined` only when an explicit `undefined` means something different from a missing key, or when the type mirrors an API that sends one. zod's `.optional()` infers `T | undefined`, so a parsed field is spread into a hand-written optional field, not assigned to it. _Gate: `exactOptionalPropertyTypes` (`pnpm check-types`)._
 
 ## 2. Data from outside is `unknown` until parsed
@@ -22,14 +22,17 @@ Warden's claim is that every external fact is verified through a citable source.
 
 - **No `any`.** Use `unknown` and narrow it. _Gate: `typescript/no-explicit-any`._
 - **Parse at the owning boundary, with a schema.** HTTP responses (OSV.dev, npm), tool output (`tsc`, ESLint, `npm audit` JSON), model output, and rows read back from the SQLite cache are all `unknown`. Parse them with zod where they enter. Do not write `(await res.json()) as T` followed by a spot check of one field. `verify/osv.ts` shows the shape: a schema `safeParse`, and a failure is an unverified result. _Partly: `anti-slop/no-widen-then-assert` rejects a widen-then-assert and `no-chained-type-assertions` rejects `as unknown as T`; `no-unknown-returns` is queued. A single `as T` on parsed JSON is review._
-- **Type guards over casts.** `as` asserts; it does not check. If you must assert, check first whether the assertion is needed: remove it and run `pnpm check-types`. _Review: `no-unsafe-type-assertion` is queued at 84 src sites._
+- **Type guards over casts.** `as` asserts; it does not check. If you must assert, check first whether the assertion is needed: remove it and run `pnpm check-types`. _Review: `no-unsafe-type-assertion` is queued at 72 src sites._
 - **No `object` parameters, no `Reflect.apply`, no alias of `unknown`.** Name the owner type. _Gate: `anti-slop/no-object-parameters`, `no-reflect-apply`, `no-unknown-type-aliases`._
 - **Exhaustive switches.** A switch over a union ends in `default: return assertNever(x, "<where>")` (`packages/core/src/assert-never.ts`), so a new variant fails the build. _Partly: `typescript/switch-exhaustiveness-check` fails a union switch with no `default` that misses a member; the `assertNever` default is review._
 - **Minimize `!`.** A non-null assertion is a promise the compiler cannot keep. Narrow instead. _Review: `no-non-null-assertion` is queued._
+- **Throw an `Error`.** A thrown string or object has no stack and no `message`. A caught `unknown` may be rethrown as it is. _Gate: `typescript/only-throw-error`._
+- **Every path returns.** A function that returns a value on one path returns one on every path. _Gate: `noImplicitReturns` (`pnpm check-types`)._
 
 ## 3. Promises
 
 - **Await it, return it, or mark it `void`.** A fire-and-forget promise is spelled `void (async () => { … })()`, with a comment that says where its errors surface (`workers/run-worker.ts` counts tool calls this way; errors surface through the awaited `result.output`). _Gate: `typescript/no-floating-promises`._
+- **`return await` inside a `try`.** A promise returned without `await` settles after the `try` exits, so its `catch` never sees the rejection and its `finally` runs too early. _Gate: `typescript/return-await` (`error-handling-correctness-only`)._
 - **No async callback where a void callback is expected.** A rejected `async` handler passed to `createServer` or `.forEach` is unhandled. _Gate: `typescript/no-misused-promises`._
 - **Cancel siblings on failure.** When one leg of a `Promise.all` over model calls fails, abort the others so they stop billing. _Review._
 

@@ -28,6 +28,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
     "exactOptionalPropertyTypes": true
   },
   "include": ["**/*.mjs", "**/*.ts"]

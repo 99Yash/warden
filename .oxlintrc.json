@@ -9,7 +9,11 @@
   // queue, or it is driven to zero first, in its own change. A rule at "warn" enforces nothing
   // on its own; `pnpm lint` passes `--deny-warnings` so a default-category warning cannot
   // accumulate either.
-  "plugins": ["eslint", "typescript", "unicorn", "oxc", "node"],
+  //
+  // `plugins` REPLACES oxlint's default set, so it restates that set (eslint, typescript,
+  // unicorn, oxc) and then adds the plugins this file opts in to. A plugin dropped from this
+  // list turns every rule below that it owns into a silent no-op.
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "node", "import"],
   "jsPlugins": ["./scripts/oxlint/anti-slop/index.ts", "./scripts/oxlint/warden/index.ts"],
   "categories": {},
   "options": {
@@ -52,6 +56,74 @@
     ],
     "typescript/no-explicit-any": "error",
     "unicorn/no-useless-spread": "error",
+    // return-await, correctness option only: a promise returned without `await` inside a `try`
+    // (or a `catch` that has a `finally`) settles after the block exits, so its `catch` never
+    // sees the rejection and its `finally` runs too early. Write `return await`. The default
+    // option also asks for style edits outside a `try`, and those change no behavior.
+    "typescript/return-await": ["error", "error-handling-correctness-only"],
+    // only-throw-error: a `throw` of a value that is not an `Error` has no stack and no
+    // `message`. Throw an `Error` (or a subclass). A caught `unknown` may be rethrown as it is
+    // (the rule's defaults).
+    "typescript/only-throw-error": "error",
+    // consistent-type-imports: an import used only as a type, including only inside `typeof`,
+    // takes `type`. `verbatimModuleSyntax` already fails `tsc` on a type imported without it,
+    // but a value imported only for `typeof` compiles and stays in the runtime import graph.
+    // `fixStyle` matches the tree: a mixed import marks each type inline. The fixer then
+    // writes `import { type X }` for a declaration whose every name is a type; rewrite that as
+    // `import type { X }`, because the inline form keeps a side-effect import of the module.
+    // `disallowTypeAnnotations` is off: an `import("…")` type is erased, so it costs nothing
+    // at runtime.
+    "typescript/consistent-type-imports": [
+      "error",
+      { "disallowTypeAnnotations": false, "fixStyle": "inline-type-imports" }
+    ],
+    // Default `correctness` rules, each at zero when it landed, default options. The default
+    // category arms them at "warn", which `--deny-warnings` already fails; "error" states the
+    // fence here, so it does not depend on the category default.
+    // - await-thenable: an `await` of a value that is not a promise. Remove the `await`.
+    // - no-array-delete: `delete xs[i]` leaves a hole. Use `splice` or `filter`.
+    // - no-for-in-array: `for…in` over an array walks string keys. Use `for…of`.
+    // - no-implied-eval: a string passed to `setTimeout` / `new Function` is `eval`. Pass a
+    //   function.
+    // - no-unsafe-unary-minus: unary minus on a value that is not a number or bigint.
+    // - no-useless-default-assignment: a default for a binding that is never `undefined`.
+    //   Delete the default, or widen the type if `undefined` can arrive.
+    // - no-meaningless-void-operator: `void` on an expression that is already `void`.
+    // - no-misused-spread: a spread of a string, a promise, or a class instance. Split a
+    //   string into code points with `Array.from`, which states the intent.
+    // - no-duplicate-type-constituents: a union or intersection that repeats a member. It
+    //   also reports `| undefined` on an optional PARAMETER; an optional property keeps it,
+    //   because `exactOptionalPropertyTypes` is on.
+    // - no-redundant-type-constituents: a union member another member absorbs
+    //   (`unknown | X`, `"a" | string`). Write the wide type and say the rest in the doc
+    //   comment, or derive the exact union.
+    // - require-array-sort-compare: `.sort()` with no comparator orders numbers, tuples and
+    //   objects by their string form. Pass a comparator. `ignoreStringArrays` stays on (its
+    //   default): a `string[]` sorts by UTF-16 code unit, which is deterministic.
+    // - no-base-to-string: `String(v)` or a template on a value that may be an object prints
+    //   `[object Object]`. Narrow the value at its boundary, or pick the text you mean
+    //   (`JSON.stringify` of a JSON value, `error.message`).
+    // - unbound-method: a method read as a value loses `this`. Bind it or wrap it in an
+    //   arrow; declare a member that never reads `this` as a function-typed property.
+    "typescript/await-thenable": "error",
+    "typescript/no-array-delete": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-implied-eval": "error",
+    "typescript/no-unsafe-unary-minus": "error",
+    "typescript/no-useless-default-assignment": "error",
+    "typescript/no-meaningless-void-operator": "error",
+    "typescript/no-misused-spread": "error",
+    "typescript/no-duplicate-type-constituents": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/require-array-sort-compare": "error",
+    "typescript/no-base-to-string": "error",
+    "typescript/unbound-method": "error",
+    // The import plugin's two default `correctness` rules had zero hits when it landed, so
+    // they are set to "error" here instead of the "warn" that the plugin arms them at.
+    // import/default: a default import from a module that has no default export.
+    // import/namespace: `ns.x` on a namespace import whose module does not export `x`.
+    "import/default": "error",
+    "import/namespace": "error",
 
     // `warden mcp` speaks JSON-RPC over stdio, so a stray console.log in product code
     // corrupts the protocol stream. Product code writes through process.stdout/stderr on
