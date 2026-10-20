@@ -87,8 +87,8 @@ const transformed = pair2.responseTransform({ tier: "3" });
 // A view of the one field this step checks; the parse throws if the result is not an object.
 const transformedTier = z.object({ tier: z.unknown() }).parse(transformed).tier;
 assert(
-  typeof transformedTier === "number",
-  `tier coerced to number (got ${typeof transformedTier})`,
+  z.number().safeParse(transformedTier).success,
+  `tier coerced to number (got ${JSON.stringify(transformedTier)})`,
 );
 assert(transformedTier === 3, `tier value preserved (got ${JSON.stringify(transformedTier)})`);
 
@@ -148,10 +148,10 @@ assert(reqParse.success, `requestSchema parses string-form BossOutputSchema (wir
 const coerced = z
   .looseObject({ comments: z.array(z.looseObject({ tier: z.unknown() })) })
   .parse(pair4.responseTransform(reqParse.success ? reqParse.data : wireBoss));
-const tiersAreNumbers = coerced.comments.every((c) => typeof c.tier === "number");
+const tiers = coerced.comments.map((c) => c.tier);
 assert(
-  tiersAreNumbers,
-  `all tier fields coerced to numbers (got: ${coerced.comments.map((c) => typeof c.tier).join(",")})`,
+  z.array(z.number()).safeParse(tiers).success,
+  `all tier fields coerced to numbers (got: ${JSON.stringify(tiers)})`,
 );
 
 const finalParse = BossOutputSchema.safeParse(coerced);

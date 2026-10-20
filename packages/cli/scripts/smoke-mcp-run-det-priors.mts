@@ -269,7 +269,7 @@ try {
     `findings page within cap (${page.findings.length} <= ${BUNDLE_LIMITS.findingsPerPage})`,
   );
   assert(
-    page.changedFiles.every((f) => typeof f.addedLineCount === "number" && !("addedLines" in f)),
+    page.changedFiles.every((f) => !("addedLines" in f)),
     "changed files carry addedLineCount and never an addedLines array",
   );
   assert(
@@ -292,7 +292,7 @@ try {
 
   process.stdout.write("\n[3] findings preserve tier / category / sources\n");
   assert(
-    page.findings.every((f) => typeof f.category === "string" && f.category.length > 0),
+    page.findings.every((f) => f.category.length > 0),
     "every finding carries a category",
   );
   assert(

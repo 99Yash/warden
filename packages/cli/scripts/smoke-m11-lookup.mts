@@ -195,10 +195,7 @@ process.stdout.write(`\n[1] lookupTypeDef — positive root lookup\n`);
     );
     assert(r.kind === "function", `kind is "function" (got ${r.kind})`);
     assert(r.dts_file.endsWith("index.d.ts"), `dts_file points at index.d.ts: ${r.dts_file}`);
-    assert(
-      typeof r.line_start === "number" && r.line_start >= 1,
-      `line_start >= 1 (${r.line_start})`,
-    );
+    assert(r.line_start >= 1, `line_start >= 1 (${r.line_start})`);
     // suggestedSource shape.
     const ss = r.suggestedSource;
     assert(

@@ -80,7 +80,7 @@ function cleanup(): void {
 }
 
 const hasOpenAI =
-  typeof process.env["OPENAI_API_KEY"] === "string" && process.env["OPENAI_API_KEY"].length > 0;
+  process.env["OPENAI_API_KEY"] !== undefined && process.env["OPENAI_API_KEY"].length > 0;
 if (!hasOpenAI) {
   process.stdout.write(`\n[skip] OPENAI_API_KEY not set — this smoke verifies the OpenAI path\n`);
   cleanup();

@@ -28,6 +28,7 @@ import {
   type JSONRPCMessage,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { isRecord } from "@warden/core/guards";
 import {
   LookupTypeDefResultSchema,
   MAX_TOOL_RESULT_BYTES,
@@ -164,8 +165,7 @@ try {
       outputSchema.oneOf.length === 2 &&
       outputSchema.oneOf.every(
         (branch) =>
-          typeof branch === "object" &&
-          branch !== null &&
+          isRecord(branch) &&
           "required" in branch &&
           isUnknownArray(branch.required) &&
           branch.required.includes("envelopeVersion") &&
@@ -206,7 +206,6 @@ try {
         ss.path === data.dts_file &&
         ss.line === data.line_start &&
         ss.snippet === data.signature &&
-        typeof ss.retrievedAt === "string" &&
         Number.isFinite(Date.parse(ss.retrievedAt)),
       "suggestedSource is a complete pre-shaped api_def citation",
     );

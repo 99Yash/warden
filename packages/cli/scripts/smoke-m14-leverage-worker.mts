@@ -73,8 +73,7 @@ const FIXTURE_CONTENT = [
 writeFileSync(resolve(TMP_ROOT, FIXTURE_PATH), FIXTURE_CONTENT);
 
 const hasKey =
-  typeof process.env["ANTHROPIC_API_KEY"] === "string" &&
-  process.env["ANTHROPIC_API_KEY"].length > 0;
+  process.env["ANTHROPIC_API_KEY"] !== undefined && process.env["ANTHROPIC_API_KEY"].length > 0;
 if (!hasKey) {
   process.stdout.write(`\n[skip] ANTHROPIC_API_KEY not set\n`);
   if (existsSync(TMP_DB)) unlinkSync(TMP_DB);

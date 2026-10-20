@@ -522,6 +522,7 @@ ${target
     fsPromises,
     "readFile",
     (path: Parameters<typeof realReadFile>[0], options?: Parameters<typeof realReadFile>[1]) => {
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the stub's `path` is the `PathLike | FileHandle` union of `readFile`; the smoke counts only the string paths that it passes itself
       if (typeof path === "string" && resolve(path) === passerAbs && ++passerReads > 1) {
         return Promise.reject(Object.assign(new Error("EACCES: simulated"), { code: "EACCES" }));
       }

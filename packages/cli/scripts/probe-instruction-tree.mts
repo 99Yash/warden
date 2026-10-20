@@ -99,6 +99,7 @@ async function readProbe(directory: string) {
   const port = await allocFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const providerAddress = provider.address();
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- `server.address()` gives `AddressInfo | string | null`, and a string is a pipe address: the check splits the Node API's own union
   if (providerAddress === null || typeof providerAddress === "string") {
     throw new Error("probe: the fake provider is not listening on a TCP port");
   }

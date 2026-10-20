@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { deriveLaneScope, resolveDiff, runPostPass, type LaneOutput } from "@warden/core";
 import { isRecord } from "@warden/core/guards";
+import { z } from "zod";
 import {
   buildLaneMessage,
   DEFAULT_LANE_TIMEOUT_SECS,
@@ -146,7 +147,8 @@ function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
     const record = event;
     const type = record["type"];
     if (type === "system" && record["subtype"] === "init") {
-      if (typeof record["model"] === "string") initModel = record["model"];
+      const model = z.string().safeParse(record["model"]);
+      if (model.success) initModel = model.data;
       const servers = Array.isArray(record["mcp_servers"]) ? record["mcp_servers"] : [];
       const warden = servers.filter(isRecord).find((s) => s["name"] === "warden");
       if (warden?.["status"] !== "connected") {
@@ -157,14 +159,15 @@ function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
       const content =
         isRecord(message) && Array.isArray(message["content"]) ? message["content"] : [];
       for (const b of content) {
-        if (!isRecord(b)) continue;
-        if (b["type"] === "tool_use" && typeof b["name"] === "string") {
-          const name = normalizeToolName(b["name"]);
-          if (typeof b["id"] === "string") toolNameById.set(b["id"], name);
+        const block = ContentBlockSchema.safeParse(b);
+        if (!block.success) continue;
+        if (block.data.type === "tool_use") {
+          const name = normalizeToolName(block.data.name);
+          if (block.data.id !== undefined) toolNameById.set(block.data.id, name);
           seen.set(name, (seen.get(name) ?? 0) + 1);
-        } else if (b["type"] === "tool_result" && typeof b["tool_use_id"] === "string") {
-          const name = toolNameById.get(b["tool_use_id"]);
-          if (name !== undefined && b["is_error"] !== true) {
+        } else {
+          const name = toolNameById.get(block.data.tool_use_id);
+          if (name !== undefined && block.data.is_error !== true) {
             completed.set(name, (completed.get(name) ?? 0) + 1);
           }
         }
@@ -173,7 +176,8 @@ function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
       if (record["is_error"] === true || record["subtype"] !== "success") {
         errors.push(`result ${String(record["subtype"])}`);
       }
-      if (typeof record["result"] === "string") resultText = record["result"];
+      const result = z.string().safeParse(record["result"]);
+      if (result.success) resultText = result.data;
       usage = parseResultUsage(record, initModel);
     }
   }
@@ -197,14 +201,38 @@ function normalizeToolName(name: string): string {
 }
 
 /**
- * The `result` event fields that `parseResultUsage` reads. The claude stream
- * has no schema that warden owns, so each value is checked where it is read.
+ * The message content blocks that the parser counts. A block of another
+ * type, or a block with a field of the wrong type, is skipped.
  */
-interface ClaudeResultEvent {
-  total_cost_usd?: unknown;
-  usage?: unknown;
-  modelUsage?: unknown;
-}
+const ContentBlockSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("tool_use"),
+    name: z.string(),
+    id: z.string().optional().catch(undefined),
+  }),
+  z.object({ type: z.literal("tool_result"), tool_use_id: z.string(), is_error: z.unknown() }),
+]);
+
+/**
+ * The `result` event fields that `parseResultUsage` reads. The claude stream
+ * has no schema that warden owns, so this one names only the fields read. A
+ * cost and the four token counts are required; the reasoning count and the
+ * `modelUsage` map read as absent when their type is wrong.
+ */
+const ClaudeResultUsageSchema = z.object({
+  total_cost_usd: z.number().nonnegative(),
+  usage: z.object({
+    input_tokens: z.number(),
+    output_tokens: z.number(),
+    cache_read_input_tokens: z.number(),
+    cache_creation_input_tokens: z.number(),
+    output_tokens_details: z
+      .object({ thinking_tokens: z.number().optional().catch(undefined) })
+      .optional()
+      .catch(undefined),
+  }),
+  modelUsage: z.record(z.string(), z.unknown()).optional().catch(undefined),
+});
 
 /**
  * `total_cost_usd` is the API-price equivalent even on a subscription
@@ -217,41 +245,22 @@ interface ClaudeResultEvent {
  * reasoning count may be absent (a run with no thinking).
  */
 function parseResultUsage(
-  record: ClaudeResultEvent,
+  record: unknown,
   initModel: string | undefined,
 ): SessionUsage | undefined {
-  const cost = record.total_cost_usd;
-  const u = record.usage;
-  if (typeof cost !== "number" || cost < 0 || !isRecord(u)) {
-    return undefined;
-  }
-  const usage = u;
-  const input = usage["input_tokens"];
-  const output = usage["output_tokens"];
-  const cacheRead = usage["cache_read_input_tokens"];
-  const cacheWrite = usage["cache_creation_input_tokens"];
-  if (
-    typeof input !== "number" ||
-    typeof output !== "number" ||
-    typeof cacheRead !== "number" ||
-    typeof cacheWrite !== "number"
-  ) {
-    return undefined;
-  }
-  const details = usage["output_tokens_details"];
-  const thinking = isRecord(details) ? details["thinking_tokens"] : undefined;
-  const modelUsage = record.modelUsage;
-  const models =
-    typeof modelUsage === "object" && modelUsage !== null ? Object.keys(modelUsage) : [];
+  const parsed = ClaudeResultUsageSchema.safeParse(record);
+  if (!parsed.success) return undefined;
+  const { total_cost_usd: cost, usage, modelUsage } = parsed.data;
+  const models = modelUsage !== undefined ? Object.keys(modelUsage) : [];
   const model = models.length > 0 ? models.join(",") : initModel;
   return {
     costUsd: cost,
     tokens: {
-      input,
-      output,
-      reasoning: typeof thinking === "number" ? thinking : 0,
-      cacheRead,
-      cacheWrite,
+      input: usage.input_tokens,
+      output: usage.output_tokens,
+      reasoning: usage.output_tokens_details?.thinking_tokens ?? 0,
+      cacheRead: usage.cache_read_input_tokens,
+      cacheWrite: usage.cache_creation_input_tokens,
     },
     ...(model !== undefined ? { model } : {}),
   };
