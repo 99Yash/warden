@@ -560,6 +560,7 @@ function findClosingEnvQuote(raw: string, quote: '"' | "'"): number {
   return -1;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- JSON parse wrapper; `loadConfigFile` parses the result with `configSchema`
 function parseJsonc(text: string, source: string): unknown {
   try {
     return JSON.parse(removeTrailingCommas(stripJsonComments(text)));
@@ -671,6 +672,7 @@ function mergeConfig(base: WardenConfig, override: WardenConfig): WardenConfig {
   return configSchema.parse(deepMerge(base, override));
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- generic walker over two config layers; `mergeConfig` parses the result with `configSchema`
 function deepMerge(base: unknown, override: unknown): unknown {
   if (override === undefined) return base;
   if (!isPlainObject(base) || !isPlainObject(override)) return override;
