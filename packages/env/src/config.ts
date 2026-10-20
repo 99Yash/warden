@@ -564,7 +564,7 @@ function parseJsonc(text: string, source: string): unknown {
   try {
     return JSON.parse(removeTrailingCommas(stripJsonComments(text)));
   } catch (err) {
-    throw new Error(`Failed to parse JSONC at ${source}: ${formatErr(err)}`);
+    throw new Error(`Failed to parse JSONC at ${source}: ${formatErr(err)}`, { cause: err });
   }
 }
 

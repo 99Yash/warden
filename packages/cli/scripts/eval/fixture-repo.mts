@@ -40,7 +40,7 @@ function git(root: string, args: string[]): string {
     }) as string;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`warden-eval-oc: git ${args.join(" ")} failed: ${detail}`);
+    throw new Error(`warden-eval-oc: git ${args.join(" ")} failed: ${detail}`, { cause: err });
   }
 }
 
@@ -145,7 +145,7 @@ function extractHeadTree(repoPath: string, commit: string, dest: string): void {
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("warden-eval-oc: ")) throw err;
     const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`warden-eval-oc: head-tree extract failed: ${detail}`);
+    throw new Error(`warden-eval-oc: head-tree extract failed: ${detail}`, { cause: err });
   } finally {
     rmSync(dirname(tarFile), { recursive: true, force: true });
   }
@@ -158,7 +158,7 @@ function applyPatch(root: string, patchFile: string, extraArgs: string[]): void 
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`warden-eval-oc: git apply failed: ${detail}`);
+    throw new Error(`warden-eval-oc: git apply failed: ${detail}`, { cause: err });
   }
 }
 

@@ -131,6 +131,10 @@
     "import/default": "error",
     "import/namespace": "error",
 
+    // A `catch` that throws a new error must pass the caught one as `{ cause }`, so the stack
+    // and the original failure survive the rewrap. Default options.
+    "preserve-caught-error": "error",
+
     // `warden mcp` speaks JSON-RPC over stdio, so a stray console.log in product code
     // corrupts the protocol stream. Product code writes through process.stdout/stderr on
     // purpose; scripts are exempt below.

@@ -190,7 +190,9 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
       const succinct = detail.startsWith("materialize: ")
         ? detail.slice("materialize: ".length)
         : detail;
-      throw new Error(`materialize: ${CHARTER_PATH} line ${lineNo}: ${succinct}`);
+      throw new Error(`materialize: ${CHARTER_PATH} line ${lineNo}: ${succinct}`, {
+        cause: err,
+      });
     }
   });
   const schemaJson = JSON.stringify(z.toJSONSchema(LaneFindingSchema), null, 2);

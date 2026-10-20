@@ -44,6 +44,7 @@ export function db() {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
         `Cache initialization failed (${message}). If the cache is newer than this warden version, upgrade warden or delete \`${cachePath}\` to recreate.`,
+        { cause: err },
       );
     }
   }
