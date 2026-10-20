@@ -29,7 +29,7 @@ import {
   type BossPromptVariant,
   type WorkerPromptVariant,
 } from "./prompts/loader.js";
-import type { ReviewScratchpad, TokenUsage } from "./scratchpad.js";
+import { tokenUsageFromSdk, type ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import {
   makeDispatchWorkerTool,
   type Concern,
@@ -568,14 +568,8 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     const output = geminiPair.responseTransform(submittedRaw) as z.infer<typeof BossOutputSchema>;
     let bossTokens: TokenUsage | undefined;
     try {
-      const usage = await result.usage;
-      bossTokens = {
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        ...(usage.inputTokenDetails.cacheReadTokens !== undefined
-          ? { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }
-          : {}),
-      };
+      // `totalUsage` sums every step of the tool loop; `usage` is the last step only.
+      bossTokens = tokenUsageFromSdk(await result.totalUsage);
     } catch {
       bossTokens = undefined;
     }

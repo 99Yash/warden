@@ -146,13 +146,16 @@ export type DegradedEntry = z.infer<typeof DegradedEntrySchema>;
  * M14 (ADR-0030): per-model-tier token usage surfaced on `CommentSet`.
  * Keys are legacy logical aliases: `opus` is boss, `sonnet` is worker-strong,
  * and `haiku` is worker-cheap. `metadata.costLabels` carries the concrete
- * provider model behind each alias. Cached input tokens are tracked when the
+ * provider model behind each alias. `inputTokens` is the TOTAL input, as AI
+ * SDK 6 reports it: it includes `cachedInputTokens` (cache reads) and
+ * `cacheWriteInputTokens` (cache writes). Both parts are tracked when the
  * provider reports them.
  */
 export const TokenUsageBlockSchema = z.object({
   inputTokens: z.number().nonnegative(),
   outputTokens: z.number().nonnegative(),
   cachedInputTokens: z.number().nonnegative().optional(),
+  cacheWriteInputTokens: z.number().nonnegative().optional(),
 });
 export type TokenUsageBlock = z.infer<typeof TokenUsageBlockSchema>;
 

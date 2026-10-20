@@ -14,6 +14,7 @@ const ModelsDevModelSchema = z
         input: z.number().optional(),
         output: z.number().optional(),
         cache_read: z.number().optional(),
+        cache_write: z.number().optional(),
       })
       .optional(),
     limit: z
@@ -75,6 +76,7 @@ function modelPrice(model: ModelsDevModel): LlmModelPrice | undefined {
     input: cost.input,
     output: cost.output,
     cachedInput: cost.cache_read ?? cost.input,
+    cacheWriteInput: cost.cache_write ?? cost.input,
   };
 }
 
