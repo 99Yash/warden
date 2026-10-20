@@ -1,161 +1,103 @@
 ---
 import AnimatedHero from "../components/AnimatedHero.astro";
-import MarketingShell from "../components/MarketingShell.astro";
+import HomeShell from "../components/HomeShell.astro";
 ---
 
-<MarketingShell
+<HomeShell
   title="Code review that brings receipts"
   description="Warden gives your agent runtime the ground truth for code review over MCP — detectors, verified advisories, real type definitions — and publishes only what survives gates the model cannot skip."
 >
-  <main>
-    <section class="hero-section">
-      <div class="hero-copy reveal-in">
-        <p class="eyebrow">Review ground truth over MCP</p>
-        <h1>
-          Reviews with <span class="accent">receipts.</span>
-        </h1>
-        <p class="hero-lede">
-          Your agent runs the review. Warden supplies the parts it cannot make up — type errors, lint
-          findings, advisories checked against OSV, real <code>.d.ts</code> signatures — and then its
-          gates decide what gets published. <em>The model never gets the last word.</em>
-        </p>
-        <div class="hero-actions">
-          <a class="button primary" href="/docs/mcp/" data-astro-prefetch>
-            Connect over MCP
-            <span class="button-arrow" aria-hidden="true">→</span>
-          </a>
-          <a class="button secondary" href="/docs/review/" data-astro-prefetch>How a review runs</a>
-        </div>
-        <p class="hero-meta">
-          <span>Any MCP client</span>
-          <span>OpenCode first</span>
-          <span>Gates outside the model</span>
-        </p>
-      </div>
-      <div class="reveal-in delay-2">
-        <AnimatedHero />
-      </div>
-    </section>
+  <main class="home-article">
+    <div class="home-topline">
+      <a class="home-status" href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">
+        <span class="home-status-dot" aria-hidden="true"></span>
+        More than 50 ADRs, every choice written down
+      </a>
+      <button class="home-command" type="button" data-copy="warden mcp" aria-label="Copy command: warden mcp">
+        <code>warden mcp</code>
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+          <path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5" fill="none" stroke="currentColor" stroke-width="1.3"></path>
+        </svg>
+      </button>
+    </div>
 
-    <section class="proof-strip" aria-label="Review contract">
-      <p><strong>Runs in your repo</strong><span>a local stdio server, no hosted backend, no upload</span></p>
-      <p><strong>Any MCP client</strong><span>OpenCode is the first client, not a dependency</span></p>
-      <p><strong>Gates are not tools</strong><span>verification runs after the model, every time</span></p>
-      <p><strong>Measured, not vibed</strong><span>recall and precision evals gate each change</span></p>
-    </section>
+    <header>
+      <h1 class="home-sr-only">Code review that brings receipts</h1>
+      <p class="home-tagline">
+        Warden gives your agent the parts of a code review it cannot make up: type errors, lint
+        findings, advisories checked against OSV, and real <code>.d.ts</code> signatures. Your agent
+        runs the review over MCP. Then Warden's gates decide what gets published. The model never
+        gets the last word.
+      </p>
+    </header>
 
-    <section class="home-band">
-      <div class="section-heading">
-        <p class="eyebrow">The split</p>
-        <h2>The loop is a commodity. The evidence is <span class="accent">not.</span></h2>
-        <p class="section-sub">
-          Agent runtimes get better at sub-agents, model routing, and permissions with every release.
-          None of them ships a detector corpus, verified advisories, or a repo index. So Warden stopped
-          running the loop and kept the parts that have to be right.
-        </p>
-      </div>
-      <div class="feature-grid">
-        <article>
-          <span class="feature-kicker">01 · EVIDENCE</span>
-          <h3>Ground truth, <em>over MCP.</em></h3>
-          <p>
-            <code>run_det_priors</code> returns TSC, ESLint, npm audit with OSV, duplication, security
-            lint, and context selection as a bounded, versioned, paged bundle.
-            <code>lookup_type_def</code> answers library API questions from installed type
-            definitions.
-          </p>
-        </article>
-        <article>
-          <span class="feature-kicker">02 · LANES</span>
-          <h3>Your runtime does <em>the reading.</em></h3>
-          <p>
-            Review lanes run as agents in your client, with read-only tools. The down lane traces a
-            claimed behavior through callers, state, and failure paths. The up lane looks for
-            structural drift.
-          </p>
-        </article>
-        <article>
-          <span class="feature-kicker">03 · POST-PASS</span>
-          <h3>Gates the model <em>can't skip.</em></h3>
-          <p>
-            A model can decline to call a tool, so verification is not a tool. After the lanes return,
-            Warden checks every citation, scopes findings to the diff, screens secrets, applies the
-            confidence and volume rules, and emits the <code>CommentSet</code>.
-          </p>
-        </article>
-      </div>
-    </section>
+    <AnimatedHero />
 
-    <section class="workflow-band">
-      <div class="section-heading">
-        <p class="eyebrow">How a review runs</p>
-        <h2>Evidence in, receipts <span class="accent">out.</span></h2>
-        <p class="section-sub">
-          <code>warden opencode-review</code> drives the whole path: it starts the MCP server, runs a
-          lane in OpenCode, and publishes only what the post-pass returns. Lane prose never reaches
-          you directly.
-        </p>
-      </div>
-      <ol class="review-spine">
+    <section>
+      <h2>How a review runs</h2>
+      <ol>
         <li>
-          <span>Diff</span>
-          <em class="spine-status">shipped</em>
-          <p>Resolve the base by merge-base, prune generated files, and stop before spawn on unsafe input such as a symlink that leaves the repo.</p>
+          <strong>Diff.</strong> Warden resolves the base by merge-base, prunes generated files, and
+          stops on unsafe input, such as a symlink that leaves the repo.
         </li>
         <li>
-          <span>Det-priors</span>
-          <em class="spine-status">shipped</em>
-          <p>The lane calls <code>run_det_priors</code> first and reads the findings page by page, by handle, without flooding its context.</p>
+          <strong>Det-priors.</strong> The lane calls <code>run_det_priors</code> first and reads the
+          findings page by page, by handle.
         </li>
         <li>
-          <span>Lanes</span>
-          <em class="spine-status partial">partial</em>
-          <p>Down proves invariants. Up searches for structural drift and is opt-in. Surface and judge come next.</p>
+          <strong>Lanes.</strong> The down lane proves invariants. The up lane searches for
+          structural drift and is opt-in. <span class="home-tag partial">partial</span>
         </li>
         <li>
-          <span>Post-pass</span>
-          <em class="spine-status">shipped</em>
-          <p>Verify citations, keep each finding inside its lane's file scope, demote by confidence, and cap volume. Tier 1 always survives the cap.</p>
+          <strong>Post-pass.</strong> Warden verifies citations, keeps each finding inside its lane's
+          file scope, demotes by confidence, and caps volume.
         </li>
         <li>
-          <span>Publish</span>
-          <em class="spine-status">shipped</em>
-          <p>Emit one stable <code>CommentSet</code>. The trusted scope envelope comes from the driver, never from the model.</p>
+          <strong>Publish.</strong> Warden emits one stable <code>CommentSet</code>. The scope
+          envelope comes from the driver, never from the model.
         </li>
       </ol>
-      <div class="review-boundary" role="note">
-        <strong>Mid-pivot, said out loud.</strong>
+      <aside class="home-callout">
         <p>
-          <code>warden review</code> still runs the original in-process boss loop, and it stays the
-          default until the parity eval shows the MCP path matches it on recall and precision. The CI
-          runner is a tracer today: it writes to the job summary and does not comment on PRs yet.
+          <code>warden review</code> still runs the original in-process loop. It stays the default
+          until the parity eval shows that the MCP path matches it. The CI runner is a tracer and
+          does not comment on PRs yet.
         </p>
-      </div>
+      </aside>
     </section>
 
-    <section class="connect-band">
-      <div class="section-heading connect-copy">
-        <p class="eyebrow">Connect</p>
-        <h2>One server. Any <span class="accent">client.</span></h2>
-        <p class="section-sub">
-          <code>warden mcp</code> speaks JSON-RPC over stdio and nothing else. Every result carries a
-          schema version, stays under a size bound, and degrades to a structured reason instead of
-          throwing.
-        </p>
-        <ul class="connect-facts">
-          <li><code>run_det_priors</code><span>the deterministic evidence bundle, paged</span></li>
-          <li><code>lookup_type_def</code><span>library API signatures from installed <code>.d.ts</code></span></li>
-          <li><code>search_index</code><span>semantic repo search, next</span></li>
-        </ul>
-      </div>
-      <div class="terminal-window connect-code">
-        <div class="terminal-bar" aria-hidden="true">
-          <span class="dot"></span>
-          <span class="dot"></span>
-          <span class="dot"></span>
-          <span class="terminal-title">opencode.jsonc</span>
-        </div>
-        <pre class="terminal-body"><code><span class="tok-punct">&#123;</span>
+    <section>
+      <h2>What your agent gets</h2>
+      <p>
+        <code>warden mcp</code> is a local stdio server. Every result carries a schema version, stays
+        under a size bound, and returns a structured reason instead of throwing.
+      </p>
+      <ul>
+        <li>
+          <strong><code>run_det_priors</code></strong>: TSC, ESLint, npm audit with OSV, duplication,
+          security lint, and context selection, as a paged bundle
+        </li>
+        <li>
+          <strong><code>lookup_type_def</code></strong>: library API signatures from the installed
+          type definitions
+        </li>
+        <li>
+          <strong><code>search_index</code></strong>: semantic repo search
+          <span class="home-tag">next</span>
+        </li>
+      </ul>
+      <p>
+        Agent runtimes get better at sub-agents, model routing, and permissions with every release.
+        None of them ships a detector corpus, verified advisories, or a repo index. So Warden hands
+        the loop to the runtime and keeps the parts that have to be right.
+      </p>
+    </section>
+
+    <section>
+      <h2>Connect</h2>
+      <p>Add Warden as a local server in <code>opencode.jsonc</code>. Any MCP client works the same way.</p>
+      <pre class="home-code"><code><span class="tok-punct">&#123;</span>
   <span class="tok-key">"mcp"</span><span class="tok-punct">: &#123;</span>
     <span class="tok-key">"servers"</span><span class="tok-punct">: &#123;</span>
       <span class="tok-key">"warden"</span><span class="tok-punct">: &#123;</span>
@@ -165,106 +107,88 @@ import MarketingShell from "../components/MarketingShell.astro";
     <span class="tok-punct">&#125;</span>
   <span class="tok-punct">&#125;</span>
 <span class="tok-punct">&#125;</span></code></pre>
-        <p class="connect-note">
-          Warden is not on npm yet. Point <code>command</code> at a local checkout —
-          <a href="/docs/mcp/" data-astro-prefetch>the docs show the exact form</a>.
-        </p>
-      </div>
+      <p>
+        Warden is not on npm yet. Point <code>command</code> at a local checkout.
+        <a href="/docs/mcp/" data-astro-prefetch>The MCP docs</a> show the exact form.
+      </p>
     </section>
 
-    <section class="anatomy-band">
-      <div class="anatomy-wrap">
-        <div>
-          <p class="eyebrow">Anatomy</p>
-          <h2>What lands in a <span class="accent">comment.</span></h2>
-          <p class="section-sub">
-            Every Warden comment is a small receipt: a tiered claim, a category, a confidence
-            number, the lane that found it, and the sources that earned it the right to interrupt
-            you.
-          </p>
-          <ul>
-            <li>
-              <span class="anatomy-key">Tier</span>
-              <div>
-                <strong>Block · Fix · Consider</strong>
-                <p>Three steps of actionability, never inflated. Tier 1 is what would block a merge.</p>
-              </div>
-            </li>
-            <li>
-              <span class="anatomy-key">Category</span>
-              <div>
-                <strong>correctness, security, scalability, …</strong>
-                <p>Reading order, not severity. The six concerns are focus areas inside a lane, not lanes of their own.</p>
-              </div>
-            </li>
-            <li>
-              <span class="anatomy-key">Sources</span>
-              <div>
-                <strong>Path, line, snippet — verified</strong>
-                <p>Every external claim points at a real artifact. The post-pass substring-matches it before the comment ships.</p>
-              </div>
-            </li>
-            <li>
-              <span class="anatomy-key">Degraded</span>
-              <div>
-                <strong>What didn't run, said out loud</strong>
-                <p>If a lane or a detector fails, the run admits it. Silence is the failure mode Warden refuses.</p>
-              </div>
-            </li>
-          </ul>
+    <section>
+      <h2>What lands in a comment</h2>
+      <p>Every Warden comment is a small receipt. It earns the right to interrupt you.</p>
+      <ul>
+        <li>
+          <strong>Tier</strong>: Block, Fix, or Consider. Tier 1 is what would block a merge, and it
+          always survives the volume cap.
+        </li>
+        <li>
+          <strong>Category</strong>: correctness, security, scalability, and others. This is the
+          reading order, not the severity.
+        </li>
+        <li>
+          <strong>Sources</strong>: a path, a line, and a snippet. The post-pass matches the snippet
+          before the comment ships.
+        </li>
+        <li>
+          <strong>Degraded</strong>: if a lane or a detector fails, the run says so.
+        </li>
+      </ul>
+      <aside class="receipt" aria-label="Sample comment receipt">
+        <div class="receipt-row">
+          <span class="receipt-key">tier</span>
+          <span class="receipt-val tier-1">1 · Block</span>
         </div>
-        <aside class="receipt" aria-label="Sample comment receipt">
-          <div class="receipt-row">
-            <span class="receipt-key">id</span>
-            <span class="receipt-val">w-7c8f3a · stable across runs</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">tier</span>
-            <span class="receipt-val tier-1">1 · Block</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">lane</span>
-            <span class="receipt-val">down · correctness</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">confidence</span>
-            <span class="receipt-val">96%</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">file</span>
-            <span class="receipt-val">src/routes/session.ts:88</span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">claim</span>
-            <span class="receipt-val">
-              <span class="receipt-emph">exec</span> receives request-controlled input before validation.
-            </span>
-          </div>
-          <div class="receipt-row">
-            <span class="receipt-key">source</span>
-            <span class="receipt-val">security/detect-child-process · tool</span>
-          </div>
-          <div class="receipt-quote">
-            child_process.exec(req.query.command)
-          </div>
-        </aside>
-      </div>
+        <div class="receipt-row">
+          <span class="receipt-key">lane</span>
+          <span class="receipt-val">down · correctness · 96%</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-key">file</span>
+          <span class="receipt-val">src/routes/session.ts:88</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-key">claim</span>
+          <span class="receipt-val">
+            <span class="receipt-emph">exec</span> receives request-controlled input before validation.
+          </span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-key">source</span>
+          <span class="receipt-val">security/detect-child-process · tool</span>
+        </div>
+        <div class="receipt-quote">child_process.exec(req.query.command)</div>
+      </aside>
     </section>
 
-    <section class="closing-band">
-      <div>
-        <p class="eyebrow">Design record</p>
-        <h2>Every choice is <span class="accent">written down.</span></h2>
-        <p>
-          More than fifty ADRs record what Warden does, what it refused, and why. ADR-0053 is the one
-          behind this page: keep the method and the gates, hand the loop to a runtime that does it
-          better.
-        </p>
-      </div>
-      <div class="closing-actions">
-        <a class="button primary" href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">Read the decisions</a>
-        <a class="button secondary" href="/notes/" data-astro-prefetch>Field notes</a>
-      </div>
+    <section>
+      <h2>Principles</h2>
+      <ul>
+        <li><strong>Runs in your repo</strong>: no hosted backend and no upload</li>
+        <li><strong>Gates are not tools</strong>: a model can skip a tool call, so verification runs after the model, every time</li>
+        <li><strong>Measured</strong>: recall and precision evals gate each change</li>
+        <li><strong>Written down</strong>: ADR-0053 explains this page. Keep the method and the gates, and hand the loop to the runtime.</li>
+      </ul>
     </section>
+
+    <nav class="home-links" aria-label="Next steps">
+      <a href="/docs/mcp/" data-astro-prefetch>Connect over MCP <span aria-hidden="true">→</span></a>
+      <a href="/docs/review/" data-astro-prefetch>Read how a review runs <span aria-hidden="true">→</span></a>
+      <a href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">
+        Read the decisions <span aria-hidden="true">→</span>
+      </a>
+    </nav>
   </main>
-</MarketingShell>
+</HomeShell>
+
+<script>
+  // Copy the command chip. Re-bind after each view transition.
+  document.addEventListener("astro:page-load", () => {
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+      button.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(button.dataset.copy ?? "");
+        button.dataset.copied = "true";
+        setTimeout(() => delete button.dataset.copied, 1400);
+      });
+    }
+  });
+</script>

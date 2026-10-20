@@ -1,0 +1,637 @@
+/* Home page: one prose column with a fixed index, after agentation.com. */
+
+.home-shell {
+  /* The column box includes its inline padding, so the text measure is 33rem. */
+  --home-column: 36rem;
+  --home-pad: 1.5rem;
+  --home-side: 11rem;
+  --home-side-min-left: 1.5rem;
+  /* From the right edge of the index to the first character of the text. */
+  --home-gutter: 3.25rem;
+  --home-text: color-mix(in srgb, var(--warden-ink) 86%, var(--warden-paper));
+  --home-faint: color-mix(in srgb, var(--warden-ink) 32%, var(--warden-paper));
+  --home-rule: color-mix(in srgb, var(--warden-ink) 9%, var(--warden-paper));
+  color: var(--home-text);
+  font-size: 14px;
+  line-height: 1.57;
+  letter-spacing: -0.005em;
+}
+
+.home-shell code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warden-ink) 5%, transparent);
+  color: var(--warden-ink);
+  font-family: var(--sl-font-mono);
+  font-size: 0.93em;
+}
+
+.home-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ─── Side index ─────────────────────────────────────────────────────── */
+
+.home-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--warden-ink);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  text-decoration: none;
+}
+
+.home-side-nav {
+  position: fixed;
+  top: 3.25rem;
+  bottom: 1rem;
+  left: max(
+    var(--home-side-min-left),
+    50% - var(--home-column) / 2 + var(--home-pad) - var(--home-gutter) - var(--home-side)
+  );
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: var(--home-side);
+  padding: 0.5rem 0.625rem;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.home-side-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.home-side-nav .home-brand {
+  flex-shrink: 0;
+  margin-bottom: 1rem;
+}
+
+.home-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.home-nav-group + .home-nav-group {
+  margin-top: 0.25rem;
+}
+
+.home-nav-heading {
+  margin: 0 0 0.125rem;
+  color: var(--warden-muted-soft);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.home-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-inline: -0.375rem;
+  padding: 0.1875rem 0.375rem;
+  border-radius: 4px;
+  color: var(--warden-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.home-nav-link:hover {
+  color: var(--warden-ink);
+}
+
+/* Feedback on press, not on release. */
+.home-nav-link:active {
+  background: color-mix(in srgb, var(--warden-ink) 6%, transparent);
+}
+
+.home-nav-link[aria-current="page"] {
+  color: var(--warden-ink);
+  font-weight: 550;
+}
+
+.home-nav-badge {
+  color: var(--warden-accent);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.home-nav-meta {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  margin: 0.75rem 0 0;
+  color: var(--home-faint);
+  font-size: 10px;
+}
+
+.home-nav-meta a {
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.home-nav-meta a:hover {
+  color: var(--warden-muted);
+}
+
+.home-mobile-nav {
+  display: none;
+}
+
+/* ─── Column ─────────────────────────────────────────────────────────── */
+
+.home-article,
+.home-footer {
+  width: 100%;
+  max-width: var(--home-column);
+  margin: 0 auto;
+  padding-inline: var(--home-pad);
+}
+
+/* Between the breakpoint and the width where the column can center, push the
+   column right so the text never runs under the fixed index. */
+@media (min-width: 981px) {
+  .home-article,
+  .home-footer {
+    margin-left: max(
+      var(--home-side-min-left) + var(--home-side) + var(--home-gutter) - var(--home-pad),
+      50% - var(--home-column) / 2
+    );
+  }
+}
+
+.home-article {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  padding-block: 3.5rem 3rem;
+}
+
+.home-article section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.home-article h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.25rem;
+  color: var(--warden-ink);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 20px;
+}
+
+.home-article h2::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--home-rule);
+}
+
+.home-article p {
+  margin: 0;
+}
+
+.home-article ol,
+.home-article ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.home-article li::marker {
+  color: var(--home-faint);
+}
+
+.home-article strong {
+  color: var(--warden-ink);
+  font-weight: 560;
+}
+
+.home-article p a,
+.home-callout a {
+  color: var(--warden-accent);
+  text-decoration: none;
+}
+
+.home-article p a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.home-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.home-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+
+.home-status:hover {
+  color: var(--warden-ink);
+}
+
+.home-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--warden-accent);
+  box-shadow: 0 0 0 3px var(--warden-accent-soft);
+}
+
+.home-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--warden-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.home-command:hover,
+.home-command[data-copied] {
+  color: var(--warden-ink);
+}
+
+.home-command code {
+  padding: 0;
+  background: none;
+  color: inherit;
+}
+
+.home-command[data-copied] svg {
+  color: var(--warden-accent);
+}
+
+.home-tagline {
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.home-tag {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--warden-accent-soft);
+  color: var(--warden-accent);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.6;
+  vertical-align: 0.1em;
+}
+
+.home-tag.partial {
+  background: color-mix(in srgb, var(--warden-gold) 14%, transparent);
+  color: var(--warden-gold);
+}
+
+.home-callout {
+  margin-top: 0.25rem;
+  padding: 0.6rem 1rem;
+  border-left: 2px solid var(--warden-line-strong);
+  color: var(--warden-muted);
+  font-size: 13px;
+}
+
+.home-code {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: #0c0e11;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warden-ink) 8%, transparent);
+  color: #e6edf3;
+  font-family: var(--sl-font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.home-code code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+.home-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 1rem;
+}
+
+.home-links a {
+  width: fit-content;
+  color: var(--warden-accent);
+  text-decoration: none;
+}
+
+.home-links a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* ─── Hero demo and receipt inside the column ────────────────────────── */
+
+.home-article .terminal-window {
+  border-color: transparent;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--warden-ink) 8%, transparent),
+    0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.home-article .terminal-body {
+  padding: 1rem 1.1rem;
+  font-size: 11.5px;
+}
+
+.home-article .phase {
+  margin-top: 0.35rem;
+}
+
+.home-article .finding-list {
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.home-article .mini-finding {
+  padding: 0.6rem 0.75rem;
+}
+
+.home-article .mini-finding:nth-child(n + 3) {
+  display: none;
+}
+
+.home-article .mini-claim {
+  font-size: 11.5px;
+}
+
+.home-article .receipt {
+  margin-top: 0.5rem;
+  padding: 1.1rem 1.25rem;
+  font-size: 12px;
+}
+
+/* The ticket notches cut into the page colour, not the deeper band colour. */
+.home-article .receipt::before,
+.home-article .receipt::after {
+  background-image: radial-gradient(circle at 8px 7px, var(--warden-paper) 6px, transparent 6.5px);
+}
+
+.home-article .receipt-key {
+  flex-basis: 5rem;
+  font-size: 10.5px;
+}
+
+.home-article .receipt-quote {
+  font-size: 11.5px;
+}
+
+/* ─── Footer ─────────────────────────────────────────────────────────── */
+
+.home-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1rem 3rem;
+  color: var(--home-faint);
+  font-size: 12px;
+}
+
+.home-footer p {
+  margin: 0;
+}
+
+.home-footer a {
+  color: var(--warden-muted);
+  text-decoration: none;
+}
+
+.home-footer a:hover {
+  color: var(--warden-ink);
+}
+
+/* ─── Narrow screens: the index folds into a menu ────────────────────── */
+
+@media (max-width: 980px) {
+  .home-side-nav {
+    display: none;
+  }
+
+  .home-mobile-nav {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem var(--home-pad) 0.375rem;
+  }
+
+  .home-mobile-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .home-menu-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-right: -0.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--warden-muted);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .home-menu-toggle:active {
+    background: color-mix(in srgb, var(--warden-ink) 6%, transparent);
+  }
+
+  .home-menu-icon {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 0.875rem;
+    height: 0.5rem;
+  }
+
+  .home-menu-icon span {
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentColor;
+    transition: transform 200ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .home-mobile-nav[data-open] .home-menu-icon span:first-child {
+    transform: translateY(3.25px) rotate(45deg);
+  }
+
+  .home-mobile-nav[data-open] .home-menu-icon span:last-child {
+    transform: translateY(-3.25px) rotate(-45deg);
+  }
+
+  /* A CSS transition reverses from its current value, so a second tap mid-way
+     turns the panel around without a jump. */
+  .home-mobile-menu {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1),
+      opacity 160ms ease;
+  }
+
+  .home-mobile-nav[data-open] .home-mobile-menu {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .home-mobile-menu-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 0;
+    margin-inline: -0.625rem;
+    padding: 0.75rem 0.625rem 0.5rem;
+    overflow: hidden;
+  }
+
+  .home-mobile-menu .home-nav-group + .home-nav-group {
+    margin-top: 0;
+  }
+
+  .home-mobile-menu .home-nav-heading {
+    padding-inline: 0.625rem;
+    margin-inline: -0.625rem;
+    font-size: 12px;
+  }
+
+  .home-mobile-menu .home-nav-link {
+    margin-inline: -0.625rem;
+    padding: 0.375rem 0.625rem;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .home-mobile-menu .home-nav-link[aria-current="page"] {
+    background: color-mix(in srgb, var(--warden-ink) 5%, transparent);
+  }
+
+  .home-article {
+    padding-top: 2rem;
+  }
+}
+
+@media (max-width: 980px) and (pointer: coarse) {
+  .home-mobile-menu .home-nav-link {
+    min-height: 44px;
+  }
+}
+
+/* The demo and the receipt shrink as one unit on phones. */
+@media (max-width: 640px) {
+  .home-article .terminal-bar {
+    height: 2rem;
+    padding-inline: 0.75rem;
+  }
+
+  .home-article .terminal-bar .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  .home-article .terminal-bar .terminal-title {
+    font-size: 10px;
+  }
+
+  .home-article .terminal-body {
+    padding: 0.85rem 0.9rem;
+    font-size: 10.5px;
+  }
+
+  .home-article .phase-tag {
+    min-width: 1.75rem;
+    font-size: 10px;
+  }
+
+  .home-article .finding-list {
+    margin-top: 0.75rem;
+  }
+
+  .home-article .mini-finding {
+    padding: 0.5rem 0.65rem;
+  }
+
+  .home-article .mini-finding:nth-child(n + 2) {
+    display: none;
+  }
+
+  .home-article .mini-meta {
+    font-size: 10px;
+  }
+
+  .home-article .mini-file {
+    font-size: 11px;
+  }
+
+  .home-article .mini-claim {
+    font-size: 10.5px;
+  }
+
+  .home-article .receipt {
+    padding: 1rem;
+  }
+
+  .home-article .receipt-key {
+    flex-basis: 3.75rem;
+  }
+
+  .home-footer {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-mobile-menu,
+  .home-menu-icon span {
+    transition: opacity 120ms ease;
+  }
+}

@@ -1,0 +1,177 @@
+---
+import { ClientRouter } from "astro:transitions";
+import "../styles/global.css";
+import "../styles/home.css";
+import Logo from "./Logo.astro";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const ogTitle = `${title} - Warden`;
+
+interface NavLink {
+  href: string;
+  label: string;
+  badge?: string;
+}
+
+interface NavGroup {
+  heading?: string;
+  links: NavLink[];
+}
+
+// One column of prose with a fixed index on the left, after agentation.com.
+const navGroups: NavGroup[] = [
+  {
+    links: [
+      { href: "/", label: "Overview" },
+      { href: "/docs/install/", label: "Install" },
+      { href: "/docs/review/", label: "Review pipeline" },
+      { href: "/docs/reading-comments/", label: "Reading comments" },
+    ],
+  },
+  {
+    heading: "Integrations",
+    links: [
+      { href: "/docs/mcp/", label: "MCP and OpenCode", badge: "new" },
+      { href: "/docs/ci/", label: "CI" },
+      { href: "/docs/configuration/", label: "Configuration" },
+    ],
+  },
+  {
+    heading: "Resources",
+    links: [
+      { href: "/examples/", label: "Examples" },
+      { href: "/design/", label: "Design" },
+      { href: "/notes/", label: "Notes" },
+      { href: "https://github.com/99Yash/warden/blob/main/decisions.md", label: "Decisions" },
+    ],
+  },
+];
+const currentPath = Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fafaf7" media="(prefers-color-scheme: light)" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:title" content={ogTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <title>{ogTitle}</title>
+    <ClientRouter />
+  </head>
+  <body class="marketing-shell home-shell">
+    <nav class="home-mobile-nav" aria-label="Site index" data-home-menu>
+      <div class="home-mobile-bar">
+        <a class="home-brand" href="/" aria-label="Warden home">
+          <Logo size={22} />
+          <span>Warden</span>
+        </a>
+        <button
+          class="home-menu-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="home-mobile-menu"
+          aria-label="Open the site index"
+        >
+          <span class="home-menu-icon" aria-hidden="true"><span></span><span></span></span>
+        </button>
+      </div>
+      <div class="home-mobile-menu" id="home-mobile-menu" inert>
+        <div class="home-mobile-menu-inner">
+          {
+            navGroups.map((group) => (
+              <div class="home-nav-group">
+                {group.heading && <p class="home-nav-heading">{group.heading}</p>}
+                {group.links.map((link) => (
+                  <a
+                    class="home-nav-link"
+                    href={link.href}
+                    aria-current={link.href === currentPath ? "page" : undefined}
+                    rel={link.href.startsWith("/") ? undefined : "noreferrer"}
+                  >
+                    {link.label}
+                    {link.badge && <span class="home-nav-badge">{link.badge}</span>}
+                  </a>
+                ))}
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </nav>
+
+    <nav class="home-side-nav" aria-label="Site index">
+      <a class="home-brand" href="/" aria-label="Warden home">
+        <Logo size={24} draw />
+        <span>Warden</span>
+      </a>
+      {
+        navGroups.map((group) => (
+          <div class="home-nav-group">
+            {group.heading && <p class="home-nav-heading">{group.heading}</p>}
+            {group.links.map((link) => (
+              <a
+                class="home-nav-link"
+                href={link.href}
+                aria-current={link.href === currentPath ? "page" : undefined}
+                data-astro-prefetch={link.href.startsWith("/") ? "" : undefined}
+                rel={link.href.startsWith("/") ? undefined : "noreferrer"}
+              >
+                {link.label}
+                {link.badge && <span class="home-nav-badge">{link.badge}</span>}
+              </a>
+            ))}
+          </div>
+        ))
+      }
+      <p class="home-nav-meta">
+        <span>v0 preview</span>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/99Yash/warden" rel="noreferrer">GitHub</a>
+      </p>
+    </nav>
+
+    <slot />
+
+    <footer class="home-footer">
+      <p>Local-first · MCP · receipts-only</p>
+      <a href="https://github.com/99Yash/warden" rel="noreferrer">Source on GitHub</a>
+    </footer>
+  </body>
+</html>
+
+<script>
+  // Open and close the index on narrow screens. Re-bind after each view transition.
+  document.addEventListener("astro:page-load", () => {
+    const nav = document.querySelector<HTMLElement>("[data-home-menu]");
+    const toggle = nav?.querySelector<HTMLButtonElement>(".home-menu-toggle");
+    const menu = nav?.querySelector<HTMLElement>(".home-mobile-menu");
+    if (!nav || !toggle || !menu) return;
+
+    const setOpen = (open: boolean) => {
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-label", open ? "Close the site index" : "Open the site index");
+      menu.inert = !open;
+      nav.toggleAttribute("data-open", open);
+    };
+
+    toggle.addEventListener("click", () => setOpen(!nav.hasAttribute("data-open")));
+    nav.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !nav.hasAttribute("data-open")) return;
+      setOpen(false);
+      toggle.focus();
+    });
+  });
+</script>
