@@ -40,7 +40,7 @@ const paths = [
 const ProviderRequestSchema = z.looseObject({
   tools: z.array(z.looseObject({ name: z.string() })).optional(),
 });
-let requests: Array<Record<string, unknown>> = [];
+let requests: z.infer<typeof ProviderRequestSchema>[] = [];
 let step = 0;
 // oxlint-disable-next-line typescript/no-misused-promises -- a rejected handler crashes the probe, which is the loud failure a smoke run wants
 const provider = createServer(async (req, res) => {

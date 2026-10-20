@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { deriveLaneScope, resolveDiff, runPostPass, type LaneOutput } from "@warden/core";
+import { isRecord } from "@warden/core/guards";
 import {
   buildLaneMessage,
   DEFAULT_LANE_TIMEOUT_SECS,
@@ -110,14 +111,6 @@ function buildClaudeCodeMessage(baseRef: string): string {
   return `${buildLaneMessage(baseRef)} Tool names on this client: ${mapping}.`;
 }
 
-/**
- * A JSON object (not an array) from the claude stream. The stream has no
- * schema that warden owns, so each field is checked where it is read.
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 interface ParsedClaudeCodeLane {
   parsed: ParsedLane;
   usage?: SessionUsage;
@@ -155,9 +148,7 @@ function parseClaudeCodeEvents(stdout: string): ParsedClaudeCodeLane {
     if (type === "system" && record["subtype"] === "init") {
       if (typeof record["model"] === "string") initModel = record["model"];
       const servers = Array.isArray(record["mcp_servers"]) ? record["mcp_servers"] : [];
-      const warden = servers.find(
-        (s: unknown): s is Record<string, unknown> => isRecord(s) && s["name"] === "warden",
-      );
+      const warden = servers.filter(isRecord).find((s) => s["name"] === "warden");
       if (warden?.["status"] !== "connected") {
         errors.push(`warden MCP server not connected (status: ${String(warden?.["status"])})`);
       }
@@ -206,6 +197,16 @@ function normalizeToolName(name: string): string {
 }
 
 /**
+ * The `result` event fields that `parseResultUsage` reads. The claude stream
+ * has no schema that warden owns, so each value is checked where it is read.
+ */
+interface ClaudeResultEvent {
+  total_cost_usd?: unknown;
+  usage?: unknown;
+  modelUsage?: unknown;
+}
+
+/**
  * `total_cost_usd` is the API-price equivalent even on a subscription
  * login (no money moves), which is the number the gate compares. The
  * model is every `modelUsage` key, so a background call on another model
@@ -216,11 +217,11 @@ function normalizeToolName(name: string): string {
  * reasoning count may be absent (a run with no thinking).
  */
 function parseResultUsage(
-  record: Record<string, unknown>,
+  record: ClaudeResultEvent,
   initModel: string | undefined,
 ): SessionUsage | undefined {
-  const cost = record["total_cost_usd"];
-  const u = record["usage"];
+  const cost = record.total_cost_usd;
+  const u = record.usage;
   if (typeof cost !== "number" || cost < 0 || !isRecord(u)) {
     return undefined;
   }
@@ -239,7 +240,7 @@ function parseResultUsage(
   }
   const details = usage["output_tokens_details"];
   const thinking = isRecord(details) ? details["thinking_tokens"] : undefined;
-  const modelUsage = record["modelUsage"];
+  const modelUsage = record.modelUsage;
   const models =
     typeof modelUsage === "object" && modelUsage !== null ? Object.keys(modelUsage) : [];
   const model = models.length > 0 ? models.join(",") : initModel;

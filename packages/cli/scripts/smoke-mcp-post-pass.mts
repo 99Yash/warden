@@ -107,10 +107,8 @@ function mkLane(
  * track findings by their unique `claim` (or the minted id), never by a
  * supplied id.
  */
-function claimOf(f: Record<string, unknown>): string {
-  const claim = f["claim"];
-  if (typeof claim !== "string") throw new Error("smoke: a fixture finding has no string claim");
-  return claim;
+function claimOf(f: Pick<Comment, "claim">): string {
+  return f.claim;
 }
 
 /** The exit status and stdout that `execFileSync` attaches to the error it throws. */
@@ -517,8 +515,7 @@ try {
   // [9] volume cap.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[9] volume cap — Tier-1 always kept\n");
-  const ten: Record<string, unknown>[] = [];
-  for (let i = 0; i < 8; i++) ten.push(mkFinding({ kind: "question", confidence: 0.9 }));
+  const ten = Array.from({ length: 8 }, () => mkFinding({ kind: "question", confidence: 0.9 }));
   const t1a = mkFinding({ tier: 1, kind: "question", confidence: 0.9 });
   const t1b = mkFinding({ tier: 1, kind: "question", confidence: 0.9 });
   ten.push(t1a, t1b);
