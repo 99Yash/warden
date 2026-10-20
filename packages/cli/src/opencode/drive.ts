@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deterministicProcessEnv } from "@warden/env";
+import { z } from "zod";
 import {
   deriveLaneScope,
   isNotClean,
@@ -383,6 +384,16 @@ const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
   /request_too_large/i,
 ];
 
+/** The fields of a run `error` event that the driver reads. A field of the wrong type reads as absent. */
+const LaneErrorSchema = z.looseObject({
+  type: z.string().optional().catch(undefined),
+  message: z.string().optional().catch(undefined),
+  response: z
+    .looseObject({ body: z.string().optional().catch(undefined) })
+    .optional()
+    .catch(undefined),
+});
+
 /**
  * Whether an `error` event's `error` object is a provider context
  * overflow. Shape verified with the shipped binary v2.0.32 and a loopback
@@ -391,13 +402,9 @@ const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
  * response:{body}}`. The message and the raw body are both checked.
  */
 export function isContextOverflowError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const record = error as Record<string, unknown>;
-  if (record["type"] !== "provider.invalid-request") return false;
-  const message = typeof record["message"] === "string" ? record["message"] : "";
-  const response = record["response"] as Record<string, unknown> | undefined;
-  const body = typeof response?.["body"] === "string" ? response["body"] : "";
-  const text = `${message}\n${body}`;
+  const parsed = LaneErrorSchema.safeParse(error);
+  if (!parsed.success || parsed.data.type !== "provider.invalid-request") return false;
+  const text = `${parsed.data.message ?? ""}\n${parsed.data.response?.body ?? ""}`;
   return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text));
 }
 
@@ -482,8 +489,8 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       }
     } else if (record["type"] === "error") {
       const error = record["error"];
-      const message = (error as Record<string, unknown> | undefined)?.["message"];
-      const text = typeof message === "string" && message !== "" ? message : "unknown error event";
+      const message = LaneErrorSchema.safeParse(error).data?.message;
+      const text = message !== undefined && message !== "" ? message : "unknown error event";
       errors.push(text);
       if (contextLimit === undefined && isContextOverflowError(error)) contextLimit = text;
     }
@@ -804,6 +811,9 @@ async function fetchSessionUsage(opts: {
   }
 }
 
+/** The `SessionMessagesResponse` fields that `parseSessionCompactions` reads. */
+const SessionMessagesSchema = z.object({ data: z.array(z.looseObject({ type: z.string() })) });
+
 /**
  * The `GET /api/session/<id>/message?type=compaction` response is
  * untrusted JSON: validate at this boundary. Shape (verified live against
@@ -813,17 +823,9 @@ async function fetchSessionUsage(opts: {
  * or `undefined` when the shape is wrong.
  */
 export function parseSessionCompactions(body: unknown): number | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const data = (body as Record<string, unknown>)["data"];
-  if (!Array.isArray(data)) return undefined;
-  let count = 0;
-  for (const entry of data) {
-    if (typeof entry !== "object" || entry === null) return undefined;
-    const type = (entry as Record<string, unknown>)["type"];
-    if (typeof type !== "string") return undefined;
-    if (type === "compaction") count += 1;
-  }
-  return count;
+  const parsed = SessionMessagesSchema.safeParse(body);
+  if (!parsed.success) return undefined;
+  return parsed.data.data.filter((entry) => entry.type === "compaction").length;
 }
 
 /**
