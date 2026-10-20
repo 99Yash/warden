@@ -443,6 +443,13 @@ try {
     child.stderr.on("data", (c: string) => {
       childErr += c;
     });
+    // Subscribe before the first await. The child can exit while waitFor(2)
+    // still polls; a listener added later misses the event, and the pending
+    // top-level await then ends the smoke with exit code 13. `close` (not
+    // `exit`) also waits for stdio to drain, so childErr is complete.
+    const childClosed = new Promise<number | null>((resolveClose) => {
+      child.once("close", (code) => resolveClose(code));
+    });
     const send = (msg: JSONRPCMessage): void => {
       child.stdin.write(`${JSON.stringify(msg)}\n`);
     };
@@ -511,9 +518,7 @@ try {
       toolEnvelope?.status === "ok",
       "in-flight tools/call response is written after client EOF",
     );
-    const exitCode = await new Promise<number | null>((resolveExit) => {
-      child.on("exit", (code) => resolveExit(code));
-    });
+    const exitCode = await childClosed;
     assert(exitCode === 0, `child exits 0 after EOF-driven drain (got ${exitCode})`);
     assert(
       childErr.includes("warden mcp: session ended"),
