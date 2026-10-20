@@ -138,7 +138,7 @@ assert(
 );
 const entry = bogusDiff.degraded?.[0];
 assert(
-  entry?.kind === "actionable" && entry?.topic === "diff-source",
+  entry?.kind === "actionable" && entry.topic === "diff-source",
   `degraded entry has kind=actionable and topic=diff-source (got ${entry?.kind}/${entry?.topic})`,
 );
 assert(

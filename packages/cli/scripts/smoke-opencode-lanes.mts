@@ -372,8 +372,8 @@ try {
   const permissions = agent?.permissions ?? [];
   assert(
     permissions[0]?.action === "*" &&
-      permissions[0]?.resource === "*" &&
-      permissions[0]?.effect === "deny",
+      permissions[0].resource === "*" &&
+      permissions[0].effect === "deny",
     "first permission rule denies every tool",
   );
   const allowed = permissions.filter((p) => p.effect === "allow").map((p) => p.action);
@@ -1393,7 +1393,7 @@ if (mode === "runfail") {
   assert(
     lanesOut?.version === 1 &&
       lanesOut.lanes[0]?.lane === "down" &&
-      lanesOut.lanes[0]?.status === "ok",
+      lanesOut.lanes[0].status === "ok",
     "--lanes-out carries the down/ok envelope for replay",
   );
   // The fake serve answers the session route with a fixed usage; the
@@ -1989,7 +1989,7 @@ if (mode === "runfail") {
   }
   assert(
     bigLanesOut?.lanes[0]?.status === "failed" &&
-      bigLanesOut.lanes[0]?.reason?.includes("review target too large") === true,
+      bigLanesOut.lanes[0].reason?.includes("review target too large") === true,
     "over-ceiling scope still writes the failed envelope to --lanes-out",
   );
   rmSync(BIG, { recursive: true, force: true });
@@ -2029,7 +2029,7 @@ if (mode === "runfail") {
   assert(
     agents.runSpawned === false &&
       agents.lanes[0]?.status === "failed" &&
-      agents.lanes[0]?.reason?.includes("src/AGENTS.md") === true,
+      agents.lanes[0].reason?.includes("src/AGENTS.md") === true,
     "nested AGENTS.md change → failed lane naming the file, runSpawned false",
   );
   assert(

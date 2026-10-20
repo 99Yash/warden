@@ -315,6 +315,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
     emit: translateReconcileEvent,
   });
 
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- translateReconcileEvent sets it from inside reconcileFiles; TS does not see a write in a callback
   if (!embedPhaseStarted) {
     // Nothing to refresh — emit terminal events so the renderer closes
     // both phases cleanly.

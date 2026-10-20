@@ -186,7 +186,6 @@ process.stdout.write(`\n[1] lookupTypeDef — positive root lookup\n`);
     );
     // suggestedSource shape.
     const ss = r.suggestedSource;
-    assert(ss.type === "api_def", "suggestedSource.type === 'api_def'");
     assert(
       ss.id === `drizzle-orm-fake@${VERSION}#withClause`,
       `suggestedSource.id correct (${ss.id})`,

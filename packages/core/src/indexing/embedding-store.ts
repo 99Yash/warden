@@ -118,7 +118,7 @@ export class SqliteEmbeddingStore implements EmbeddingStore {
         and(eq(embeddingsTable.modelId, modelId), eq(embeddingsTable.modelVersion, modelVersion)),
       )
       .run();
-    return Number(result.changes ?? 0);
+    return result.changes;
   }
 }
 

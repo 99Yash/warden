@@ -94,13 +94,11 @@ async function call(name: string, args: Record<string, unknown>, caller: Client 
     JSON.stringify(result.structuredContent) === JSON.stringify(JSON.parse(content[0].text)),
     `${name} preserves the full envelope in structuredContent and JSON text`,
   );
-  // tautology-ok: partial correlation, not serialization-only. The version
-  // assertion repeats the shared envelope schema's literal check (the parse
-  // above already rejects a wrong version), and the tool-name assertion
+  // tautology-ok: partial correlation, not serialization-only. The parse
+  // above already rejects a wrong envelope version. The tool-name assertion
   // checks request/result correlation — it fails if the handler returns an
   // envelope built for a different tool than the one requested, even though
   // JSON-RPC transmitted every field faithfully.
-  assert(envelope.envelopeVersion === TOOL_ENVELOPE_VERSION, `${name} envelope is versioned`);
   assert(envelope.tool === name, `${name} envelope identifies the tool`);
   return envelope;
 }
@@ -181,7 +179,7 @@ try {
     "package and symbol are string properties",
   );
   assert(
-    schema?.required?.includes("package") && schema?.required?.includes("symbol"),
+    schema?.required?.includes("package") && schema.required.includes("symbol"),
     "both input properties are required",
   );
 
@@ -193,10 +191,9 @@ try {
   if (parsed.success) {
     const data = parsed.data;
     const ss = data.suggestedSource;
-    assert(data.found && data.symbol === SYMBOL, "requested symbol resolves");
+    assert(data.symbol === SYMBOL, "requested symbol resolves");
     assert(
-      ss.type === "api_def" &&
-        ss.id === `typescript@${data.version}#${SYMBOL}` &&
+      ss.id === `typescript@${data.version}#${SYMBOL}` &&
         ss.title === `function ${SYMBOL}` &&
         ss.path === data.dts_file &&
         ss.line === data.line_start &&
@@ -238,9 +235,8 @@ try {
     symbol: "large",
   });
   assert(
-    oversized.status === "error" &&
-      oversized.reason === "result_too_large" &&
-      oversized.data === undefined,
+    // The envelope schema rejects `data` on an error envelope.
+    oversized.status === "error" && oversized.reason === "result_too_large",
     "oversized result degrades without returning a truncated citation",
   );
   assert(oversized.hint?.includes("content limit"), "overflow envelope explains the size limit");

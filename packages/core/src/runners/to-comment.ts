@@ -1,3 +1,4 @@
+import { assertNever } from "../assert-never.js";
 import { stableCommentId } from "../comment-id.js";
 import type { ChangedFile } from "../diff/index.js";
 import type { Category, Comment, Tier } from "../schema.js";
@@ -46,63 +47,65 @@ export function toComment(f: ToolFinding): Comment {
 }
 
 export function mapSeverity(f: ToolFinding): { tier: Tier; category: Category } {
-  // ADR-0054: deterministic integrity signals must survive curation and caps.
-  if (f.source === "input-integrity" || f.source === "secret-diff")
-    return { tier: 1, category: "security" };
-  if (f.source === "tsc") {
-    return f.severity === "error"
-      ? { tier: 1, category: "correctness" }
-      : { tier: 2, category: "correctness" };
-  }
-  if (f.source === "jscpd") {
-    return { tier: 3, category: "dedup" };
-  }
-  if (f.source === "scalability") {
-    return { tier: 2, category: "scalability" };
-  }
-  if (f.source === "deadcode") {
-    return { tier: 2, category: "deadcode" };
-  }
-  if (f.source === "consistency") {
-    return { tier: 2, category: "consistency" };
-  }
-  if (f.source === "leverage") {
-    return { tier: 2, category: "leverage" };
-  }
-  // ADR-0046: react-doctor findings route off the carried `rdCategory`
-  // (react-doctor's coarse category), NOT severity. Tiers are category-fixed:
-  // Security → Tier 1 (matches the ESLint-security precedent below — the
-  // Tier-3 verbose gate must not suppress security), Bugs/Performance → Tier 2,
-  // Maintainability/Accessibility → Tier 3. react-doctor's error/warning is
-  // kept on the finding for debug but intentionally ignored here.
-  if (f.source === "react-doctor") {
-    switch (f.rdCategory) {
-      case "Security":
-        return { tier: 1, category: "security" };
-      case "Bugs":
-        return { tier: 2, category: "correctness" };
-      case "Performance":
-        return { tier: 2, category: "scalability" };
-      case "Maintainability":
-      case "Accessibility":
-        return { tier: 3, category: "clarity" };
-      default:
-        return { tier: 3, category: "clarity" };
-    }
-  }
-  // ADR-0028 §7 / M13: ESLint findings from the Warden-managed security
-  // pass carry rule IDs prefixed `security/*` or `no-secrets/*`. Route them
-  // to the `security` category at Tier 1 unconditionally — these patterns
-  // exist *because* they're security issues; the Tier-3 verbose gate must
-  // not be able to suppress them, and the M13 confidence floor's Tier-1
-  // bypass guarantees they surface even when sub-agent noise is being
-  // curated.
-  if (f.source === "eslint" && f.ruleId !== undefined) {
-    if (f.ruleId.startsWith("security/") || f.ruleId.startsWith("no-secrets/")) {
+  switch (f.source) {
+    // ADR-0054: deterministic integrity signals must survive curation and caps.
+    case "input-integrity":
+    case "secret-diff":
       return { tier: 1, category: "security" };
-    }
+    case "tsc":
+      return f.severity === "error"
+        ? { tier: 1, category: "correctness" }
+        : { tier: 2, category: "correctness" };
+    case "jscpd":
+      return { tier: 3, category: "dedup" };
+    case "scalability":
+      return { tier: 2, category: "scalability" };
+    case "deadcode":
+      return { tier: 2, category: "deadcode" };
+    case "consistency":
+      return { tier: 2, category: "consistency" };
+    case "leverage":
+      return { tier: 2, category: "leverage" };
+    // ADR-0046: react-doctor findings route off the carried `rdCategory`
+    // (react-doctor's coarse category), NOT severity. Tiers are category-fixed:
+    // Security → Tier 1 (matches the ESLint-security precedent below — the
+    // Tier-3 verbose gate must not suppress security), Bugs/Performance → Tier 2,
+    // Maintainability/Accessibility → Tier 3. react-doctor's error/warning is
+    // kept on the finding for debug but intentionally ignored here.
+    case "react-doctor":
+      switch (f.rdCategory) {
+        case "Security":
+          return { tier: 1, category: "security" };
+        case "Bugs":
+          return { tier: 2, category: "correctness" };
+        case "Performance":
+          return { tier: 2, category: "scalability" };
+        case "Maintainability":
+        case "Accessibility":
+          return { tier: 3, category: "clarity" };
+        default:
+          return { tier: 3, category: "clarity" };
+      }
+    // ADR-0028 §7 / M13: ESLint findings from the Warden-managed security
+    // pass carry rule IDs prefixed `security/*` or `no-secrets/*`. Route them
+    // to the `security` category at Tier 1 unconditionally — these patterns
+    // exist *because* they're security issues; the Tier-3 verbose gate must
+    // not be able to suppress them, and the M13 confidence floor's Tier-1
+    // bypass guarantees they surface even when sub-agent noise is being
+    // curated.
+    case "eslint":
+      if (
+        f.ruleId !== undefined &&
+        (f.ruleId.startsWith("security/") || f.ruleId.startsWith("no-secrets/"))
+      ) {
+        return { tier: 1, category: "security" };
+      }
+      return f.severity === "error"
+        ? { tier: 2, category: "style" }
+        : { tier: 3, category: "style" };
+    default:
+      return assertNever(f.source, "ToolFinding.source");
   }
-  return f.severity === "error" ? { tier: 2, category: "style" } : { tier: 3, category: "style" };
 }
 
 /**

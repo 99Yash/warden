@@ -943,7 +943,7 @@ export async function waitForWardenMcp(opts: {
     }
     if (readiness.state === "connected") return;
     if (readiness.state === "failed") throw new Error(readiness.detail);
-    lastDetail = readiness.state === "pending" ? readiness.detail : lastDetail;
+    lastDetail = readiness.detail;
     if (Date.now() >= deadline) {
       const secs = Math.round(opts.timeoutMs / 1000);
       throw new Error(`warden MCP server not connected within ${secs}s (last: ${lastDetail})`);
@@ -1185,7 +1185,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
       stdio: ["ignore", "ignore", "pipe"],
     });
     let serveStderr = "";
-    serve.stderr?.on("data", (d: Buffer) => {
+    serve.stderr.on("data", (d: Buffer) => {
       serveStderr += d.toString();
       if (serveStderr.length > STDERR_TAIL_BYTES)
         serveStderr = serveStderr.slice(-STDERR_TAIL_BYTES);
@@ -1459,7 +1459,7 @@ async function killServe(serve: ChildProcess): Promise<void> {
         // Already gone.
       }
     }, SERVE_KILL_GRACE_MS);
-    timer.unref?.();
+    timer.unref();
     serve.once("exit", () => {
       clearTimeout(timer);
       resolveP();
@@ -1495,7 +1495,7 @@ function spawnLane(
       finish({ exitCode: -1, stdout, timedOut: true });
     }, timeoutSecs * 1000);
     // Unref'd so the timer never holds the loop open on its own.
-    timer.unref?.();
+    timer.unref();
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
     });

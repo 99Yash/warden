@@ -108,7 +108,7 @@ export class CodeChunkAdapter implements Chunker {
     const records: ChunkRecord[] = [];
     for (const c of raw) {
       const chunkHash = sha256Hex(c.text);
-      const symbolPath = (c.context.scope ?? [])
+      const symbolPath = c.context.scope
         .map((s) => s.name)
         .filter((n): n is string => typeof n === "string" && n.length > 0);
       records.push({

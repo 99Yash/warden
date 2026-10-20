@@ -36,18 +36,16 @@ function assert(cond: unknown, msg: string): void {
 process.stdout.write(`\n[1] schema migration\n`);
 // Force migration by exercising any table.
 db().select().from(fileChunks).all();
-const tableRow = db().run(
-  sql`SELECT name FROM sqlite_master WHERE type='table' AND name='file_chunks'`,
-);
-assert(tableRow !== undefined, "file_chunks table created on first db()");
-const pathIdx = db().run(
-  sql`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_fc_path'`,
-);
-assert(pathIdx !== undefined, "idx_fc_path index present");
-const hashIdx = db().run(
-  sql`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_fc_hash'`,
-);
-assert(hashIdx !== undefined, "idx_fc_hash index present");
+// `run()` returns a RunResult for any statement, so read the rows instead.
+function schemaObjectExists(type: "table" | "index", name: string): boolean {
+  const rows = db().all(
+    sql`SELECT name FROM sqlite_master WHERE type = ${type} AND name = ${name}`,
+  );
+  return rows.length === 1;
+}
+assert(schemaObjectExists("table", "file_chunks"), "file_chunks table created on first db()");
+assert(schemaObjectExists("index", "idx_fc_path"), "idx_fc_path index present");
+assert(schemaObjectExists("index", "idx_fc_hash"), "idx_fc_hash index present");
 
 process.stdout.write(`\n[2] store round-trip\n`);
 const store = new SqliteFileChunksStore();

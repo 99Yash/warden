@@ -113,7 +113,7 @@ assert(entries.length === 1, `exactly one degraded entry (got ${entries.length})
 assert(entries[0]?.kind === "info", `kind is info (got ${entries[0]?.kind})`);
 assert(entries[0]?.topic === "security", `topic is security (got ${entries[0]?.topic})`);
 assert(
-  entries[0]?.message.includes("2") && entries[0]?.message.includes("0.8"),
+  entries[0]?.message.includes("2") && entries[0].message.includes("0.8"),
   `message mentions count=2 and floor=0.8 ("${entries[0]?.message}")`,
 );
 

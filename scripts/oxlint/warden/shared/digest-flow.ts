@@ -87,7 +87,8 @@ export function digestSinkOf(call: ESTree.CallExpression): Sink | null {
 
   if (member === null) return null;
 
-  const [first, second] = call.arguments;
+  const first = call.arguments.at(0);
+  const second = call.arguments.at(1);
 
   if (member.name === "update" && first !== undefined && first.type !== "SpreadElement") {
     return { call, data: first, receiver: member.object, helper: null };
@@ -151,7 +152,7 @@ export function ownerImportsOf(
 
     for (const specifier of statement.specifiers) {
       if (specifier.type === "ImportSpecifier" && specifier.importKind === "type") continue;
-      const [variable] = sourceCode.getDeclaredVariables(specifier);
+      const variable = sourceCode.getDeclaredVariables(specifier).at(0);
 
       if (variable === undefined) continue;
 
@@ -213,7 +214,7 @@ export function ownerHasherOf(
 /** A call of an owner hasher is a sink over its first argument. */
 export function ownerSinkOf(imports: OwnerImports, call: ESTree.CallExpression): Sink | null {
   const hasher = ownerHasherOf(imports, call.callee);
-  const [first] = call.arguments;
+  const first = call.arguments.at(0);
 
   if (hasher === null || first === undefined || first.type === "SpreadElement") return null;
 
@@ -314,7 +315,7 @@ export function createDigestFlow(
 
   /** The values the binding can hold at `use`. See the sha256 rule header for the reaching rule. */
   function reachingValues(variable: Variable, use: Reference): ESTree.Expression[] {
-    const [definition] = variable.defs;
+    const definition = variable.defs.at(0);
 
     if (definition === undefined || variable.defs.some((def) => def.type !== "Variable")) return [];
 
@@ -353,7 +354,7 @@ export function createDigestFlow(
    * destructured parameter binds (`{ raw }`).
    */
   function parameterSlot(variable: Variable): ParameterSlot | null {
-    const [definition] = variable.defs;
+    const definition = variable.defs.at(0);
 
     if (variable.defs.length !== 1 || definition?.type !== "Parameter") return null;
 
@@ -427,7 +428,7 @@ export function createDigestFlow(
     );
     const transformed = (node: Ranged) => outer.some(({ call }) => within(node, call));
     for (const { call, kind } of outer) {
-      const argument = call.arguments[0];
+      const argument = call.arguments.at(0);
       if (argument !== undefined && argument.type !== "SpreadElement") {
         collect(argument, flow, seen, true, kind === "parse");
       }
@@ -461,6 +462,7 @@ export function createDigestFlow(
         if (isFunctionNode(unwrap(value))) continue;
         collect(value, flow, seen, canonicalizing, decoded);
 
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- `collect` sets `flow.json` through the shared object; TS keeps the narrowing from the check at the top across the call
         if (flow.json) return;
       }
     }
@@ -516,7 +518,7 @@ export function createDigestFlow(
         const call = reference.identifier.parent;
 
         if (call.type !== "CallExpression" || call.callee !== reference.identifier) continue;
-        const argument = call.arguments[slot.index];
+        const argument = call.arguments.at(slot.index);
 
         if (argument === undefined || argument.type === "SpreadElement") continue;
 

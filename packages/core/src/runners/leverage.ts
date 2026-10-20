@@ -1,6 +1,5 @@
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
-import { assertNever } from "../assert-never.js";
 import type { Runner, RunnerInput, RunnerOutput } from "../orchestration/runner.js";
 import type { DegradedEntry } from "../schema.js";
 import { anyAddedInRange, parseChangedSourceFile } from "./_shared.js";
@@ -64,7 +63,6 @@ export async function runLeverage(input: LeverageRunnerInput): Promise<LeverageR
       degraded.push(result.entry);
       continue;
     }
-    if (result.kind !== "ok") assertNever(result, "ParseChangedFileResult");
     const { sf, addedLines } = result.parsed;
     findStructuredClone(sf, cf.path, addedLines, findings);
     findIncludes(sf, cf.path, addedLines, findings);
