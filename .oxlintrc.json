@@ -29,9 +29,15 @@
     "anti-slop/no-object-parameters": "error",
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-chained-type-assertions": "error",
+    // no-unknown-returns: a function whose explicit return type is `unknown` or
+    // `Promise<unknown>` gives each caller a value that no code checked. Parse the value at its
+    // boundary and return the domain type, or let inference keep the narrow type. A JSON parse
+    // wrapper or a generic walker whose callers parse the result keeps `unknown` with
+    // `// oxlint-disable-next-line anti-slop/no-unknown-returns -- <reason>`; the reason names
+    // the parse.
+    "anti-slop/no-unknown-returns": "error",
     // Ratchet queue — counts measured 2026-10-18 as product src / scripts. Each moves to
     // "error" in its own change once the tree is at zero. See docs/gate-design.md.
-    "anti-slop/no-unknown-returns": "off", // 6 / 3
     "anti-slop/no-known-value-widening": "off", // 42 / 18
     "anti-slop/no-unsafe-dictionary-type": "off", // 50 / 32
     "anti-slop/no-runtime-typeof": "off", // 75 / 42 (with allowInTypeGuards)
