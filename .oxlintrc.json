@@ -53,9 +53,19 @@
     // JSON, an opaque JSON column whose reader parses it, and a generic bound keep it with
     // `// oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- <reason>`.
     "anti-slop/no-unsafe-dictionary-type": "error",
-    // Ratchet queue — counts measured 2026-10-18 as product src / scripts. Each moves to
-    // "error" in its own change once the tree is at zero. See docs/gate-design.md.
-    "anti-slop/no-runtime-typeof": "off", // 75 / 42 (with allowInTypeGuards)
+    // no-runtime-typeof: a `typeof` check that narrows an unparsed value tells the reader its
+    // representation, not its contract. Parse the value at its boundary with a zod schema and
+    // branch on the result, or delete the probe when the type already gives the answer.
+    // `typeof x === "undefined"`, which asks whether a binding exists, always passes.
+    // `allowInTypeGuards: true` also passes a `typeof` directly inside a function whose return
+    // type is a type predicate (`value is T` or `asserts value is T`); a nested callback in
+    // that function does not count. A named guard is where a narrowing check belongs. A
+    // generic walker over unparsed data, or a split of an API's own union such as
+    // `server.address()`, keeps its probe with
+    // `// oxlint-disable-next-line anti-slop/no-runtime-typeof -- <reason>`.
+    "anti-slop/no-runtime-typeof": ["error", { "allowInTypeGuards": true }],
+    // Ratchet queue — count measured 2026-10-18. It moves to "error" in its own change once
+    // the tree is at zero. See docs/gate-design.md.
     "anti-slop/require-readable-spacing": "off", // 4375, whitespace-only autofix; a style decision
 
     // Warden's own rules (scripts/oxlint/warden/, first-party, see its README). Each keeps

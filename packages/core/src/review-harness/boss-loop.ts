@@ -692,7 +692,9 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     const output = parsedOutput.data;
     const bossTokens = recordBossUsage();
 
-    const modelId = modelLabel(servedBy);
+    // `LanguageModel` is ai-retry's `LanguageModelV3`, a model object, never a
+    // gateway string id, so `modelId` is always a string.
+    const modelId = servedBy.modelId;
 
     // Post-amendment, the only served path is Anthropic primary — fallback
     // wiring is compile-time deleted. The retried-successfully degraded
@@ -919,22 +921,19 @@ function errorSummary(err: unknown): string {
   return "unknown error";
 }
 
-function httpStatus(err: unknown): number | undefined {
-  if (!err || typeof err !== "object") return undefined;
-  const direct = (err as { statusCode?: unknown }).statusCode;
-  if (typeof direct === "number") return direct;
-  const status = (err as { status?: unknown }).status;
-  if (typeof status === "number") return status;
-  const response = (err as { response?: { status?: unknown } }).response;
-  if (response && typeof response.status === "number") return response.status;
-  return undefined;
-}
+/**
+ * The HTTP status on a caught provider error, in order of preference: the AI
+ * SDK's `APICallError.statusCode`, a fetch-style `status`, then an
+ * axios-style `response.status`. The first shape that matches wins.
+ */
+const HttpStatusErrorSchema = z.union([
+  z.looseObject({ statusCode: z.number() }).transform((e) => e.statusCode),
+  z.looseObject({ status: z.number() }).transform((e) => e.status),
+  z
+    .looseObject({ response: z.looseObject({ status: z.number() }) })
+    .transform((e) => e.response.status),
+]);
 
-function modelLabel(model: LanguageModel): string {
-  if (typeof model === "string") return model;
-  if ("modelId" in model) {
-    const v = (model as { modelId?: unknown }).modelId;
-    if (typeof v === "string") return v;
-  }
-  return "unknown";
+function httpStatus(err: unknown): number | undefined {
+  return HttpStatusErrorSchema.safeParse(err).data;
 }

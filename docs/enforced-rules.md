@@ -65,6 +65,7 @@ The config also keeps oxlint's default `correctness` category on, at `warn`. `pn
 | `anti-slop/no-module-mocking` |  | Disallow Vitest and Jest module mocking; tests must replace dependencies through real interfaces. |
 | `anti-slop/no-object-parameters` |  | Disallow object function parameters; inputs must use an owner-provided type and be parsed at their boundary. |
 | `anti-slop/no-reflect-apply` |  | Disallow Reflect.apply; call typed functions directly or model dynamic dispatch behind an interface. |
+| `anti-slop/no-runtime-typeof` |  | Disallow runtime typeof checks; external values must be decoded into meaningful types at their I/O boundary. Options: `{"allowInTypeGuards":true}` |
 | `anti-slop/no-unknown-returns` |  | Disallow functions whose explicit return contract is unknown or Promise<unknown>. |
 | `anti-slop/no-unknown-type-aliases` |  | Disallow type aliases whose resolved type is unknown; unknown must remain visible at an allowed boundary. |
 | `anti-slop/no-unsafe-dictionary-type` |  | Disallow object-dictionary contracts whose direct value type is unknown, any, object, {}, or a union/alias containing one of those escape hatches. |
