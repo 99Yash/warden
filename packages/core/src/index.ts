@@ -150,7 +150,9 @@ export {
 export {
   runReviewHarness,
   runDetPriors,
+  ReviewFailedError,
   ReviewScratchpad,
+  type ReviewSpend,
   type ReviewHarnessInput,
   type ReviewHarnessResult,
   type ReviewHarnessConfig,
