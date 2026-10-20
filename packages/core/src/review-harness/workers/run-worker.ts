@@ -529,7 +529,8 @@ async function tryProvider(
     const parsed = schemaPair.responseTransform(rawOutput) as WorkerOutput;
     let tokenUsage: TokenUsage | undefined;
     try {
-      tokenUsage = tokenUsageFromSdk(await result.usage);
+      // `totalUsage` sums every step of the tool loop; `usage` is the last step only.
+      tokenUsage = tokenUsageFromSdk(await result.totalUsage);
     } catch {
       tokenUsage = undefined;
     }

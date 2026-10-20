@@ -51,10 +51,11 @@ export interface WorkerOutput {
 }
 
 /**
- * Per-call token usage. The AI SDK v6 `streamText` result exposes a `usage`
- * object after the stream resolves. Cost-tracking SQLite (`reviewRuns`) is
- * deferred per M14 Q12; v0 keeps usage in-memory on the scratchpad and
- * renders it via `packages/cli/src/render.ts`.
+ * Per-call token usage. Read from the AI SDK v6 `streamText` result's
+ * `totalUsage` (summed over all steps) after the stream resolves.
+ * Cost-tracking SQLite (`reviewRuns`) is deferred per M14 Q12; v0 keeps
+ * usage in-memory on the scratchpad and renders it via
+ * `packages/cli/src/render.ts`.
  */
 export interface TokenUsage {
   /** Total input tokens, including cache reads and cache writes (AI SDK 6). */

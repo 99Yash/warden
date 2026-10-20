@@ -568,7 +568,8 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     const output = geminiPair.responseTransform(submittedRaw) as z.infer<typeof BossOutputSchema>;
     let bossTokens: TokenUsage | undefined;
     try {
-      bossTokens = tokenUsageFromSdk(await result.usage);
+      // `totalUsage` sums every step of the tool loop; `usage` is the last step only.
+      bossTokens = tokenUsageFromSdk(await result.totalUsage);
     } catch {
       bossTokens = undefined;
     }
