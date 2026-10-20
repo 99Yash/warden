@@ -73,18 +73,22 @@
     // that explained the deleted cast goes with it. It applies to every surface, with no
     // override.
     "typescript/no-unnecessary-type-assertion": "error",
-    // The no-unsafe-* family. The family says that an `any` may not flow into a return, an
-    // argument, a call, a member read, or an assignment; a member not listed here is still
-    // off, and lands once the tree is at zero for it. Type external, persisted, and protocol
-    // data as `unknown` and parse it at the owning boundary (docs/conventions.md §2) instead
-    // of letting `any` carry it on. Do not swap the `any` for an `as T`: give the value a
-    // type that it provably has (a zod parse, a `: unknown` binding, a type guard). The
-    // family is off for JavaScript sources in the last "overrides" entry; JSDoc-typed `.mjs`
-    // is `any` by construction.
+    // The no-unsafe-* family, all five members: an `any` may not flow into a return, an
+    // argument, a call, a member read, or an assignment. Type external, persisted, and
+    // protocol data as `unknown` and parse it at the owning boundary (docs/conventions.md
+    // §2) instead of letting `any` carry it on. Do not swap the `any` for an `as T`: give the
+    // value a type that it provably has. The usual sources and their fixes: `JSON.parse`
+    // (bind it as `unknown`, or parse it with a zod schema), `Array.isArray` on `unknown`
+    // (an `isUnknownArray` guard, or a `: unknown` binding for the element), `Object.entries`
+    // on `object` (`Object.keys` plus `Reflect.get` into `unknown`), a Node stream or
+    // `events.once` (`text()` from `node:stream/consumers`, or an `unknown[]` binding), and
+    // `await import()` of a runtime path (a static import). The family is off for JavaScript
+    // sources in the last "overrides" entry; JSDoc-typed `.mjs` is `any` by construction.
     "typescript/no-unsafe-return": "error",
     "typescript/no-unsafe-argument": "error",
     "typescript/no-unsafe-call": "error",
     "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-assignment": "error",
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
     // A `catch` handles the failure, logs safe fields, or holds a comment that says why the
@@ -242,9 +246,8 @@
       // (scripts/tsconfig.json), and `.claude/hooks/*.mjs` are in no tsconfig at all, so an
       // unannotated binding, a parsed manifest, or a Node global is `any` there by
       // construction. On 2026-10-20 the family reported 294 such reads in `.mjs`, none of
-      // them an escaped boundary. TypeScript sources everywhere, scripts included, keep each
-      // rule that is on. The four that are still "off" above are listed here already, so a
-      // rule that lands later needs no second override.
+      // them an escaped boundary. TypeScript sources everywhere, scripts included, keep all
+      // five rules on.
       "files": ["**/*.mjs", "**/*.js", "**/*.cjs"],
       "rules": {
         "typescript/no-unsafe-return": "off",

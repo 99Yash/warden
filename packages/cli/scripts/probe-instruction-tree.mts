@@ -185,7 +185,9 @@ async function readProbe(directory: string) {
       output += chunk.toString();
     });
     const timer = setTimeout(() => run.kill("SIGKILL"), 30000);
-    const [code] = await once(run, "close");
+    // `events.once` types the event arguments as `any[]`; "close" passes the exit code first.
+    const closeArgs: unknown[] = await once(run, "close");
+    const [code] = closeArgs;
     clearTimeout(timer);
     assert.equal(code, 0, output.slice(-1200));
     assert.equal(step, 5, "all four scripted reads reach the loopback provider");

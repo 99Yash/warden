@@ -156,7 +156,9 @@ async function probe(
       output += chunk.toString();
     });
     const timer = setTimeout(() => run.kill("SIGKILL"), 20000);
-    const [code] = await once(run, "close");
+    // `events.once` types the event arguments as `any[]`; "close" passes the exit code first.
+    const closeArgs: unknown[] = await once(run, "close");
+    const [code] = closeArgs;
     clearTimeout(timer);
     if (code !== 0 || requests.length === 0)
       throw new Error(`model stub failed: ${output.slice(-1000)}`);

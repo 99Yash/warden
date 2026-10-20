@@ -1382,9 +1382,11 @@ if (mode === "runfail") {
     "lane-trace entry records the tool-call counts",
   );
   await assertServeDead("happy path");
-  let lanesOut: { version: number; lanes: Array<{ lane: string; status: string }> } | undefined;
+  let lanesOut: z.infer<typeof PostPassLanesSchema> | undefined;
   try {
-    lanesOut = JSON.parse(readFileSync(resolve(REPO, "lanes.json"), "utf8"));
+    lanesOut = PostPassLanesSchema.parse(
+      JSON.parse(readFileSync(resolve(REPO, "lanes.json"), "utf8")),
+    );
   } catch {
     lanesOut = undefined;
   }
@@ -1977,9 +1979,11 @@ if (mode === "runfail") {
     isOpencodeCostMeasured(big.runSpawned, big.usage),
     "over-ceiling scope → measured $0 (the eval run continues)",
   );
-  let bigLanesOut: { lanes: Array<{ status: string; reason?: string }> } | undefined;
+  let bigLanesOut: z.infer<typeof PostPassLanesSchema> | undefined;
   try {
-    bigLanesOut = JSON.parse(readFileSync(resolve(BIG, "lanes.json"), "utf8"));
+    bigLanesOut = PostPassLanesSchema.parse(
+      JSON.parse(readFileSync(resolve(BIG, "lanes.json"), "utf8")),
+    );
   } catch {
     bigLanesOut = undefined;
   }
