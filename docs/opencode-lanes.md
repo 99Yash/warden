@@ -123,6 +123,9 @@ Anthropic stub that costs $0):
 - Without the key, the stub showed one compaction before the second step
   (199,000 of 200,000 input tokens) and one after a 400 "prompt is too
   long". With the key, the stub showed none.
+- The CI pin v2.0.25 (`warden-review.yml`) has the same key, default,
+  `skipped` check, overflow patterns, and run-client event set. This is
+  from its strings only; the stub check ran on v2.0.32.
 
 **At the context limit.** The provider rejects the request. The run
 client then writes this event and exits 1:
