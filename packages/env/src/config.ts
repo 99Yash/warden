@@ -536,7 +536,7 @@ function parseEnv(text: string): Record<string, string> {
 
 function parseEnvValue(raw: string): string {
   if (raw.startsWith('"') || raw.startsWith("'")) {
-    const quote = raw[0] as '"' | "'";
+    const quote = raw.startsWith('"') ? '"' : "'";
     const end = findClosingEnvQuote(raw, quote);
     if (end !== -1) {
       const inner = raw.slice(1, end);
@@ -661,8 +661,14 @@ function removeTrailingCommas(text: string): string {
   return out;
 }
 
+/**
+ * Both layers passed `configSchema`. Its objects are strict, it checks no
+ * field against another, and it has no default or transform, so a key-wise
+ * merge of two valid layers is valid too. The parse states that fact; it can
+ * fail only on a bug in `deepMerge`.
+ */
 function mergeConfig(base: WardenConfig, override: WardenConfig): WardenConfig {
-  return deepMerge(base, override) as WardenConfig;
+  return configSchema.parse(deepMerge(base, override));
 }
 
 function deepMerge(base: unknown, override: unknown): unknown {
@@ -742,7 +748,7 @@ function optionalForProvider(
 function reviewLlmProviderCandidates(info: WardenRuntime): string[] {
   const primary = info.config.routing?.llm?.primary ?? "anthropic";
   const providers = new Set<string>();
-  if (REVIEW_LLM_PROVIDER_CANDIDATES.includes(primary as ReviewLlmProviderCandidate)) {
+  if (REVIEW_LLM_PROVIDER_CANDIDATES.some((candidate) => candidate === primary)) {
     providers.add(primary);
   }
   for (const provider of REVIEW_LLM_PROVIDER_CANDIDATES) {
@@ -752,8 +758,6 @@ function reviewLlmProviderCandidates(info: WardenRuntime): string[] {
     return info.config.providers?.[providerId]?.kind === "llm";
   });
 }
-
-type ReviewLlmProviderCandidate = (typeof REVIEW_LLM_PROVIDER_CANDIDATES)[number];
 
 function formatMissingEnvMessage(envName: string, command: string, info: WardenRuntime): string {
   const checked = info.envFiles.map((file) => `  ${file.path}${file.exists ? "" : " (missing)"}`);
