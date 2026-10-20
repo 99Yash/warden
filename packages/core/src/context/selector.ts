@@ -9,7 +9,7 @@ import {
   MAX_REASON_WEIGHT_SUM,
   MAX_SAME_FOLDER_ONLY,
   REASON_WEIGHTS,
-} from "./index.js";
+} from "./scoring.js";
 import type { ContextCandidate, ContextSelector, Reason, SelectorOutput } from "./index.js";
 import {
   loadImportGraph,

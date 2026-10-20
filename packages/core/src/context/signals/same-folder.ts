@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { SAME_FOLDER_CAP } from "../index.js";
+import { SAME_FOLDER_CAP } from "../scoring.js";
 
 /**
  * Same-folder siblings signal (ADR-0018). Path-only — content is not
