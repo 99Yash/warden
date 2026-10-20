@@ -80,9 +80,7 @@ export class CodeChunkAdapter implements Chunker {
   detectLanguage(filePath: string): SupportedLanguage | null {
     const lang = detectLanguage(filePath);
     if (!lang) return null;
-    return SUPPORTED_LANGUAGES.includes(lang as SupportedLanguage)
-      ? (lang as SupportedLanguage)
-      : null;
+    return SUPPORTED_LANGUAGES.includes(lang) ? lang : null;
   }
 
   async chunk(filePath: string, fileContent: string, fileSha: string): Promise<ChunkRecord[]> {

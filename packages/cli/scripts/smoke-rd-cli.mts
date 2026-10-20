@@ -128,16 +128,16 @@ for (const f of parsed.findings) {
 
 const security = parsed.findings.find((f) => f.rdCategory === "Security");
 if (!security) fail("missing Security finding");
-const secMap = mapSeverity(security!);
+const secMap = mapSeverity(security);
 if (secMap.tier !== 1 || secMap.category !== "security") {
   fail(`Security → expected {tier:1, security}, got ${JSON.stringify(secMap)}`);
 }
 // Evidence snippet must be the whitespace-collapsed flagged line (line 3).
 const expectedSnippet = `const rows = await db.query("SELECT * FROM users WHERE id = " + req.params.id);`;
-if (security!.evidence?.snippet !== expectedSnippet) {
-  fail(`Security evidence snippet mismatch — got ${JSON.stringify(security!.evidence)}`);
+if (security.evidence?.snippet !== expectedSnippet) {
+  fail(`Security evidence snippet mismatch — got ${JSON.stringify(security.evidence)}`);
 }
-if (security!.evidence?.path !== "src/db.ts" || security!.evidence?.line !== 3) {
+if (security.evidence?.path !== "src/db.ts" || security.evidence?.line !== 3) {
   fail(`Security evidence path/line should be repo-relative src/db.ts:3`);
 }
 
@@ -158,7 +158,7 @@ if (maint!.severity !== "info") {
 console.log("✓ parse + category→{tier,category} mapping + evidence snippet");
 
 // ── 2. toComment on the Security finding ─────────────────────────────────
-const comment = toComment(security!);
+const comment = toComment(security);
 if (comment.tier !== 1 || comment.category !== "security") {
   fail(
     `Security Comment → expected tier 1 / security, got tier ${comment.tier} / ${comment.category}`,

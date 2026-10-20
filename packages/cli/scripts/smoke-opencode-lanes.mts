@@ -816,7 +816,7 @@ try {
     Array.isArray(wardenServer?.["command"]) &&
       wardenServer?.["type"] === "local" &&
       wardenServer?.["codemode"] === false &&
-      (wardenServer as Record<string, unknown>)["cwd"] === "/tmp/r",
+      wardenServer["cwd"] === "/tmp/r",
     "config content carries the full server object (host replaces the whole mcp key)",
   );
   assert(!("provider" in content), "config content has no provider key without a base URL");
@@ -1123,7 +1123,7 @@ if (mode === "runfail") {
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
-      return { exit: 0, out: out as string };
+      return { exit: 0, out };
     } catch (err) {
       const e = err as { status?: number; stdout?: string };
       return { exit: e.status ?? -1, out: e.stdout ?? "" };
@@ -1639,7 +1639,7 @@ if (mode === "runfail") {
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 90000,
       },
-    ) as string;
+    );
     nobinExit = 0;
   } catch (err) {
     const e = err as { status?: number; stdout?: unknown };

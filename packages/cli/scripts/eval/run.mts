@@ -938,7 +938,7 @@ async function main(): Promise<void> {
 
 function opencodeVersion(): string {
   try {
-    return (execFileSync("opencode", ["--version"], { encoding: "utf8" }) as string).trim();
+    return execFileSync("opencode", ["--version"], { encoding: "utf8" }).trim();
   } catch {
     return "unknown";
   }
@@ -946,11 +946,9 @@ function opencodeVersion(): string {
 
 function wardenHead(): string {
   try {
-    return (
-      execFileSync("git", ["-C", WARDEN_ROOT, "rev-parse", "HEAD"], {
-        encoding: "utf8",
-      }) as string
-    ).trim();
+    return execFileSync("git", ["-C", WARDEN_ROOT, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
   } catch {
     return "unknown";
   }

@@ -106,12 +106,12 @@ function toolDefinitions(reviewCache: ReviewResultCache) {
  */
 function toInputJsonSchema(schema: ZodType): Record<string, unknown> {
   const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { io: "input" });
-  return rest as Record<string, unknown>;
+  return rest;
 }
 
 function toOutputJsonSchema(schema: ZodType): Record<string, unknown> {
   const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { io: "output" });
-  return rest as Record<string, unknown>;
+  return rest;
 }
 
 export interface StartMcpServerOptions {

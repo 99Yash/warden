@@ -121,7 +121,7 @@ function loadFixtures(): LoadedFixture[] {
               repoPath = resolved;
               worktreeBefore = execFileSync("git", ["-C", resolved, "worktree", "list"], {
                 encoding: "utf8",
-              }) as string;
+              });
             } catch {
               how = `sparse fallback (commit unreachable in ${meta.repo})`;
             }
@@ -155,10 +155,12 @@ for (const { fixture, sections, how, worktreeBefore, repoPath } of loaded) {
     const repo = buildFixtureRepo(fixture);
     root = repo.root;
     const ms = Date.now() - startedAt;
-    const names = (
-      execFileSync("git", ["-C", repo.root, "diff", "--name-only", `${repo.baseSha}...HEAD`], {
+    const names = execFileSync(
+      "git",
+      ["-C", repo.root, "diff", "--name-only", `${repo.baseSha}...HEAD`],
+      {
         encoding: "utf8",
-      }) as string
+      },
     )
       .split("\n")
       .filter((l) => l.trim() !== "");
@@ -177,7 +179,7 @@ for (const { fixture, sections, how, worktreeBefore, repoPath } of loaded) {
     if (repoPath !== undefined) {
       const after = execFileSync("git", ["-C", repoPath, "worktree", "list"], {
         encoding: "utf8",
-      }) as string;
+      });
       assert(after === worktreeBefore, `${fixture.name}: no worktree registered in source repo`);
     }
   } catch (err) {
