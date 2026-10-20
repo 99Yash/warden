@@ -66,18 +66,21 @@ export const STDERR_TAIL_BYTES = 2048;
  * shipped binary v2.0.25), so `steps` leaves `steps - 1` steps that can
  * call tools. The charter spends the first on `warden_run_det_priors`
  * (its result pages cost more, but their count is unknown before the run,
- * so they are left out), and each changed file needs at least one
- * whole-file read. At one read per step — the rate in the recorded
- * down-lane streams — a larger scope cannot get one read per file before
- * any trace starts, so the run would only spend its timeout.
+ * so they are left out). The spec's `scopeBudget` gives the rest of the
+ * method's cost: the down lane needs one whole-file read per changed file
+ * (58 files); the up lane needs a read and a grep per changed file, plus
+ * 9 pass 2 reads (24 files). At one tool call per step — the rate in the
+ * recorded down-lane streams — a larger scope cannot finish that work
+ * before the step cap, so the run would only spend its timeout.
  *
  * Not a hard limit: a model can batch reads in one step (recorded up to
  * 4). The timeout is left out because its rate depends on the model; on
  * the issue #57 run (`opencode/space-bunny-free`), the lane made 54 tool
  * calls in 900 s, which is also below this ceiling.
  */
-function laneScopeCeiling(spec: LaneSpec): number {
-  return spec.steps - 2;
+export function laneScopeCeiling(spec: LaneSpec): number {
+  const { stepsPerFile, fixed } = spec.scopeBudget;
+  return Math.floor((spec.steps - 2 - (fixed?.steps ?? 0)) / stepsPerFile);
 }
 
 /** The down lane's scope ceiling (`laneScopeCeiling(DOWN_LANE_SPEC)`). */
@@ -635,10 +638,12 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
 export function laneScopeOverCeiling(scope: string[], spec: LaneSpec): string | undefined {
   const ceiling = laneScopeCeiling(spec);
   if (scope.length <= ceiling) return undefined;
+  const { perFile, fixed } = spec.scopeBudget;
   return (
     `review target too large: ${scope.length} changed files exceed the ${spec.lane} lane ceiling of ` +
     `${ceiling} (${spec.lane.toUpperCase()}_LANE_SPEC.steps ${spec.steps} - 1 text-only final step ` +
-    `- 1 warden_run_det_priors call, at one read per changed file)`
+    `- 1 warden_run_det_priors call${fixed !== undefined ? ` - ${fixed.steps} ${fixed.what}` : ""}, ` +
+    `at ${perFile})`
   );
 }
 

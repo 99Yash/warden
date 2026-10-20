@@ -45,7 +45,8 @@ the lanes that `lanes:materialize` writes: `DOWN_LANE_SPEC` and
 | `lane` | The post-pass lane name in the lane envelope and the `lane-trace` entry. |
 | `agentId` | The agent key in the config and the `--agent` value. |
 | `tier`, `defaultModel` | The `--model` value when the operator gives none. |
-| `steps` | The agent step cap. The scope ceiling is `steps - 2`. |
+| `steps` | The agent step cap. |
+| `scopeBudget` | The charter's step cost: steps for each changed file, and the fixed steps. The scope ceiling is `floor((steps - 2 - fixed) / stepsPerFile)`. |
 | `description`, `allowedTools` | The agent description and the read-only tool allows. |
 | `charterPath` | The canonical charter. Its fenced `includes` list names the method sections. |
 | `promptFilename`, `configFilename` | The two generated files. Each lane has its own config, because `compaction` is a top-level key and one private `serve` reads one config. |
@@ -509,15 +510,20 @@ warden opencode-review [--lane <down|up>] [--base <ref>]
   anchors against.
 - Empty scope never spawns OpenCode: the lane is `failed` with
   `empty review target` so the fail-closed entries fire.
-- A scope above `DOWN_LANE_MAX_SCOPE_FILES` (58 files) never spawns
+- A scope above the lane's ceiling (`laneScopeCeiling(spec)`: 58 files
+  for the down lane, `DOWN_LANE_MAX_SCOPE_FILES`, and 24 files for the
+  up lane) never spawns
   OpenCode either (issue #57): the lane is `failed` with a
   `review target too large: …` reason that names the file count, the
   ceiling, and its source, and `runSpawned` is `false` (a known $0). The
-  ceiling is the lane spec's `steps - 2` (`DOWN_LANE_SPEC.steps - 2` for
-  the down lane): OpenCode forces a text-only step
+  ceiling comes from the lane spec's `steps` and `scopeBudget`: OpenCode
+  forces a text-only step
   at `step >= steps` (the step counter starts at 1, so 59 steps can call
-  tools), the first goes to `warden_run_det_priors`, and each changed
-  file needs at least one whole-file read. It assumes one read per step,
+  tools), and the first goes to `warden_run_det_priors`. The down lane
+  needs at least one whole-file read for each changed file
+  (`60 - 2 = 58`). The up lane needs a read and a `grep` for each
+  changed file in pass 1, plus 9 pass 2 reads (3 candidates × 3 home
+  files): `floor((60 - 2 - 9) / 2) = 24`. It assumes one tool call per step,
   the rate in the recorded down-lane streams. It is not a hard limit: a
   model can batch reads (recorded up to 4 in one step). The timeout is
   not in the formula because its rate depends on the model.

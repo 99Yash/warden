@@ -43,6 +43,8 @@ export interface LaneSpec {
   defaultModel: string;
   /** OpenCode step cap. The driver's scope ceiling derives from it (`laneScopeCeiling`). */
   steps: number;
+  /** The charter's step cost, from which the driver derives the scope ceiling. */
+  scopeBudget: LaneScopeBudget;
   description: string;
   /** Read-only v2 tool names, verified against `core/src/tool/plugin/*`. */
   allowedTools: string[];
@@ -65,6 +67,20 @@ export interface LaneSpec {
 }
 
 /**
+ * Issue #57: the tool steps that the charter's method spends, for the
+ * driver's scope ceiling (`laneScopeCeiling`). Each text field names the
+ * cost in the over-ceiling reason.
+ */
+export interface LaneScopeBudget {
+  /** Tool steps that each changed file costs. */
+  stepsPerFile: number;
+  /** What one file costs, for example "one read per changed file". */
+  perFile: string;
+  /** Tool steps that the method spends whatever the scope size, and on what. */
+  fixed?: { steps: number; what: string };
+}
+
+/**
  * The read/grep exclusions that every charter states (issue #57). The
  * host keys grep permission on the pattern, not the path, so the charter
  * is the only thing that keeps read/grep out of the fixtures and the ADR
@@ -78,6 +94,7 @@ export const DOWN_LANE_SPEC: LaneSpec = {
   tier: "strong",
   defaultModel: "anthropic/claude-opus-5-5#high",
   steps: 60,
+  scopeBudget: { stepsPerFile: 1, perFile: "one read per changed file" },
   description:
     "Warden down lane: invariant proof with a correctness focus. Traces claimed behavior through callers, state, and failure; submits findings as JSON.",
   allowedTools: ["read", "grep", "glob"],
@@ -112,6 +129,13 @@ export const UP_LANE_SPEC: LaneSpec = {
   tier: "strong",
   defaultModel: "anthropic/claude-opus-5-5#high",
   steps: 60,
+  // Pass 1 reads each changed file and greps for its other homes; pass 2
+  // opens at most 3 home files for each of at most 3 candidates.
+  scopeBudget: {
+    stepsPerFile: 2,
+    perFile: "one read and one grep per changed file",
+    fixed: { steps: 9, what: "pass 2 reads (3 candidates x 3 home files)" },
+  },
   description:
     "Warden up lane: structural search with a drift focus. Maps where each changed fact lives, confirms gated restructures, and submits findings as JSON.",
   allowedTools: ["read", "grep", "glob"],

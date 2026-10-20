@@ -53,6 +53,7 @@ import {
   evaluateLane,
   isContextOverflowError,
   laneCompactionReason,
+  laneScopeCeiling,
   laneScopeOverCeiling,
   parseLaneEvents,
   parseMcpServers,
@@ -2041,6 +2042,30 @@ if (mode === "runfail") {
       overReason.includes(`ceiling of ${DOWN_LANE_MAX_SCOPE_FILES}`) &&
       overReason.includes(`DOWN_LANE_SPEC.steps ${DOWN_LANE_SPEC.steps}`),
     `scope one over the ceiling fails naming the numbers and their source (${overReason})`,
+  );
+  // The down reason keeps its pre-seam text byte for byte.
+  assert(
+    overReason ===
+      "review target too large: 59 changed files exceed the down lane ceiling of 58 " +
+        "(DOWN_LANE_SPEC.steps 60 - 1 text-only final step - 1 warden_run_det_priors call, " +
+        "at one read per changed file)",
+    "down over-ceiling reason is unchanged",
+  );
+  // The up lane pays a read and a grep per file in pass 1, plus 9 pass 2
+  // reads: floor((60 - 2 - 9) / 2) = 24.
+  const upCeiling = laneScopeCeiling(UP_LANE_SPEC);
+  assert(upCeiling === 24, `up ceiling derives from its scope budget (got ${upCeiling})`);
+  assert(
+    laneScopeOverCeiling(scopeOf(upCeiling), UP_LANE_SPEC) === undefined,
+    `up scope at the ceiling (${upCeiling} files) is allowed`,
+  );
+  const upOverReason = laneScopeOverCeiling(scopeOf(upCeiling + 1), UP_LANE_SPEC) ?? "";
+  assert(
+    upOverReason ===
+      "review target too large: 25 changed files exceed the up lane ceiling of 24 " +
+        "(UP_LANE_SPEC.steps 60 - 1 text-only final step - 1 warden_run_det_priors call " +
+        "- 9 pass 2 reads (3 candidates x 3 home files), at one read and one grep per changed file)",
+    `up over-ceiling reason names its own derivation (${upOverReason})`,
   );
   const BIG = mkdtempSync(resolve(tmpdir(), "warden-lanes-big-"));
   const bigGit = (args: string[]): void => {
