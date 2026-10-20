@@ -71,7 +71,7 @@ export interface LaneSpec {
  * driver's scope ceiling (`laneScopeCeiling`). Each text field names the
  * cost in the over-ceiling reason.
  */
-export interface LaneScopeBudget {
+interface LaneScopeBudget {
   /** Tool steps that each changed file costs. */
   stepsPerFile: number;
   /** What one file costs, for example "one read per changed file". */
