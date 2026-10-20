@@ -191,7 +191,7 @@ export async function runInit(input: InitInput): Promise<InitSummary> {
   // Cost gate: bail before any chunking work if the estimate already
   // exceeds the budget. Matches pre-M16 behavior.
   if (
-    typeof opts.maxCostUsd === "number" &&
+    opts.maxCostUsd !== undefined &&
     initialEstimate.estimatedUsd > opts.maxCostUsd &&
     !opts.dryRun
   ) {

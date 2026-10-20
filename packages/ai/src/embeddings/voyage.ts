@@ -202,12 +202,11 @@ function isTransient(err: unknown): boolean {
   return false;
 }
 
+/** A caught value with a string `code` (a Node system error, an undici error). */
+const ErrorCodeSchema = z.object({ code: z.string() });
+
 function errorCode(err: unknown): string | undefined {
-  if (err && typeof err === "object" && "code" in err) {
-    const v = (err as { code?: unknown }).code;
-    return typeof v === "string" ? v : undefined;
-  }
-  return undefined;
+  return ErrorCodeSchema.safeParse(err).data?.code;
 }
 
 function formatError(err: unknown): string {

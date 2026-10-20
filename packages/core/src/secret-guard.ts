@@ -11,6 +11,8 @@
  *    entropy rule in v0 — code quotes hashes and ids that look random.
  */
 
+import { isRecord } from "./guards.js";
+
 /**
  * The lane `read` guard globs, in OpenCode wildcard syntax (`*` matches
  * any run of characters, `/` included; anchored). The materializer emits
@@ -167,6 +169,7 @@ export function screenFinding(value: unknown): SecretMatch | undefined {
 
 function walk(value: unknown, key: string | undefined, depth: number): SecretMatch | undefined {
   if (depth > SECRET_SCAN_MAX_DEPTH) return SECRET_DEPTH_RULE_ID;
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- a fail-closed walker over an unparsed lane object: it screens every string leaf, whatever the shape around it
   if (typeof value === "string") {
     if (key !== undefined && PATH_KEYS.has(key) && isSecretFilePath(value)) {
       return SECRET_FILE_RULE_ID;
@@ -180,7 +183,7 @@ function walk(value: unknown, key: string | undefined, depth: number): SecretMat
     }
     return undefined;
   }
-  if (value !== null && typeof value === "object") {
+  if (isRecord(value)) {
     for (const [childKey, child] of Object.entries(value)) {
       const match = walk(child, childKey, depth + 1);
       if (match !== undefined) return match;

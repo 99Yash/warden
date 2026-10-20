@@ -228,7 +228,8 @@ function isNumericLiteralUnion(def: ZodDef): boolean {
     const values = optDef.values;
     if (!values || values.length === 0) return false;
     for (const v of values) {
-      if (typeof v !== "number" || !Number.isFinite(v)) return false;
+      // `Number.isFinite` does not coerce: it is false for each value that is not a number.
+      if (!Number.isFinite(v)) return false;
     }
   }
   return true;
@@ -271,6 +272,7 @@ function applyPaths(raw: unknown, paths: PathStep[][]): unknown {
 function applyPath(value: unknown, path: PathStep[], step: number): unknown {
   if (value === null || value === undefined) return value;
   if (step === path.length) {
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- generic walker over the unparsed model output: only a string leaf converts back to a number; the caller parses the result
     if (typeof value === "string") {
       const n = Number(value);
       if (Number.isFinite(n)) return n;

@@ -128,18 +128,25 @@ interface SymbolEntry {
 
 type SymbolTable = Map<string, SymbolEntry>;
 
+/** A path field of the wrong type reads as absent, the same as a missing field. */
+const optionalPath = z.string().optional().catch(undefined);
+
 /**
  * The `package.json` fields the resolver reads. A file whose `version` is not
- * a non-empty string is skipped. The other fields stay `unknown`, because each
- * reader checks the shape it accepts; the parse strips the remaining keys.
+ * a non-empty string is skipped. `exports` and `typesVersions` stay `unknown`,
+ * because each reader checks the shape it accepts; the parse strips the
+ * remaining keys.
  */
 const InstalledPackageJsonSchema = z.object({
   version: z.string().min(1),
-  types: z.unknown(),
-  typings: z.unknown(),
+  types: optionalPath,
+  typings: optionalPath,
   exports: z.unknown(),
   typesVersions: z.unknown(),
 });
+
+/** A `typesVersions` subpath entry that the resolver reads: an array whose first path is a string. */
+const TypesVersionsPathsSchema = z.tuple([z.string()]).rest(z.unknown());
 
 type InstalledPackageJson = z.infer<typeof InstalledPackageJsonSchema>;
 
@@ -320,7 +327,7 @@ async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
     // Root entrypoint.
     // a) `package.json#types` / `#typings`.
     for (const v of [packageJson.types, packageJson.typings]) {
-      if (typeof v === "string") {
+      if (v !== undefined) {
         await pushIfExists(resolvePath(pkgDir, v));
       }
     }
@@ -342,12 +349,9 @@ async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
       // Walk version ranges in declaration order; first matching wins.
       for (const map of Object.values(typesVersions)) {
         if (!isRecord(map)) continue;
-        const subEntry = map[subpath];
-        if (Array.isArray(subEntry) && subEntry.length > 0) {
-          const first: unknown = subEntry[0];
-          if (typeof first === "string") {
-            await pushIfExists(resolvePath(pkgDir, first));
-          }
+        const paths = TypesVersionsPathsSchema.safeParse(map[subpath]);
+        if (paths.success) {
+          await pushIfExists(resolvePath(pkgDir, paths.data[0]));
         }
       }
     }
@@ -414,24 +418,24 @@ function pickTypesFromExports(exportsField: unknown, key: string): string | unde
 }
 
 function pickFromConditionalShape(entry: unknown): string | undefined {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- a walker over the unparsed `exports` conditions tree: a string is a leaf path, a record is a nested condition
   if (typeof entry === "string") {
     return entry;
   }
   if (isRecord(entry)) {
     // Prefer `types`.
-    if (typeof entry["types"] === "string") return entry["types"];
-    if (entry["types"] && typeof entry["types"] === "object") {
-      const recur = pickFromConditionalShape(entry["types"]);
+    const types = entry["types"];
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the same walker: a string `types` is the answer as it is, also when it is empty
+    if (typeof types === "string") return types;
+    if (isRecord(types)) {
+      const recur = pickFromConditionalShape(types);
       if (recur) return recur;
     }
-    // Then default / import / require — only if they land on a `.d.ts`.
+    // Then default / import / require — only if they land on a `.d.ts`. A
+    // string leaf comes back from the walk as it is.
     for (const k of ["default", "import", "require"]) {
-      const v = entry[k];
-      if (typeof v === "string" && v.endsWith(".d.ts")) return v;
-      if (v && typeof v === "object") {
-        const recur = pickFromConditionalShape(v);
-        if (recur && recur.endsWith(".d.ts")) return recur;
-      }
+      const recur = pickFromConditionalShape(entry[k]);
+      if (recur?.endsWith(".d.ts")) return recur;
     }
   }
   return undefined;

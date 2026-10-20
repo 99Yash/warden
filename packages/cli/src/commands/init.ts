@@ -26,7 +26,7 @@ export async function runInitCommand(opts: InitCliOpts, repoRoot: string): Promi
   const initOpts: InitOptions = {
     rebuild: opts.rebuild === true,
     dryRun: opts.dryRun === true,
-    ...(typeof maxCostUsd === "number" ? { maxCostUsd } : {}),
+    ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
   };
 
   if (!opts.json) {
@@ -59,7 +59,7 @@ function describe(opts: InitOptions): string {
   const parts: string[] = [];
   if (opts.rebuild) parts.push("rebuild");
   if (opts.dryRun) parts.push("dry-run");
-  if (typeof opts.maxCostUsd === "number") parts.push(`max-cost $${opts.maxCostUsd.toFixed(2)}`);
+  if (opts.maxCostUsd !== undefined) parts.push(`max-cost $${opts.maxCostUsd.toFixed(2)}`);
   if (parts.length === 0) return "(walk → chunk → embed)";
   return parts.join(", ");
 }
