@@ -3,6 +3,7 @@ import { ClientRouter } from "astro:transitions";
 import "../styles/global.css";
 import "../styles/home.css";
 import Logo from "./Logo.astro";
+import { navGroups } from "../navigation";
 
 interface Props {
   title: string;
@@ -12,45 +13,6 @@ interface Props {
 const { title, description } = Astro.props;
 const ogTitle = `${title} - Warden`;
 
-interface NavLink {
-  href: string;
-  label: string;
-  badge?: string;
-}
-
-interface NavGroup {
-  heading?: string;
-  links: NavLink[];
-}
-
-// One column of prose with a fixed index on the left, after agentation.com.
-const navGroups: NavGroup[] = [
-  {
-    links: [
-      { href: "/", label: "Overview" },
-      { href: "/docs/install/", label: "Install" },
-      { href: "/docs/review/", label: "Review pipeline" },
-      { href: "/docs/reading-comments/", label: "Reading comments" },
-    ],
-  },
-  {
-    heading: "Integrations",
-    links: [
-      { href: "/docs/mcp/", label: "MCP and OpenCode", badge: "new" },
-      { href: "/docs/ci/", label: "CI" },
-      { href: "/docs/configuration/", label: "Configuration" },
-    ],
-  },
-  {
-    heading: "Resources",
-    links: [
-      { href: "/examples/", label: "Examples" },
-      { href: "/design/", label: "Design" },
-      { href: "/notes/", label: "Notes" },
-      { href: "https://github.com/99Yash/warden/blob/main/decisions.md", label: "Decisions" },
-    ],
-  },
-];
 const currentPath = Astro.url.pathname;
 ---
 

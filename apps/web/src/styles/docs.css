@@ -1,0 +1,415 @@
+/* Docs pages: the home column with Markdown prose inside it.
+   Every rule starts at .doc-article so it outranks the .home-article element rules. */
+
+.doc-article {
+  gap: 0;
+}
+
+.doc-article .doc-header h1 {
+  margin: 0;
+  color: var(--warden-ink);
+  font-size: 19px;
+  font-weight: 560;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+
+.doc-article .doc-header p {
+  margin-top: 0.3rem;
+  color: var(--warden-muted);
+}
+
+.doc-article .doc-body {
+  margin-top: 2rem;
+}
+
+.doc-article .doc-body > * {
+  margin: 0;
+}
+
+.doc-article .doc-body > * + * {
+  margin-top: 0.85rem;
+}
+
+.doc-article .doc-body > h2 {
+  margin-top: 2.75rem;
+  margin-bottom: 0.25rem;
+  scroll-margin-top: 2rem;
+}
+
+.doc-article .doc-body > h3 {
+  margin-top: 1.75rem;
+  color: var(--warden-ink);
+  font-size: 14px;
+  font-weight: 560;
+  line-height: 1.45;
+  scroll-margin-top: 2rem;
+}
+
+.doc-article .doc-body > h2 + *,
+.doc-article .doc-body > h3 + * {
+  margin-top: 0.6rem;
+}
+
+.doc-article .doc-body a {
+  color: var(--warden-accent);
+  text-decoration: none;
+}
+
+.doc-article .doc-body a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.doc-article .doc-body li > p {
+  margin: 0;
+}
+
+.doc-article .doc-body hr {
+  height: 1px;
+  border: 0;
+  background: var(--home-rule);
+}
+
+.doc-article .doc-body blockquote {
+  padding: 0.6rem 1rem;
+  border-left: 2px solid var(--warden-line-strong);
+  color: var(--warden-muted);
+}
+
+/* ─── Lede ───────────────────────────────────────────────────────────── */
+
+.doc-article .doc-body .doc-lede {
+  color: var(--warden-ink);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.doc-article .doc-lede em {
+  color: var(--warden-accent);
+  font-family: var(--warden-font-serif);
+  font-size: 1.08em;
+  font-style: italic;
+}
+
+/* ─── Link list ──────────────────────────────────────────────────────── */
+
+.doc-article .doc-link-list a {
+  display: block;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--home-rule);
+  color: inherit;
+  text-decoration: none;
+}
+
+.doc-article .doc-link-list a:first-child {
+  border-top: 1px solid var(--home-rule);
+}
+
+.doc-article .doc-link-list span {
+  color: var(--warden-accent);
+  font-family: var(--sl-font-mono);
+  font-size: 11px;
+}
+
+.doc-article .doc-link-list strong {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--warden-ink);
+  font-weight: 560;
+  transition: color 120ms ease;
+}
+
+.doc-article .doc-link-list a:hover strong {
+  color: var(--warden-accent);
+}
+
+.doc-article .doc-link-list p {
+  margin: 0.15rem 0 0;
+  color: var(--warden-muted);
+  font-size: 13px;
+}
+
+/* ─── Code ───────────────────────────────────────────────────────────── */
+
+.doc-article .doc-body pre {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  border-radius: 10px;
+  /* Shiki sets an inline background; match the code sample on the home page. */
+  background: #0c0e11 !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warden-ink) 8%, transparent);
+  font-family: var(--sl-font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.doc-article .doc-body pre code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+.doc-article .doc-code {
+  position: relative;
+}
+
+.doc-article .doc-code pre {
+  padding-right: 2.75rem;
+}
+
+.doc-article .doc-code-copy {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.doc-article .doc-code:hover .doc-code-copy,
+.doc-article .doc-code-copy:focus-visible,
+.doc-article .doc-code-copy[data-copied] {
+  opacity: 1;
+}
+
+.doc-article .doc-code-copy:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e6edf3;
+}
+
+.doc-article .doc-code-copy:active {
+  transform: scale(0.96);
+}
+
+.doc-article .doc-code-copy[data-copied] {
+  color: #4cc99b;
+}
+
+@media (hover: none) {
+  .doc-article .doc-code-copy {
+    opacity: 1;
+  }
+}
+
+/* ─── Tables ─────────────────────────────────────────────────────────── */
+
+.doc-article .doc-body table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.doc-article .doc-body th,
+.doc-article .doc-body td {
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  border-bottom: 1px solid var(--home-rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc-article .doc-body th {
+  color: var(--warden-ink);
+  font-weight: 560;
+}
+
+.doc-article .doc-body td:first-child {
+  white-space: nowrap;
+}
+
+/* ─── Figures written in the Markdown ────────────────────────────────── */
+
+/* Who does what, in order. Stacks on narrow screens. */
+.doc-article .doc-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  padding: 0;
+  counter-reset: doc-flow;
+}
+
+.doc-article .doc-flow-step,
+.doc-article .doc-tier {
+  position: relative;
+  min-width: 0;
+  padding: 0.8rem 0.9rem 0.9rem;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warden-ink) 9%, transparent);
+}
+
+.doc-article .doc-flow-step {
+  counter-increment: doc-flow;
+}
+
+.doc-article .doc-flow-step-runtime {
+  box-shadow: none;
+  outline: 1px dashed color-mix(in srgb, var(--warden-ink) 18%, transparent);
+  outline-offset: -1px;
+}
+
+.doc-article .doc-flow-owner,
+.doc-article .doc-tier span {
+  display: block;
+  color: var(--warden-accent);
+  font-family: var(--sl-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.doc-article .doc-flow-step-runtime .doc-flow-owner {
+  color: var(--warden-muted);
+}
+
+.doc-article .doc-flow-step strong,
+.doc-article .doc-tier strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--warden-ink);
+  font-weight: 560;
+}
+
+.doc-article .doc-flow-step strong::before {
+  content: counter(doc-flow) ". ";
+  color: var(--home-faint);
+}
+
+.doc-article .doc-flow-step p,
+.doc-article .doc-tier p {
+  margin: 0.3rem 0 0;
+  color: var(--warden-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.doc-article .doc-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.doc-article .doc-tier::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+}
+
+.doc-article .doc-tier.tier-one::after {
+  background: var(--warden-red);
+}
+
+.doc-article .doc-tier.tier-two::after {
+  background: var(--warden-gold);
+}
+
+.doc-article .doc-tier.tier-three::after {
+  background: var(--warden-green);
+}
+
+.doc-article .doc-tier code {
+  white-space: nowrap;
+}
+
+.doc-article .doc-priority-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.doc-article .doc-priority-chain span {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warden-ink) 5%, transparent);
+  color: var(--warden-muted);
+  font-family: var(--sl-font-mono);
+  font-size: 11px;
+}
+
+/* A two-column list of names and what they mean. */
+.doc-article .doc-property-list > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--home-rule);
+}
+
+.doc-article .doc-property-list > div:first-child {
+  border-top: 1px solid var(--home-rule);
+}
+
+.doc-article .doc-property-list > div > code {
+  align-self: start;
+  padding: 0;
+  background: none;
+  color: var(--warden-accent);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.doc-article .doc-property-list b {
+  color: var(--warden-ink);
+  font-weight: 560;
+}
+
+/* ─── Previous and next ──────────────────────────────────────────────── */
+
+.doc-article .doc-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--home-rule);
+  font-size: 13px;
+}
+
+.doc-article .doc-pager a {
+  color: var(--warden-muted);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.doc-article .doc-pager a:hover {
+  color: var(--warden-ink);
+}
+
+.doc-article .doc-pager-next {
+  margin-left: auto;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .doc-article .doc-flow,
+  .doc-article .doc-tier-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .doc-article .doc-property-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .doc-article .doc-body td:first-child {
+    white-space: normal;
+  }
+}

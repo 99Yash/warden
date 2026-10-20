@@ -140,32 +140,33 @@ import HomeShell from "../components/HomeShell.astro";
         </div>
         <div class="receipt-row">
           <span class="receipt-key">lane</span>
-          <span class="receipt-val">down · correctness · 96%</span>
+          <span class="receipt-val">down · correctness · 91%</span>
         </div>
         <div class="receipt-row">
           <span class="receipt-key">file</span>
-          <span class="receipt-val">src/routes/session.ts:88</span>
+          <span class="receipt-val">src/billing/charge.ts:88</span>
         </div>
         <div class="receipt-row">
           <span class="receipt-key">claim</span>
           <span class="receipt-val">
-            <span class="receipt-emph">exec</span> receives request-controlled input before validation.
+            <span class="receipt-emph">markPaid</span> runs before the charge result is checked, so a
+            declined card still ships the order.
           </span>
         </div>
         <div class="receipt-row">
           <span class="receipt-key">source</span>
-          <span class="receipt-val">security/detect-child-process · tool</span>
+          <span class="receipt-val">charge.ts:88 · quote verified</span>
         </div>
-        <div class="receipt-quote">child_process.exec(req.query.command)</div>
+        <div class="receipt-quote">await markPaid(order.id);</div>
       </aside>
     </section>
 
     <section>
       <h2>Principles</h2>
       <ul>
-        <li><strong>Runs in your repo</strong>: no hosted backend and no upload</li>
+        <li><strong>Runs in your repo</strong>: no hosted backend. Code goes only to the model provider you choose</li>
         <li><strong>Gates are not tools</strong>: a model can skip a tool call, so verification runs after the model, every time</li>
-        <li><strong>Measured</strong>: recall and precision evals gate each change</li>
+        <li><strong>Measured</strong>: an eval harness scores recall and precision, and a parity eval decides when the new path becomes the default</li>
         <li><strong>Written down</strong>: ADR-0053 explains this page. Keep the method and the gates, and hand the loop to the runtime.</li>
       </ul>
     </section>
