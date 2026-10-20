@@ -1,3 +1,14 @@
+diff --git a/db/schema.sql b/db/schema.sql
+new file mode 100644
+index 0000000..3c1d0f2
+--- /dev/null
++++ b/db/schema.sql
+@@ -0,0 +1,5 @@
++CREATE TABLE profiles (
++  user_id text PRIMARY KEY,
++  display_name text NOT NULL,
++  bio text NOT NULL
++);
 diff --git a/src/profiles/upsert-profile.ts b/src/profiles/upsert-profile.ts
 new file mode 100644
 index 0000000..7b2e4a1
@@ -47,6 +58,6 @@ index 0000000..e05c9d3
 +  sessionUserId: string,
 +  body: ProfileBody,
 +): Promise<{ status: 204 }> {
-+  await upsertProfile(pool, { userId: sessionUserId, ...body });
++  await upsertProfile(pool, { ...body, userId: sessionUserId });
 +  return { status: 204 };
 +}

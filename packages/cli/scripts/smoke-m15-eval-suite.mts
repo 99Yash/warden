@@ -244,9 +244,14 @@ for (const { name, dir, real } of structuralDirs) {
     assert(real, `${name}: recall and ladder fixtures are real PRs`);
     assert(existsSync(resolve(dir, "meta.json")), `${name}: has meta.json (real-repo tree)`);
     assert(present.length === 1, `${name}: one present label (got ${present.length})`);
+    // The ladder labels are path-scoped: every consistency candidate in that
+    // diff is a prose-vs-code drift, so the gate must see all of them.
+    const pinsLine = !name.startsWith("structural-ladder-");
     assert(
-      present.every((l) => l.line !== undefined && STRUCTURAL_CATEGORIES.has(l.category ?? "")),
-      `${name}: the present label pins a line and a structural category`,
+      present.every(
+        (l) => (!pinsLine || l.line !== undefined) && STRUCTURAL_CATEGORIES.has(l.category ?? ""),
+      ),
+      `${name}: the present label has a structural category${pinsLine ? " and pins a line" : ""}`,
     );
   }
 }
