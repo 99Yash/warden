@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { wardenCachePath } from "@warden/env";
 
 /**
  * Resolves the SQLite cache file path. Anchors to the repo root by walking
@@ -13,11 +14,11 @@ import { dirname, resolve } from "node:path";
  * project gets its own cache without explicit configuration.
  *
  * Override with the `WARDEN_CACHE_PATH` env var if you need a non-default
- * location (e.g. for testing).
+ * location (e.g. for testing). `@warden/env` owns the read; it happens on
+ * each call, so a value set before the first `db()` call applies.
  */
 export function resolveCachePath(): string {
-  // oxlint-disable-next-line node/no-process-env -- debt, queued in docs/gate-design.md: WARDEN_CACHE_PATH is not in the @warden/env schema yet
-  const override = process.env["WARDEN_CACHE_PATH"];
+  const override = wardenCachePath();
   const path = override ? resolve(override) : resolve(findRepoRoot(), ".warden", "cache.sqlite");
   mkdirSync(dirname(path), { recursive: true });
   return path;

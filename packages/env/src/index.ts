@@ -25,6 +25,14 @@ const envSchema = z.object({
   // schema is parsed; kept here so docs-vs-code consistency checks see the
   // supported surface.
   WARDEN_ENV_FILE: z.string().min(1).optional(),
+  // SQLite cache file override (ADR-0007). Unset or empty means the
+  // `<repo-root>/.warden/cache.sqlite` resolved by `@warden/db`. The empty
+  // string maps to unset so `WARDEN_CACHE_PATH=` keeps the repo default.
+  // Read by `wardenCachePath()` below.
+  WARDEN_CACHE_PATH: z
+    .string()
+    .optional()
+    .transform((value) => (value === "" ? undefined : value)),
   // ADR-0028 / M13: per-category confidence floor override for the
   // `security` category. Parsed as a numeric string so missing/empty values
   // are unambiguous. v0 default lives in `@warden/core`'s
@@ -170,4 +178,19 @@ export function wardenEnv(): WardenEnv {
     );
   }
   return result.data;
+}
+
+/**
+ * The `WARDEN_CACHE_PATH` override, or `undefined` when unset or empty.
+ *
+ * `@warden/db` opens the cache through this reader, not through
+ * `wardenEnv()`, for two reasons. `wardenEnv()` loads the Warden runtime
+ * when no caller loaded it, and that writes env-file values into
+ * `process.env`. It also parses every key, so an unrelated invalid value
+ * would stop the cache from opening. This reader does neither. It reads
+ * `process.env` on each call, so a value that a smoke or the env-file
+ * loader sets before the first `db()` call applies.
+ */
+export function wardenCachePath(): string | undefined {
+  return envSchema.shape.WARDEN_CACHE_PATH.parse(process.env["WARDEN_CACHE_PATH"]);
 }
