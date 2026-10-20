@@ -9,23 +9,26 @@
  * instruction is appended.
  *
  * `runBossLoop()` builds its model from `getBossModel()` and takes no model
- * argument, so this smoke checks two things:
+ * argument, so this smoke checks the parts it exports:
  *   [1-2] the hook as a pure function (step numbers, meter calls);
- *   [3-4] the hook inside a real `streamText` loop with a mock model and the
- *         same `stopWhen` as the boss. This proves that the AI SDK sends only
- *         `submit_review` on the last step, that the tool result of the step
- *         before is in the last-step prompt, and that `CallUsageMeter` still
- *         counts every request.
+ *   [3-6] the hook inside a real `streamText` loop with a mock model and the
+ *         boss `stopWhen` (`bossStopConditions`). [3-4] prove that the AI SDK
+ *         sends only `submit_review` on the last step, that the tool result
+ *         of the step before is in the last-step prompt, and that
+ *         `CallUsageMeter` still counts every request. [5-6] prove that a
+ *         `submit_review` call with invalid input does not stop the loop
+ *         before the step cap.
  *
  * Offline: mock models only, no network, no paid call.
  *
  * Usage: pnpm --filter @warden/cli smoke:boss-final-step
  */
 
-import { hasToolCall, stepCountIs, streamText, tool, type ModelMessage } from "@warden/ai";
+import { streamText, tool, type ModelMessage } from "@warden/ai";
 import { MockLanguageModelV3 } from "@warden/ai/test";
 import {
   BOSS_FINAL_STEP_INSTRUCTION,
+  bossStopConditions,
   makeBossPrepareStep,
 } from "@warden/core/review-harness/boss-loop";
 import { CallUsageMeter } from "@warden/core/review-harness/scratchpad";
@@ -127,13 +130,16 @@ interface LoopRun {
   meter: CallUsageMeter;
 }
 
+type StepAction = "dispatch" | "submit" | "submit-invalid";
+
 /**
  * Run the boss tool wiring (`dispatch_worker` + `submit_review`, the boss
- * `stopWhen`, the boss `prepareStep`) against a mock model. The model calls
- * `dispatch_worker` while that tool is offered, and `submit_review` when it
- * is the only tool.
+ * `stopWhen`, the boss `prepareStep`) against a mock model. With no
+ * `actions`, the model calls `dispatch_worker` while that tool is offered,
+ * and `submit_review` when it is the only tool. With `actions`, request N
+ * plays `actions[N]`.
  */
-async function runLoop(stepCap: number): Promise<LoopRun> {
+async function runLoop(stepCap: number, actions?: StepAction[]): Promise<LoopRun> {
   const run: LoopRun = {
     calls: [],
     submitted: undefined,
@@ -147,14 +153,17 @@ async function runLoop(stepCap: number): Promise<LoopRun> {
       const toolNames = (options.tools ?? []).map((t) => t.name);
       run.calls.push({ toolNames, prompt: JSON.stringify(options.prompt) });
       const n = run.calls.length;
-      if (toolNames.includes("dispatch_worker")) {
+      const action =
+        actions?.[n - 1] ?? (toolNames.includes("dispatch_worker") ? "dispatch" : "submit");
+      if (action === "dispatch") {
         return toolCallStream(
           `call-${n}`,
           "dispatch_worker",
           JSON.stringify({ files: ["src/a.ts"], concern: "correctness" }),
         );
       }
-      return toolCallStream(`call-${n}`, "submit_review", JSON.stringify({ comments: [] }));
+      const comments = action === "submit-invalid" ? "not-an-array" : [];
+      return toolCallStream(`call-${n}`, "submit_review", JSON.stringify({ comments }));
     },
   });
 
@@ -180,7 +189,7 @@ async function runLoop(stepCap: number): Promise<LoopRun> {
         },
       }),
     },
-    stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
+    stopWhen: bossStopConditions(stepCap, () => run.submitted !== undefined),
     prepareStep: makeBossPrepareStep({ stepCap, meter: run.meter }),
     onStepFinish: run.meter.onStepFinish,
   });
@@ -235,6 +244,24 @@ process.stdout.write("\n[4] stepCap=1: the only step is the submit step\n");
   assert(run.dispatches === 0, `no worker ran (got ${run.dispatches})`);
   assert(run.submitted !== undefined, "submit_review was called");
   assert(run.meter.snapshot().requests.length === 1, "meter recorded 1 request");
+}
+
+process.stdout.write("\n[5] stepCap=3: an invalid submit does not end the loop\n");
+{
+  const run = await runLoop(3, ["submit-invalid", "submit"]);
+  assert(run.calls.length === 2, `two model requests (got ${run.calls.length})`);
+  assert(
+    run.calls[1]?.prompt.includes("Invalid input for tool submit_review") === true,
+    "the step-1 prompt carries the tool error of the invalid submit",
+  );
+  assert(run.submitted !== undefined, "the second, valid submit_review was accepted");
+}
+
+process.stdout.write("\n[6] stepCap=2: an invalid submit on the final step leaves no submission\n");
+{
+  const run = await runLoop(2, ["dispatch", "submit-invalid"]);
+  assert(run.calls.length === 2, `the loop stops at the step cap (got ${run.calls.length})`);
+  assert(run.submitted === undefined, "no submission: runBossLoop() then throws");
 }
 
 if (failed > 0) {

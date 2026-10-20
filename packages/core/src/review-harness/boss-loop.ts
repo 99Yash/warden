@@ -5,7 +5,6 @@ import {
   getBossModel,
   getBossModelInfo,
   getModelKey,
-  hasToolCall,
   stepCountIs,
   streamText,
   timeout as timeoutCondition,
@@ -437,6 +436,22 @@ export const BOSS_FINAL_STEP_INSTRUCTION = [
 ].join("\n");
 
 /**
+ * The boss `streamText({ stopWhen })` conditions: the step cap, or a VALID
+ * `submit_review` call (`submitted()` is true once its `execute` ran).
+ *
+ * Do not use `hasToolCall("submit_review")` here. It also matches a call
+ * that failed input validation, so it ended the review with no retry. With
+ * this condition, the boss sees the tool error in the next step and can
+ * submit again.
+ */
+export function bossStopConditions(
+  stepCap: number,
+  submitted: () => boolean,
+): [ReturnType<typeof stepCountIs>, () => boolean] {
+  return [stepCountIs(stepCap), submitted];
+}
+
+/**
  * Build the boss `streamText({ prepareStep })` hook.
  *
  * Every step calls `meter.prepareStep()` first, so the request count of
@@ -585,16 +600,17 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   // structured output composes far more reliably with a tool-use loop across
   // model versions: opus-4-8 deterministically failed `Output.object` here with
   // "No object generated: could not parse the response", while opus-4-6 did
-  // not. The tool's `execute` captures the SDK-validated input;
-  // `hasToolCall("submit_review")` ends the loop as soon as it fires.
+  // not. The tool's `execute` captures the SDK-validated input, and the loop
+  // ends as soon as `submittedRaw` is set (see `stopWhen`).
   let submittedRaw: unknown;
   const submitReviewTool = tool({
     description: [
       "Submit the final review. Call this exactly once, as your LAST action,",
       "with the complete review as `{ comments: Comment[] }`. Copy each",
-      "Comment's `sources` verbatim from worker findings. Calling this ends",
+      "Comment's `sources` verbatim from worker findings. A valid call ends",
       "the review; an empty `comments` array is the correct submission for a",
-      "clean diff.",
+      "clean diff. A call with invalid input returns the validation error:",
+      "fix the input and call again.",
     ].join(" "),
     inputSchema: geminiPair.requestSchema,
     execute: (args: unknown) => {
@@ -613,7 +629,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
         dispatch_worker: dispatchHandle.tool,
         submit_review: submitReviewTool,
       },
-      stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
+      stopWhen: bossStopConditions(stepCap, () => submittedRaw !== undefined),
       prepareStep: makeBossPrepareStep({ stepCap, meter }),
       onStepFinish: meter.onStepFinish,
       ...(primaryInfo.providerOptions !== undefined
@@ -637,17 +653,21 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     }
 
     if (submittedRaw === undefined) {
-      // The final step offers only `submit_review`, so this is a boss that
-      // ignored the final-step instruction, or one that stopped early with
-      // text and no tool call. Fail loudly: a 0-comment review here would be
-      // a false-clean.
-      const stepCount = (await result.steps).length;
-      const where =
-        stepCount >= stepCap
-          ? `final step ${stepCount}/${stepCap} made no submit_review call`
-          : `stopped at step ${stepCount}/${stepCap} with no tool call`;
+      // Fail loudly: a 0-comment review here would be a false-clean.
+      const steps = await result.steps;
+      const rejected = steps
+        .at(-1)
+        ?.toolCalls.find((c) => c.toolName === "submit_review" && c.invalid === true);
       throw new Error(
-        `boss ended without calling submit_review (${where}; no final comment set emitted)`,
+        describeMissingSubmit({
+          stepCount: steps.length,
+          stepCap,
+          rejectedIssues:
+            rejected === undefined
+              ? undefined
+              : (schemaIssues(geminiPair.requestSchema, rejected.input) ??
+                errorSummary(rejected.error)),
+        }),
       );
     }
     // Coerce string-form numeric literals back to numbers. No-op when the
@@ -813,6 +833,41 @@ const BossOutputSchema = z.object({
     .array(CommentSchema)
     .describe("Final review-comment array. Sources must be copied verbatim from worker outputs."),
 });
+
+const SUBMIT_ISSUES_CHAR_CAP = 400;
+
+/** The schema issues of `value`, on one line, or `undefined` when it parses. */
+function schemaIssues(schema: z.ZodType, value: unknown): string | undefined {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return undefined;
+  return truncate(z.prettifyError(parsed.error).replace(/\s*\n\s*/g, " "), SUBMIT_ISSUES_CHAR_CAP);
+}
+
+/**
+ * The error text for a boss loop that ended with no valid `submit_review`
+ * call. The harness keeps only the first 80 characters in its top-level
+ * message (the full text stays on `cause`), so the reason comes first.
+ */
+function describeMissingSubmit(opts: {
+  stepCount: number;
+  stepCap: number;
+  /**
+   * Set when the last step made a `submit_review` call that failed input
+   * validation: its schema issues, or the SDK error when the input did not
+   * parse. `undefined` when there was no such call.
+   */
+  rejectedIssues: string | undefined;
+}): string {
+  const at = `step ${opts.stepCount}/${opts.stepCap}`;
+  if (opts.rejectedIssues !== undefined) {
+    return `boss submit_review input invalid at ${at}: ${opts.rejectedIssues}`;
+  }
+  const where =
+    opts.stepCount >= opts.stepCap
+      ? `final ${at} made no valid submit_review call`
+      : `stopped at ${at} with no tool call`;
+  return `boss ended without calling submit_review (${where}; no final comment set emitted)`;
+}
 
 function normalizeBossComments(comments: Comment[]): Comment[] {
   // The boss-emitted ids are LLM-authored placeholders; re-derive stable
