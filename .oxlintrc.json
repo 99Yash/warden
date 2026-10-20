@@ -73,6 +73,15 @@
     // that explained the deleted cast goes with it. It applies to every surface, with no
     // override.
     "typescript/no-unnecessary-type-assertion": "error",
+    // no-unsafe-return, the first of the no-unsafe-* family. The family says that an `any`
+    // may not flow into a return, an argument, a call, a member read, or an assignment; each
+    // member lands here once the tree is at zero for it. Type external, persisted, and
+    // protocol data as `unknown` and parse it at the owning boundary (docs/conventions.md
+    // §2) instead of letting `any` carry it out of a function. Do not swap the `any` for an
+    // `as T`: give the function a return type that the value provably has. The family is off
+    // for JavaScript sources in the last "overrides" entry; JSDoc-typed `.mjs` is `any` by
+    // construction.
+    "typescript/no-unsafe-return": "error",
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
     // A `catch` handles the failure, logs safe fields, or holds a comment that says why the
@@ -223,6 +232,24 @@
       // set up child-process environments directly.
       "files": ["**/scripts/**", ".claude/hooks/**"],
       "rules": { "no-console": "off", "node/no-process-env": "off" }
+    },
+    {
+      // The no-unsafe-* family stays off ON PURPOSE for JavaScript sources, as in alfred. The
+      // gate scripts are JSDoc-typed `.mjs` checked with `noImplicitAny: false`
+      // (scripts/tsconfig.json), and `.claude/hooks/*.mjs` are in no tsconfig at all, so an
+      // unannotated binding, a parsed manifest, or a Node global is `any` there by
+      // construction. On 2026-10-20 the family reported 294 such reads in `.mjs`, none of
+      // them an escaped boundary. TypeScript sources everywhere, scripts included, keep each
+      // rule that is on. The four that are still "off" above are listed here already, so a
+      // rule that lands later needs no second override.
+      "files": ["**/*.mjs", "**/*.js", "**/*.cjs"],
+      "rules": {
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-assignment": "off"
+      }
     }
   ]
 }
