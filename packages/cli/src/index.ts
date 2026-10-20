@@ -28,7 +28,7 @@ import { runSetupCommand, type SetupCliOpts } from "./commands/setup.js";
 import { formatCliError, formatCommentSet } from "./format.js";
 import { createPhaseRenderer, renderBannerLine } from "./render.js";
 import { runOpencodeReview } from "./opencode/drive.js";
-import { LANE_SPECS, type LaneSpec } from "./opencode/materialize.js";
+import { LANE_SPECS, laneSpecFor, type LaneSpec } from "./opencode/materialize.js";
 
 function findUp(filename: string): string | undefined {
   let dir = process.cwd();
@@ -257,7 +257,7 @@ program
     "Run one review lane in OpenCode (the down lane by default), build the trusted lane envelope, and publish only the runPostPass CommentSet. No warden provider key needed.",
   )
   .option(
-    "--lane <down|up>",
+    `--lane <${LANE_SPECS.map((spec) => spec.lane).join("|")}>`,
     "The lane to run. Default down. The up lane (ADR-0052, not ratified) is off unless you pass --lane up.",
   )
   .option(
@@ -408,7 +408,7 @@ async function runOpencodeReviewCommand(opts: OpencodeReviewOpts): Promise<void>
 
   let lane: LaneSpec | undefined;
   if (opts.lane !== undefined) {
-    lane = LANE_SPECS.find((spec) => spec.lane === opts.lane);
+    lane = laneSpecFor(opts.lane);
     if (lane === undefined) {
       throw new Error(
         `opencode-review: --lane must be one of ${LANE_SPECS.map((spec) => spec.lane).join(", ")} (got "${opts.lane}")`,

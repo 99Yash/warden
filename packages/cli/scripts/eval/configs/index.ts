@@ -206,7 +206,7 @@ const opencodeUp: EvalConfig = {
   name: "opencode-up",
   description: "OpenCode up lane (structural search, ADR-0052) via driveOpencodeLane.",
   runtime: "opencode",
-  opencodeLane: "up",
+  lane: "up",
 };
 
 export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp];

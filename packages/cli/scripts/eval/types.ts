@@ -10,6 +10,7 @@
  */
 
 import type { BossLoopConfig } from "@warden/core";
+import type { LaneSpec } from "../../src/opencode/materialize.js";
 import { z } from "zod";
 
 /**
@@ -32,10 +33,11 @@ export interface EvalConfig {
   /** OpenCode lane model override; absent means the driver default. */
   opencodeModel?: string;
   /**
-   * OpenCode lane (`LaneSpec.lane`); absent means the down lane. The up
-   * lane (ADR-0052, not ratified) runs only through a config that sets it.
+   * The lane a lane runtime runs (`laneSpecFor`); absent means the down
+   * lane. The up lane (ADR-0052, not ratified) runs only through a config
+   * that sets it. Only the `opencode` runtime reads it now.
    */
-  opencodeLane?: "down" | "up";
+  lane?: LaneSpec["lane"];
 }
 
 /**

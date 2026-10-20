@@ -53,7 +53,7 @@ import {
   type DriveLaneResult,
   type SessionUsage,
 } from "../../src/opencode/drive.js";
-import { UP_LANE_SPEC } from "../../src/opencode/materialize.js";
+import { laneSpecFor, type LaneSpec } from "../../src/opencode/materialize.js";
 import { driveClaudeCodeLane } from "./claude-code-lane.mjs";
 import { ALL_CONFIGS, LANE_CONFIGS } from "./configs/index.js";
 import {
@@ -450,18 +450,29 @@ interface OpencodeScoreExtra {
   requestedModel?: string;
 }
 
+/** The spec of the lane a config names (`EvalConfig.lane`); `undefined` means the down lane. */
+function configLaneSpec(config: EvalConfig): LaneSpec | undefined {
+  if (config.lane === undefined) return undefined;
+  const spec = laneSpecFor(config.lane);
+  if (spec === undefined) {
+    throw new Error(`eval: config "${config.name}" names lane "${config.lane}", not in LANE_SPECS`);
+  }
+  return spec;
+}
+
 async function runOnce(
   fixture: Fixture,
   config: EvalConfig,
   repoRoot: string,
 ): Promise<OnceResult> {
   if (config.runtime === "opencode") {
+    const lane = configLaneSpec(config);
     return await runOnceLane(fixture, (root, baseSha) =>
       driveOpencodeLane({
         repoRoot: root,
         baseRef: baseSha,
         ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
-        ...(config.opencodeLane === "up" ? { lane: UP_LANE_SPEC } : {}),
+        ...(lane !== undefined ? { lane } : {}),
       }),
     );
   }

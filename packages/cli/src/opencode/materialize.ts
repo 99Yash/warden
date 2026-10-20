@@ -155,6 +155,15 @@ export const UP_LANE_SPEC: LaneSpec = {
 /** Every lane that `lanes:materialize` writes, in output order. */
 export const LANE_SPECS: readonly LaneSpec[] = [DOWN_LANE_SPEC, UP_LANE_SPEC];
 
+/**
+ * The spec of the lane with this name, or `undefined` when no lane has
+ * it. The one lookup from a lane name (a CLI flag, an eval config) to its
+ * spec, so a new lane needs only a new entry in `LANE_SPECS`.
+ */
+export function laneSpecFor(name: string): LaneSpec | undefined {
+  return LANE_SPECS.find((spec) => spec.lane === name);
+}
+
 /** MCP tool actions the lane may call (server `warden` + tool name). */
 export const LANE_MCP_TOOLS = ["warden_run_det_priors", "warden_lookup_type_def"] as const;
 
