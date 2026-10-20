@@ -20,6 +20,7 @@
  * sample fails the precision gate.
  */
 
+import type { CommentSetMetadata } from "@warden/core";
 import type { SessionUsage } from "../../src/opencode/drive.js";
 import type {
   AggregateScore,
@@ -37,6 +38,44 @@ const COST_BUDGET_USD = 3;
 const SYNTHETIC_PLANTS_MIN_CATCH = 4;
 const REAL_PR_M14_MIN_CATCH = 2;
 const DISPATCH_MIN_ON_SUBSTANTIVE = 1;
+
+// ---------------------------------------------------------------------------
+// Cost of one sample, and how a report prints a cost
+// ---------------------------------------------------------------------------
+
+/**
+ * The cost fields of a harness sample, from the `CommentSet` metadata of a
+ * review that finished, or from the `spend` of a `ReviewFailedError`.
+ * `undefined` (a throw with no known spend) is $0. `usageUnknownRequests`
+ * is copied only when it is above 0, as in the metadata.
+ */
+export function harnessSampleCost(
+  spend: Pick<CommentSetMetadata, "costUsd" | "usageUnknownRequests"> | undefined,
+): Pick<FixtureSample, "costUsd" | "usageUnknownRequests"> {
+  const unknown = spend?.usageUnknownRequests ?? 0;
+  return {
+    costUsd: spend?.costUsd ?? 0,
+    ...(unknown > 0 ? { usageUnknownRequests: unknown } : {}),
+  };
+}
+
+/**
+ * `$0.1234`, or `≥ $0.1234` when some model requests reported no usage and
+ * the cost is a lower bound. The one cost format of the eval reports.
+ */
+export function formatCost(usd: number, unknownRequests: number | undefined): string {
+  const amount = `$${usd.toFixed(4)}`;
+  return unknownRequests !== undefined && unknownRequests > 0 ? `≥ ${amount}` : amount;
+}
+
+/** Sum of the `usageUnknownRequests` of each item, or `{}` when the sum is 0. */
+function sumUnknownRequests(items: readonly { usageUnknownRequests?: number }[]): {
+  usageUnknownRequests?: number;
+} {
+  let sum = 0;
+  for (const item of items) sum += item.usageUnknownRequests ?? 0;
+  return sum > 0 ? { usageUnknownRequests: sum } : {};
+}
 
 // ---------------------------------------------------------------------------
 // Per-fixture scoring
@@ -71,6 +110,7 @@ export function scoreFixtureRun(
     maxForbidden: max(forbiddenCounts),
     medianUnlabeled: median(unlabeledCounts),
     medianCost: median(costs),
+    ...sumUnknownRequests(samples),
     medianDispatches: median(dispatches),
     medianDurationMs: median(durations),
     hadError: errors >= Math.ceil(samples.length / 2),
@@ -123,6 +163,7 @@ export function aggregateScores(rows: FixtureScore[], configName: string): Aggre
     falsePositiveTrapHits,
     cleanFixtureUnlabeled,
     totalCost: round4(totalCost),
+    ...sumUnknownRequests(rows),
     medianDispatchesOnSubstantive: median(substantiveDispatches),
     rows,
   };
@@ -173,10 +214,10 @@ export function checkThreshold(agg: AggregateScore, rows: FixtureScore[]): Thres
   );
   if (!passC) failed.push("c-clean-fixture-comments");
 
-  // (d) Total cost < $3.
+  // (d) Total cost < $3. A lower bound (`≥`) is compared as it is.
   const passD = agg.totalCost < COST_BUDGET_USD;
   details.push(
-    `(d) Total cost: $${agg.totalCost.toFixed(4)} ` +
+    `(d) Total cost: ${formatCost(agg.totalCost, agg.usageUnknownRequests)} ` +
       `(threshold <$${COST_BUDGET_USD}) — ${passD ? "PASS" : "FAIL"}`,
   );
   if (!passD) failed.push("d-cost-budget");
@@ -384,7 +425,7 @@ export function checkParity(
   ).length;
   const passP5 = passP5cost && unmeasured === 0;
   details.push(
-    `(P5) Cost: $${candidate.totalCost.toFixed(4)} ` +
+    `(P5) Cost: ${formatCost(candidate.totalCost, candidate.usageUnknownRequests)} ` +
       `(threshold <$${COST_BUDGET_USD}) + ${unmeasured} row(s) with unmeasured spend — ${passP5 ? "PASS" : "FAIL"}`,
   );
   if (!passP5) failed.push("P5-cost");
@@ -461,7 +502,7 @@ export function renderMarkdownTable(agg: AggregateScore): string {
     return (
       `| \`${r.fixture}\`${expectsEmpty} | ${r.category} | ` +
       `${r.caughtCount} | ${r.totalLabels} | ${r.maxForbidden}/${r.totalForbiddenLabels} | ${r.medianUnlabeled} | ` +
-      `${r.medianDispatches} | ${r.medianCost.toFixed(4)} | ${r.medianDurationMs} |`
+      `${r.medianDispatches} | ${costCell(r)} | ${r.medianDurationMs} |`
     );
   });
   const summary = [
@@ -471,10 +512,23 @@ export function renderMarkdownTable(agg: AggregateScore): string {
     `- Real-PR catch: ${agg.realCaught}/${agg.realPlants}`,
     `- False-positive trap hits: ${agg.falsePositiveTrapHits}/${agg.falsePositiveTraps}`,
     `- Clean-fixture unlabeled: ${agg.cleanFixtureUnlabeled}`,
-    `- Total cost: $${agg.totalCost.toFixed(4)}`,
+    `- Total cost: ${formatCost(agg.totalCost, agg.usageUnknownRequests)}` +
+      unknownRequestsNote(agg.usageUnknownRequests),
     `- Min substantive dispatches: ${agg.medianDispatchesOnSubstantive}`,
   ];
   return [...header, ...rows, ...summary].join("\n");
+}
+
+/** The `cost $` cell: `0.1234`, or `≥ 0.1234` for a lower bound. */
+function costCell(row: FixtureScore): string {
+  const amount = row.medianCost.toFixed(4);
+  return row.usageUnknownRequests !== undefined ? `≥ ${amount}` : amount;
+}
+
+/** " (lower bound: N model requests reported no usage)", or "" when N is 0. */
+function unknownRequestsNote(unknownRequests: number | undefined): string {
+  if (unknownRequests === undefined || unknownRequests === 0) return "";
+  return ` (lower bound: ${unknownRequests} model request${unknownRequests === 1 ? "" : "s"} reported no usage)`;
 }
 
 // ---------------------------------------------------------------------------

@@ -2833,6 +2833,13 @@ Usage stays telemetry: no usage read can fail a review or a lane.
 - `LlmModelPrice.contextTiers` carries the tiers. The catalog parser reads `cost.tiers` one entry at a time, so a bad entry cannot fail the catalog parse. The OpenAI fallback prices carry the 272k tier too.
 - The Anthropic models in use (Opus 5.5, Sonnet 5.5, Haiku 4.5) have no tier. Claude 4.6 and later models, except Haiku 5.5, bill the full 1M context at standard prices. No call site uses Gemini today. Gemini 2.5 Pro has a tier above 200k, and the generic parser reads it.
 
+**Amendment 2026-10-20 (the spend of a failed review reaches the caller).** The first amendment of this date wrote the spend of a failed boss to the `reviewRuns` row only. The CLI error and the eval sample showed no cost. Decision:
+
+- When the boss loop throws, `runReviewHarness()` throws `ReviewFailedError` (`review-harness/review-failed-error.ts`), not the raw boss error. Its `message` is the boss message, unchanged. Its `cause` is the boss error. Its `spend` holds `runId`, `tokenUsage`, `costUsd`, `costByTier`, `costLabels`, and `usageUnknownRequests`, with the same meaning as in `CommentSet.metadata`. It is the same spend as the `reviewRuns` row.
+- `spend` is `undefined` when the usage cannot be read or priced. Usage stays telemetry: it never replaces the failure, and the review still fails.
+- The CLI keeps the line `warden: <message>` and exit code 1. For a `ReviewFailedError`, it adds one line: `warden: spent before the failure: ≥ $X (…); N model requests reported no usage; review run <id>`. The `≥` and the count show only when `usageUnknownRequests` is set.
+- The eval runner records the spend of a failed harness sample as the sample cost, so the `--max-cost` ceiling counts it. Each sample, fixture row, and aggregate carries `usageUnknownRequests` (absent when 0). Each report place that prints a cost prints a lower bound as `≥`. The JSON scorecard only adds fields. A lower bound is still a measured cost: it does not stop the run as `unmeasured-spend`, and criterion (d) and P5 compare it as it is.
+
 ---
 
 ## ADR-0049 — Lever B (intent-context): feed stated intent as adjudication context — `gh`-sourced PR description + referenced design docs, compressed by a configured cheap-model summarizer (a routing policy, not a hard-wired provider) into a claimed-intent digest the boss verifies against code (never trusts)

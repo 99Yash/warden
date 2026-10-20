@@ -26,6 +26,7 @@ import type {
 import { BOSS_LOOP_DEFAULTS, runBossLoop, type BossLoopConfig } from "./boss-loop.js";
 import { scopeCommentsToDiff } from "./comment-scope.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
+import { ReviewFailedError, type ReviewSpend } from "./review-failed-error.js";
 import {
   accumulateTokenUsage,
   ReviewScratchpad,
@@ -199,15 +200,17 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   } catch (err) {
     // The boss hard-fails the review (ADR-0017 amendment), but the boss and
     // the workers already spent tokens. Write that spend to the review-run
-    // row before the rethrow. Best-effort: this path never replaces `err`.
-    await recordFailedReviewRun({
+    // row, and give it to the caller on the thrown error. The error keeps
+    // the boss message and has the boss error as `cause`. Best-effort: a
+    // failed usage read gives `spend: undefined` and never replaces `err`.
+    const spend = await recordFailedReviewRun({
       runId,
       inputHash,
       mode: input.config.mode,
       modelLabels,
       scratchpad,
     });
-    throw err;
+    throw new ReviewFailedError(err, spend);
   }
 
   // Phase 3 — citation verify. Substring-checks every `{path, line, snippet}`
@@ -435,10 +438,12 @@ function recordReviewRun(input: {
 }
 
 /**
- * Write the review-run row for a review whose boss loop threw. The row
- * carries the spend known at the failure, so the durable record does not
- * read $0 for a run that spent tokens. `commentsEmitted` is 0: the review
- * emitted nothing. Never throws.
+ * Write the review-run row for a review whose boss loop threw, and return
+ * the same spend for the thrown `ReviewFailedError`. The row carries the
+ * spend known at the failure, so the durable record does not read $0 for a
+ * run that spent tokens. `commentsEmitted` is 0: the review emitted
+ * nothing. A failed row write still returns the spend. Never throws:
+ * returns `undefined` when the usage cannot be read or priced.
  */
 async function recordFailedReviewRun(input: {
   runId: string;
@@ -446,7 +451,7 @@ async function recordFailedReviewRun(input: {
   mode: "check" | "review";
   modelLabels: Record<ReviewCostTier, string>;
   scratchpad: ReviewScratchpad;
-}): Promise<void> {
+}): Promise<ReviewSpend | undefined> {
   try {
     const { tokenUsage, requestsByTier, unknownRequests } = summarizeUsage(input.scratchpad);
     const costs = await computeCosts(tokenUsage, requestsByTier);
@@ -460,8 +465,17 @@ async function recordFailedReviewRun(input: {
       commentsEmitted: 0,
       usageUnknownRequests: unknownRequests,
     });
+    return {
+      runId: input.runId,
+      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+      ...(costs !== undefined
+        ? { costUsd: costs.costUsd, costByTier: costs.costByTier, costLabels: costs.costLabels }
+        : {}),
+      ...(unknownRequests > 0 ? { usageUnknownRequests: unknownRequests } : {}),
+    };
   } catch {
     // Usage is telemetry; the boss error is the one the caller must see.
+    return undefined;
   }
 }
 
@@ -683,3 +697,4 @@ function makeEmptySet(startedAt: number, degraded: DegradedEntry[]): CommentSet 
 export type { DetPriors };
 export { runDetPriors } from "./det-priors.js";
 export { ReviewScratchpad, type TokenUsage, type WorkerOutput } from "./scratchpad.js";
+export { ReviewFailedError, type ReviewSpend } from "./review-failed-error.js";
