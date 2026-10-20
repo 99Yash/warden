@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { gitProcessEnv } from "@warden/env";
 import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { and, db, eq, importGraph } from "@warden/db";
@@ -210,6 +211,7 @@ function gitLsFiles(repoRoot: string, args: string[]): Promise<string[]> {
   return new Promise((resolveP, rejectP) => {
     const child = spawn("git", ["ls-files", "-z", ...args], {
       cwd: repoRoot,
+      env: gitProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     // Decode once at the end: a multi-byte character split across two chunks

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { gitProcessEnv } from "@warden/env";
 import { createReadStream } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { createInterface } from "node:readline";
@@ -136,6 +137,7 @@ function gitListFiles(repoRoot: string): Promise<string[]> {
   return new Promise((resolveP, rejectP) => {
     const child = spawn("git", ["ls-files"], {
       cwd: repoRoot,
+      env: gitProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { gitProcessEnv } from "@warden/env";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { sha256Hex } from "../hash.js";
@@ -90,7 +91,11 @@ export async function walkRepo(repoRoot: string): Promise<WalkResult> {
 
 function gitListFiles(repoRoot: string): Promise<string[]> {
   return new Promise((resolveP, rejectP) => {
-    const child = spawn("git", ["ls-files"], { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("git", ["ls-files"], {
+      cwd: repoRoot,
+      env: gitProcessEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
