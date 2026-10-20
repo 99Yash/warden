@@ -252,10 +252,16 @@ export function requireProviderApiKey(providerId: string, command: string): stri
   throw new Error(formatMissingEnvMessage(provider.apiKeyEnv, command, runtimeInfo));
 }
 
+/** The first configured provider that has an API key, and the key. */
+export interface ProviderApiKey {
+  providerId: string;
+  apiKey: string;
+}
+
 export function requireAnyProviderApiKey(
   providerIds: readonly string[],
   command: string,
-): { providerId: string; apiKey: string } {
+): ProviderApiKey {
   const runtimeInfo = currentWardenRuntime();
   const missing: string[] = [];
   for (const providerId of providerIds) {
@@ -503,8 +509,8 @@ function loadEnvFiles(files: LoadedEnvFile[]): Map<string, EnvVarSource> {
     try {
       const text = readFileSyncUtf8(file.path);
       const entries = parseEnv(text);
-      file.keys = Object.keys(entries);
-      for (const [key, value] of Object.entries(entries)) {
+      file.keys = [...entries.keys()];
+      for (const [key, value] of entries) {
         if (STARTUP_ENV_KEYS.has(key) && (process.env[key]?.length ?? 0) > 0) continue;
         process.env[key] = value;
         sources.set(key, { envName: key, source: "file", path: file.path });
@@ -516,8 +522,8 @@ function loadEnvFiles(files: LoadedEnvFile[]): Map<string, EnvVarSource> {
   return sources;
 }
 
-function parseEnv(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
+function parseEnv(text: string): Map<string, string> {
+  const out = new Map<string, string>();
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
@@ -529,7 +535,7 @@ function parseEnv(text: string): Record<string, string> {
     const key = withoutExport.slice(0, eq).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
     const rawValue = withoutExport.slice(eq + 1).trim();
-    out[key] = parseEnvValue(rawValue);
+    out.set(key, parseEnvValue(rawValue));
   }
   return out;
 }
@@ -676,10 +682,11 @@ function mergeConfig(base: WardenConfig, override: WardenConfig): WardenConfig {
 function deepMerge(base: unknown, override: unknown): unknown {
   if (override === undefined) return base;
   if (!isPlainObject(base) || !isPlainObject(override)) return override;
-  const merged: Record<string, unknown> = { ...base };
+  const merged = { ...base };
   for (const [key, value] of Object.entries(override)) {
     merged[key] = deepMerge(merged[key], value);
   }
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- generic walker over two config layers; `mergeConfig` parses the result with `configSchema`
   return merged;
 }
 

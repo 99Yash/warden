@@ -150,15 +150,15 @@ export interface ReviewTelemetrySettings {
 export function buildReviewTelemetry(ctx: ReviewTelemetryContext): ReviewTelemetrySettings {
   const state = ensureObservability();
   if (state.kind !== "on") return { isEnabled: false };
-  const metadata: Record<string, AttributeValue> = {
+  const metadata = {
     // Group every boss + worker call in this review into one Langfuse trace.
     langfuseTraceId: ctx.runId,
     "warden.runId": ctx.runId,
     "warden.role": ctx.role,
-  };
-  if (ctx.concern !== undefined) metadata["warden.concern"] = ctx.concern;
-  if (ctx.tier !== undefined) metadata["warden.tier"] = ctx.tier;
-  if (ctx.file !== undefined) metadata["warden.file"] = ctx.file;
+    ...(ctx.concern !== undefined ? { "warden.concern": ctx.concern } : {}),
+    ...(ctx.tier !== undefined ? { "warden.tier": ctx.tier } : {}),
+    ...(ctx.file !== undefined ? { "warden.file": ctx.file } : {}),
+  } satisfies Record<string, AttributeValue>;
   return {
     isEnabled: true,
     functionId: ctx.concern

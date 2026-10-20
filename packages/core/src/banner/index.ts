@@ -58,7 +58,7 @@ export async function computeBannerState(inputs: BannerInputs): Promise<BannerSt
   // state, and the user needs to switch models when re-running init.
   const locked = await readLockedModel();
   if (locked) {
-    const meta = VOYAGE_MODELS[locked.modelId];
+    const meta = VOYAGE_MODELS.get(locked.modelId);
     if (meta?.deprecatedAfter) {
       const deprecated = new Date(meta.deprecatedAfter);
       if (!Number.isNaN(deprecated.getTime()) && deprecated.getTime() <= Date.now()) {
@@ -112,7 +112,7 @@ export async function computeSoftNotice(inputs: BannerInputs): Promise<SoftNotic
   if (!locked || locked.modelId === currentDefault) return null;
 
   // Only soft when the more-severe banners aren't already firing.
-  const meta = VOYAGE_MODELS[locked.modelId];
+  const meta = VOYAGE_MODELS.get(locked.modelId);
   if (meta?.deprecatedAfter) {
     const deprecated = new Date(meta.deprecatedAfter);
     if (!Number.isNaN(deprecated.getTime()) && deprecated.getTime() <= Date.now()) return null;
@@ -180,7 +180,7 @@ export function bannerStateToDegraded(state: BannerState): DegradedEntry[] {
 }
 
 function computeDefaultAgeDays(currentDefault: string): number | null {
-  const meta = VOYAGE_MODELS[currentDefault];
+  const meta = VOYAGE_MODELS.get(currentDefault);
   if (!meta) return null;
   const since = new Date(meta.defaultSince);
   if (Number.isNaN(since.getTime())) return null;

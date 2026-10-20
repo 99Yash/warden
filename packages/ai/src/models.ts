@@ -219,7 +219,7 @@ type ReviewRole = "boss" | "apex" | "workerStrong" | "workerCheap";
 type ReviewLlmProvider = Extract<LlmProviderId, "anthropic" | "openai">;
 
 /** Per-provider model for each review role. */
-const PROVIDER_ROLE_MODELS: Record<ReviewLlmProvider, Record<ReviewRole, ResolvedLlmModel>> = {
+const PROVIDER_ROLE_MODELS = {
   anthropic: {
     boss: ANTHROPIC_OPUS_5_5,
     apex: ANTHROPIC_OPUS_5_5,
@@ -234,7 +234,7 @@ const PROVIDER_ROLE_MODELS: Record<ReviewLlmProvider, Record<ReviewRole, Resolve
     workerStrong: OPENAI_GPT_6_LUNA,
     workerCheap: OPENAI_GPT_6_LUNA,
   },
-};
+} satisfies Record<ReviewLlmProvider, Record<ReviewRole, ResolvedLlmModel>>;
 
 /**
  * Default provider preference per role when the user has not pinned
@@ -242,12 +242,12 @@ const PROVIDER_ROLE_MODELS: Record<ReviewLlmProvider, Record<ReviewRole, Resolve
  * favor OpenAI GPT-6 Luna for cost/performance. An explicit primary overrides
  * this for every role (see {@link roleProviderOrder}).
  */
-const ROLE_DEFAULT_PROVIDER_ORDER: Record<ReviewRole, readonly ReviewLlmProvider[]> = {
+const ROLE_DEFAULT_PROVIDER_ORDER = {
   boss: ["anthropic", "openai"],
   apex: ["anthropic", "openai"],
   workerStrong: ["openai", "anthropic"],
   workerCheap: ["openai", "anthropic"],
-};
+} satisfies Record<ReviewRole, readonly ReviewLlmProvider[]>;
 
 function isReviewLlmProvider(id: string | undefined): id is ReviewLlmProvider {
   return id === "anthropic" || id === "openai";
@@ -306,12 +306,12 @@ export async function getReviewModelPricingByTier(): Promise<
   };
 }
 
-export function getReviewModelLabelsByTier(): Record<ReviewCostTier, string> {
+export function getReviewModelLabelsByTier() {
   return {
     opus: getBossModelInfo().label,
     sonnet: getWorkerStrongModelInfo().label,
     haiku: getWorkerCheapModelInfo().label,
-  };
+  } satisfies Record<ReviewCostTier, string>;
 }
 
 /**

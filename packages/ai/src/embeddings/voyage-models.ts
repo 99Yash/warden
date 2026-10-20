@@ -19,15 +19,18 @@ export interface VoyageModelMeta {
   usdPerMTokens: number;
 }
 
-export const VOYAGE_MODELS: Record<string, VoyageModelMeta> = {
-  "voyage-code-3": {
-    defaultSince: "2026-02-01",
-    deprecatedAfter: null,
-    outputDim: 1024,
-    maxInputTokens: 32_000,
-    usdPerMTokens: 0.18,
-  },
-};
+export const VOYAGE_MODELS: ReadonlyMap<string, VoyageModelMeta> = new Map([
+  [
+    "voyage-code-3",
+    {
+      defaultSince: "2026-02-01",
+      deprecatedAfter: null,
+      outputDim: 1024,
+      maxInputTokens: 32_000,
+      usdPerMTokens: 0.18,
+    },
+  ],
+]);
 
 /** Current Warden default. Touching this value is an ADR. */
 export const CURRENT_DEFAULT = "voyage-code-3";
@@ -36,7 +39,7 @@ export const CURRENT_DEFAULT = "voyage-code-3";
 export const VOYAGE_MAX_BATCH_SIZE = 128;
 
 export function voyageModelMeta(modelId: string): VoyageModelMeta {
-  const meta = VOYAGE_MODELS[modelId];
+  const meta = VOYAGE_MODELS.get(modelId);
   if (!meta) {
     throw new Error(
       `Unknown Voyage SKU: ${modelId}. Add it to VOYAGE_MODELS in @warden/ai/embeddings/voyage-models.ts.`,
