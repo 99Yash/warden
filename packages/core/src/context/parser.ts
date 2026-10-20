@@ -91,7 +91,7 @@ export class TsCompilerParser implements SourceParser {
         ts.isExternalModuleReference(stmt.moduleReference)
       ) {
         const expr = stmt.moduleReference.expression;
-        if (expr && ts.isStringLiteral(expr)) {
+        if (ts.isStringLiteral(expr)) {
           const moduleName = expr.text;
           const range = lineRange(sf, stmt);
           const resolved = this.resolve(moduleName, absPath);

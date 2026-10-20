@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { relative, resolve as resolvePath, sep } from "node:path";
 import ts from "typescript";
-import { assertNever } from "../assert-never.js";
 import {
   loadImportGraph,
   type ImportGraphLoader,
@@ -96,7 +95,6 @@ export async function runDeadcode(input: DeadcodeRunnerInput): Promise<DeadcodeR
       degraded.push(parseResult.entry);
       continue;
     }
-    if (parseResult.kind !== "ok") assertNever(parseResult, "ParseChangedFileResult");
     const { abs, sf, addedLines } = parseResult.parsed;
     const candidates = collectOptionalParamCandidates(sf, addedLines);
     if (candidates.length === 0) continue;
@@ -216,7 +214,7 @@ function collectOptionalParamCandidates(
       for (const decl of stmt.declarationList.declarations) {
         if (!ts.isIdentifier(decl.name)) continue;
         const init = decl.initializer;
-        if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) {
+        if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
           collectFromFunctionLike(sf, init, init.body, decl.name.text, addedLines, out);
         }
       }

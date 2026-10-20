@@ -232,9 +232,9 @@ function basename(path: string): string {
  */
 function decrementAncestors(tree: DiffTreeNode, path: string): void {
   const segments = path.split("/").filter((s) => s.length > 0);
-  let node: DiffTreeNode | undefined = tree;
+  let node: DiffTreeNode = tree;
   node.fileCount--;
-  for (let i = 0; i < segments.length - 1 && node; i++) {
+  for (let i = 0; i < segments.length - 1; i++) {
     const seg = segments[i];
     if (seg === undefined) break;
     const next: DiffTreeNode | undefined = node.children.get(seg);

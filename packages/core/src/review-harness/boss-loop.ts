@@ -774,7 +774,7 @@ function httpStatus(err: unknown): number | undefined {
 
 function modelLabel(model: LanguageModel): string {
   if (typeof model === "string") return model;
-  if (model && typeof model === "object" && "modelId" in model) {
+  if ("modelId" in model) {
     const v = (model as { modelId?: unknown }).modelId;
     if (typeof v === "string") return v;
   }

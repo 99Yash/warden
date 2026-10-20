@@ -105,12 +105,12 @@ export class SqliteFileChunksStore implements FileChunksStore {
       const chunkRes = tx.run(
         sql`DELETE FROM chunks WHERE chunk_hash NOT IN (SELECT chunk_hash FROM file_chunks)`,
       );
-      chunksPruned = Number(chunkRes.changes ?? 0);
+      chunksPruned = chunkRes.changes;
       // Orphan embeddings: their chunk no longer exists.
       const embRes = tx.run(
         sql`DELETE FROM embeddings WHERE chunk_hash NOT IN (SELECT chunk_hash FROM chunks)`,
       );
-      embeddingsPruned = Number(embRes.changes ?? 0);
+      embeddingsPruned = embRes.changes;
     });
     return { chunksPruned, embeddingsPruned };
   }

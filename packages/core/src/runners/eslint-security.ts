@@ -131,7 +131,7 @@ export async function runEslintSecurity(
       // Warden-managed pass doesn't know the user's tsconfig, so a TS file
       // using project-specific syntax (decorators, paths) may not parse —
       // surface once per file as info, don't pollute findings.
-      if (msg.fatal === true || ruleId === null || ruleId === undefined) {
+      if (msg.fatal === true || ruleId === undefined) {
         degraded.push({
           kind: "info",
           topic: "eslint-security",
