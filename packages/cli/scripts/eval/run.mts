@@ -53,6 +53,7 @@ import {
   type DriveLaneResult,
   type SessionUsage,
 } from "../../src/opencode/drive.js";
+import { UP_LANE_SPEC } from "../../src/opencode/materialize.js";
 import { driveClaudeCodeLane } from "./claude-code-lane.mjs";
 import { ALL_CONFIGS, LANE_CONFIGS } from "./configs/index.js";
 import {
@@ -460,6 +461,7 @@ async function runOnce(
         repoRoot: root,
         baseRef: baseSha,
         ...(config.opencodeModel !== undefined ? { model: config.opencodeModel } : {}),
+        ...(config.opencodeLane === "up" ? { lane: UP_LANE_SPEC } : {}),
       }),
     );
   }

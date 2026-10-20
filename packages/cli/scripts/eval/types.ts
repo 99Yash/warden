@@ -31,6 +31,11 @@ export interface EvalConfig {
   runtime?: "harness" | "opencode" | "claude-code";
   /** OpenCode lane model override; absent means the driver default. */
   opencodeModel?: string;
+  /**
+   * OpenCode lane (`LaneSpec.lane`); absent means the down lane. The up
+   * lane (ADR-0052, not ratified) runs only through a config that sets it.
+   */
+  opencodeLane?: "down" | "up";
 }
 
 /**

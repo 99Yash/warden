@@ -34,6 +34,7 @@ import {
   DOWN_LANE_SPEC,
   LANE_MCP_TOOLS,
   LANE_SPECS,
+  UP_LANE_SPEC,
   materializeLane,
   missingRequiredPhrases,
   extractSection,
@@ -464,6 +465,21 @@ try {
     "config turns auto-compaction off (top-level compaction.auto:false)",
   );
   assert(agent?.mode === "primary", "agent mode is primary (--agent selects it regardless)");
+  // Every lane gets the same security policy: only the agent key, its
+  // description, and its prompt file differ from the down config.
+  for (const spec of LANE_SPECS) {
+    const other = LaneConfigSchema.parse(
+      JSON.parse(materializeLane(spec, materializeInput(spec)).configJson),
+    );
+    const otherAgent = other.agents[spec.agentId];
+    assert(
+      Object.keys(other.agents).length === 1 &&
+        JSON.stringify(otherAgent?.permissions) === JSON.stringify(agent?.permissions) &&
+        JSON.stringify(other.mcp) === JSON.stringify(config.mcp) &&
+        JSON.stringify(other.compaction) === JSON.stringify(config.compaction),
+      `${spec.lane} config has one agent with the down lane's permissions, MCP server, and compaction`,
+    );
+  }
   assert(
     z.string().safeParse(agent?.model).success,
     "agent carries a model default (--model still required: run ignores it)",
@@ -1292,7 +1308,8 @@ if (argv[0] !== "run") fail("first argv must be run or serve");
 for (const w of ["--server", "--format"]) if (!has(w)) fail("missing " + w);
 if (has("--standalone")) fail("--standalone must not be passed (warmed serve owns MCP)");
 if (!String(argv[argv.indexOf("--server") + 1] ?? "").startsWith("http://127.0.0.1:")) fail("wrong --server URL");
-if (!has("--agent", "warden-down")) fail("wrong agent");
+if (!has("--agent", process.env.WARDEN_SMOKE_AGENT ?? "warden-down")) fail("wrong agent");
+if (!(process.env.OPENCODE_CONFIG ?? "").endsWith("/" + (process.env.WARDEN_SMOKE_CONFIG_FILE ?? "opencode.json"))) fail("wrong lane config");
 if (!has("--model") || (argv[argv.indexOf("--model") + 1] ?? "").length === 0) fail("missing --model value");
 if (has("--auto")) fail("--auto must not be passed");
 checkSharedEnv();
@@ -1467,6 +1484,44 @@ if (mode === "runfail") {
       lanesOut.lanes[0]?.lane === "down" &&
       lanesOut.lanes[0].status === "ok",
     "--lanes-out carries the down/ok envelope for replay",
+  );
+  // (a1) the up lane is opt-in: `--lane up` runs agent warden-up against
+  // its own config, and the envelope and trace name the up lane.
+  const upRun = runDriver(
+    ["--base", "HEAD~1", "--json", "--lane", "up", "--lanes-out", "lanes-up.json"],
+    {
+      WARDEN_SMOKE_AGENT: UP_LANE_SPEC.agentId,
+      WARDEN_SMOKE_CONFIG_FILE: UP_LANE_SPEC.configFilename,
+    },
+  );
+  const upSet = parseOut(upRun.out);
+  assert(
+    upRun.exit === 0 && upSet?.comments.some((c) => c.claim === inScopeFinding.claim) === true,
+    `--lane up runs ${UP_LANE_SPEC.agentId} on ${UP_LANE_SPEC.configFilename} and publishes (exit ${upRun.exit})`,
+  );
+  assert(
+    upSet?.metadata.degradedWorkers.some(
+      (d) => d.topic === "lane-trace" && d.message.startsWith("lane-trace: up ok"),
+    ) === true,
+    "the up lane's trace entry names the up lane",
+  );
+  let upLanesOut: z.infer<typeof PostPassLanesSchema> | undefined;
+  try {
+    upLanesOut = PostPassLanesSchema.parse(
+      JSON.parse(readFileSync(resolve(REPO, "lanes-up.json"), "utf8")),
+    );
+  } catch {
+    upLanesOut = undefined;
+  }
+  assert(
+    upLanesOut?.lanes.length === 1 && upLanesOut.lanes[0]?.lane === "up",
+    "--lanes-out carries one up envelope",
+  );
+  // An unknown lane name fails in flag parsing, before any spawn.
+  const badLane = runDriver(["--base", "HEAD~1", "--json", "--lane", "surface"]);
+  assert(
+    badLane.exit !== 0 && badLane.out === "",
+    "--lane with an unknown lane fails before spawn",
   );
   // The fake serve answers the session route with a fixed usage; the
   // lane-trace entry carries it as a cost suffix.
