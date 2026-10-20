@@ -104,7 +104,7 @@ export class SqliteIndexImporter implements IndexImporter {
             .values({
               nodePath: String(record.nodePath),
               hash: String(record.hash),
-              kind: (record.nodeKind === "dir" ? "dir" : "file") as "file" | "dir",
+              kind: record.nodeKind === "dir" ? "dir" : "file",
               observedAt: new Date(),
             })
             .onConflictDoUpdate({

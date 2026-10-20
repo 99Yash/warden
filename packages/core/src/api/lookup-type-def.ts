@@ -754,7 +754,7 @@ function extractSignatureText(node: ts.Node, sf: ts.SourceFile): string {
     ts.isGetAccessorDeclaration(node) ||
     ts.isSetAccessorDeclaration(node)
   ) {
-    const body = (node as ts.FunctionLikeDeclaration).body;
+    const body = node.body;
     if (body) {
       const rel = body.getStart(sf) - node.getStart(sf);
       return collapseWhitespace(fullText.slice(0, rel));

@@ -85,7 +85,7 @@ export function extractSection(source: string, file: string, heading: string): s
 
 function headingLevel(line: string): number | undefined {
   const match = /^(#{1,6})\s/.exec(line.trim());
-  return match?.[1] !== undefined ? (match[1] as string).length : undefined;
+  return match?.[1] !== undefined ? match[1].length : undefined;
 }
 
 function isCommentLine(line: string): boolean {

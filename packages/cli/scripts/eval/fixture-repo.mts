@@ -37,7 +37,7 @@ function git(root: string, args: string[]): string {
   try {
     return execFileSync("git", ["-C", root, ...GIT_IDENTITY, ...args], {
       encoding: "utf8",
-    }) as string;
+    });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(`warden-eval-oc: git ${args.join(" ")} failed: ${detail}`, { cause: err });
@@ -115,7 +115,7 @@ export function buildFixtureRepo(fixture: Fixture): FixtureRepo {
     const baseSha = git(root, ["rev-parse", "HEAD~1"]).trim();
     const names = execFileSync("git", ["-C", root, "diff", "--name-only", `${baseSha}...HEAD`], {
       encoding: "utf8",
-    }) as string;
+    });
     if (names.trim() === "") {
       throw new Error(`warden-eval-oc: empty <base>...HEAD file list for ${fixture.name}`);
     }

@@ -50,8 +50,8 @@ function mkComment(overrides: Partial<Comment> & { id: string }): Comment {
     explanation: "test",
     sources: [],
     confidence: 0.9,
-  } as Comment;
-  return { ...base, ...overrides } as Comment;
+  };
+  return { ...base, ...overrides };
 }
 
 // ---------------------------------------------------------------------------

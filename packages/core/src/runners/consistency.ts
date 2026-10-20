@@ -371,7 +371,7 @@ function findZObjectLiteral(sf: ts.SourceFile): ts.ObjectLiteralExpression | und
       node.arguments.length >= 1 &&
       ts.isObjectLiteralExpression(node.arguments[0]!)
     ) {
-      found = node.arguments[0] as ts.ObjectLiteralExpression;
+      found = node.arguments[0];
       return;
     }
     ts.forEachChild(node, visit);
