@@ -205,8 +205,10 @@ try {
     "control loads global AGENTS.md into the model prompt",
   );
   assert(inherited.skills.includes(skill), "control discovers home skills");
+  const isolatedConfigDir = isolation.env["OPENCODE_CONFIG_DIR"];
+  assert(isolatedConfigDir, "isolation sets OPENCODE_CONFIG_DIR");
   const configOnly = await probe({
-    OPENCODE_CONFIG_DIR: isolation.env["OPENCODE_CONFIG_DIR"]!,
+    OPENCODE_CONFIG_DIR: isolatedConfigDir,
     OPENCODE_CONFIG_PROJECT_DISABLE: "1",
   });
   assert(

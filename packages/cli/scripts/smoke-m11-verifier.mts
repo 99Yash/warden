@@ -61,6 +61,7 @@ function assert(cond: unknown, msg: string): void {
 const now = new Date().toISOString();
 
 // Case 1: single-line signature pointing at line 2 of DTS_CONTENT.
+const singleSnippet = "export declare function singleLineSig(x: number): boolean;";
 const commentSingle: Comment = {
   id: "W-single0001",
   file: "src/x.ts",
@@ -79,7 +80,7 @@ const commentSingle: Comment = {
       retrievedAt: now,
       path: DTS_REL,
       line: 2,
-      snippet: "export declare function singleLineSig(x: number): boolean;",
+      snippet: singleSnippet,
     },
   ],
   confidence: 0.9,
@@ -154,10 +155,7 @@ const sawMulti = result.comments.find((c) => c.id === commentMulti.id);
 const sawBogus = result.comments.find((c) => c.id === commentBogus.id);
 
 assert(sawSingle !== undefined, "single-line api_def Comment survives");
-assert(
-  sawSingle?.sources[0]?.snippet === commentSingle.sources[0]!.snippet,
-  "single-line source kept intact",
-);
+assert(sawSingle?.sources[0]?.snippet === singleSnippet, "single-line source kept intact");
 assert(sawMulti !== undefined, "multi-line api_def Comment survives the concat-match path");
 assert(sawMulti?.sources[0]?.snippet === multilineSnippet, "multi-line source kept intact");
 assert(sawBogus === undefined, "bogus-only api_def Comment dropped entirely (M10 drop semantics)");

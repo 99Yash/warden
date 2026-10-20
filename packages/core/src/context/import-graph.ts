@@ -155,8 +155,7 @@ export async function loadImportGraph(input: {
   const unreadable: string[] = [];
   const outsideSparse: string[] = [];
   const graph: Graph = new Map();
-  for (let i = 0; i < tracked.length; i++) {
-    const path = tracked[i]!;
+  for (const [i, path] of tracked.entries()) {
     if (status[i] === "read") files.push(path);
     else if (status[i] === "unreadable") unreadable.push(path);
     else if (status[i] === "absent" && !deleted.has(path)) {

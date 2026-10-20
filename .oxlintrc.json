@@ -55,6 +55,11 @@
       { "considerDefaultExhaustiveForUnions": true }
     ],
     "typescript/no-explicit-any": "error",
+    // no-non-null-assertion: a postfix `!` is a runtime promise the compiler cannot keep. Keep
+    // the narrowing instead (destructure, `.at(-1)` plus a check, `for…of` over `entries()`, a
+    // local). When absence is impossible, throw an `Error` that names the invariant; when it is
+    // possible, handle it. Never trade `!` for `as T`. Scripts included, no override.
+    "typescript/no-non-null-assertion": "error",
     // no-deprecated: a use of a symbol whose declaration carries `@deprecated`, from a
     // dependency (zod 4, the AI SDK, the TypeScript API, drizzle, the MCP SDK) or from this
     // repo. Migrate to the replacement the tag names. A site that must keep the old symbol

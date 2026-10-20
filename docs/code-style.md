@@ -25,7 +25,7 @@ Warden's claim is that every external fact is verified through a citable source.
 - **Type guards over casts.** `as` asserts; it does not check. If you must assert, check first whether the assertion is needed: remove it and run `pnpm check-types`. _Partly: `typescript/no-unnecessary-type-assertion` fails an `as T` or `!` that does not change the type; `no-unsafe-type-assertion` is queued at 72 src sites._
 - **No `object` parameters, no `Reflect.apply`, no alias of `unknown`.** Name the owner type. _Gate: `anti-slop/no-object-parameters`, `no-reflect-apply`, `no-unknown-type-aliases`._
 - **Exhaustive switches.** A switch over a union ends in `default: return assertNever(x, "<where>")` (`packages/core/src/assert-never.ts`), so a new variant fails the build. _Partly: `typescript/switch-exhaustiveness-check` fails a union switch with no `default` that misses a member; the `assertNever` default is review._
-- **Minimize `!`.** A non-null assertion is a promise the compiler cannot keep. Narrow instead. _Review: `no-non-null-assertion` is queued._
+- **Minimize `!`.** A non-null assertion is a promise the compiler cannot keep. Narrow instead, or throw an `Error` that names the invariant. Never trade `!` for `as T`. _Gate: `typescript/no-non-null-assertion`._
 - **Throw an `Error`.** A thrown string or object has no stack and no `message`. A caught `unknown` may be rethrown as it is. _Gate: `typescript/only-throw-error`._
 - **Every path returns.** A function that returns a value on one path returns one on every path. _Gate: `noImplicitReturns` (`pnpm check-types`)._
 

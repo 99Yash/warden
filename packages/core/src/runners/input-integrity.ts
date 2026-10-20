@@ -44,9 +44,12 @@ export function runInputIntegrity(diff: string): ToolFinding[] {
   for (const [index, added] of lines.entries()) {
     const points = [
       ...new Set(
-        [...added.text.matchAll(HIDDEN_UNICODE)].map(
-          (match) => `U+${match[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`,
-        ),
+        [...added.text.matchAll(HIDDEN_UNICODE)].map((match) => {
+          // HIDDEN_UNICODE matches exactly one code point, never an empty string.
+          const point = match[0].codePointAt(0);
+          if (point === undefined) throw new Error("HIDDEN_UNICODE matched an empty string");
+          return `U+${point.toString(16).toUpperCase().padStart(4, "0")}`;
+        }),
       ),
     ];
     if (points.length > 0)
@@ -62,9 +65,8 @@ export function runInputIntegrity(diff: string): ToolFinding[] {
   }
   // Small, contiguous windows catch an address or override split across comment
   // lines. Never combine removed/context lines, separate files, or hunks.
-  for (let index = 0; index < lines.length; index++) {
+  for (const [index, first] of lines.entries()) {
     if (instructionLines.has(index)) continue;
-    const first = lines[index]!;
     let text = first.text.replace(/^\s*(?:\/\/|\/\*|\*|#)\s*/, "");
     for (let size = 1; size < 3; size++) {
       const next = lines[index + size];

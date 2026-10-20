@@ -186,13 +186,15 @@ function findSequentialAwait(
   function visit(node: ts.Node): void {
     if (ts.isBlock(node)) {
       const cluster = collectAwaitCluster(node, sf);
-      if (cluster.statements.length >= 2) {
-        const startLine =
-          sf.getLineAndCharacterOfPosition(cluster.statements[0]!.getStart(sf)).line + 1;
-        const endLine =
-          sf.getLineAndCharacterOfPosition(
-            cluster.statements[cluster.statements.length - 1]!.getEnd(),
-          ).line + 1;
+      const [firstStatement] = cluster.statements;
+      const lastStatement = cluster.statements.at(-1);
+      if (
+        cluster.statements.length >= 2 &&
+        firstStatement !== undefined &&
+        lastStatement !== undefined
+      ) {
+        const startLine = sf.getLineAndCharacterOfPosition(firstStatement.getStart(sf)).line + 1;
+        const endLine = sf.getLineAndCharacterOfPosition(lastStatement.getEnd()).line + 1;
         if (anyAddedInRange(startLine, endLine, addedLines)) {
           findings.push({
             source: "scalability",

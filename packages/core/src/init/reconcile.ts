@@ -191,8 +191,7 @@ export async function reconcileFiles(input: ReconcileInput): Promise<ReconcileSu
             inputs: batchInputs,
             inputType: "document",
           });
-          for (let j = 0; j < batch.length; j++) {
-            const h = batch[j]!;
+          for (const [j, h] of batch.entries()) {
             const vector = resp.vectors[j];
             // Provider contract: every batch input gets a non-empty vector.
             // VoyageProvider enforces this at the source (voyage.ts:157-161);

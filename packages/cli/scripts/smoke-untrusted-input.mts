@@ -201,7 +201,10 @@ try {
   function readDenied(path: string): boolean {
     let denied = false;
     for (const rule of readRules) {
-      const pattern = rule["resource"]!.split("*")
+      const resource = rule["resource"];
+      if (resource === undefined) throw new Error("a read permission rule has no resource");
+      const pattern = resource
+        .split("*")
         .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
         .join(".*");
       if (new RegExp(`^${pattern}$`).test(path)) denied = rule["effect"] === "deny";

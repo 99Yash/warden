@@ -210,14 +210,14 @@ function collectOptionalParamCandidates(
     if (!hasExportModifier(stmt)) continue;
     if (ts.isFunctionDeclaration(stmt)) {
       if (!stmt.name || !stmt.body) continue;
-      collectFromFunctionLike(sf, stmt, stmt.name.text, addedLines, out);
+      collectFromFunctionLike(sf, stmt, stmt.body, stmt.name.text, addedLines, out);
     } else if (ts.isVariableStatement(stmt)) {
       // `export const fn = (...) => { ... }` shape.
       for (const decl of stmt.declarationList.declarations) {
         if (!ts.isIdentifier(decl.name)) continue;
         const init = decl.initializer;
         if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) {
-          collectFromFunctionLike(sf, init, decl.name.text, addedLines, out);
+          collectFromFunctionLike(sf, init, init.body, decl.name.text, addedLines, out);
         }
       }
     }
@@ -228,17 +228,17 @@ function collectOptionalParamCandidates(
 function collectFromFunctionLike(
   sf: ts.SourceFile,
   fn: ts.FunctionLikeDeclaration,
+  body: ts.ConciseBody,
   fnName: string,
   addedLines: Set<number>,
   out: OptionalParamInfo[],
 ): void {
   const fnLine = sf.getLineAndCharacterOfPosition(fn.getStart(sf)).line + 1;
-  for (let i = 0; i < fn.parameters.length; i++) {
-    const param = fn.parameters[i]!;
+  for (const [i, param] of fn.parameters.entries()) {
     if (!isOptionalParam(param)) continue;
     if (!ts.isIdentifier(param.name)) continue;
     const paramName = param.name.text;
-    const branchLine = findPresenceCheckBranch(fn.body!, paramName, sf);
+    const branchLine = findPresenceCheckBranch(body, paramName, sf);
     if (branchLine === undefined) continue;
     const paramLine = sf.getLineAndCharacterOfPosition(param.getStart(sf)).line + 1;
     // Trigger only when the diff actually touches this function.
