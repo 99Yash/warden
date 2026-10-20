@@ -9,15 +9,10 @@
  *
  * Usage: pnpm --filter @warden/cli lanes:measure
  */
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  LANE_SPECS,
-  extractSection,
-  materializeLane,
-  parseCharterIncludes,
-} from "../src/opencode/materialize.js";
+import { LANE_SPECS, extractSection, materializeLane } from "../src/opencode/materialize.js";
+import { readLaneInput } from "./lane-input.mjs";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(CLI_ROOT, "..", "..");
@@ -38,14 +33,7 @@ const lines: string[] = [
 ];
 const parts: string[] = ["| Lane | Part | Bytes | Est. tokens |", "| --- | --- | ---: | ---: |"];
 for (const spec of LANE_SPECS) {
-  const charter = readFileSync(resolve(REPO_ROOT, spec.charterPath), "utf8");
-  const includes = parseCharterIncludes(charter, spec.charterPath);
-  const sources = new Map<string, string>();
-  for (const include of includes) {
-    if (!sources.has(include.file)) {
-      sources.set(include.file, readFileSync(resolve(REPO_ROOT, include.file), "utf8"));
-    }
-  }
+  const { charter, sources, includes } = readLaneInput(spec, REPO_ROOT);
   const { prompt, configJson } = materializeLane(spec, { charter, sources });
   const total = bytes(prompt);
   lines.push(
@@ -57,7 +45,10 @@ for (const spec of LANE_SPECS) {
   );
   let sectionBytes = 0;
   for (const include of includes) {
-    const source = sources.get(include.file) ?? "";
+    const source = sources.get(include.file);
+    if (source === undefined) {
+      throw new Error(`lanes:measure: readLaneInput did not read included file ${include.file}`);
+    }
     const n = bytes(extractSection(source, include.file, include.heading));
     sectionBytes += n;
     parts.push(`| ${spec.lane} | \`${include.file}\` ${include.heading} | ${n} | ${tokens(n)} |`);

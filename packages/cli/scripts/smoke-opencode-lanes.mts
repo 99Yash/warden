@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import {
   CommentSetSchema,
@@ -65,6 +66,7 @@ import {
   wardenMcpReadiness,
 } from "../src/opencode/drive.js";
 import { isOpencodeCostMeasured } from "./eval/score.mjs";
+import { readLaneInput } from "./lane-input.mjs";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
 async function withEnv<T>(
@@ -184,14 +186,7 @@ function readCommitted(rel: string): string {
 }
 
 function materializeInput(spec: LaneSpec = DOWN_LANE_SPEC): MaterializeInput {
-  const charter = readFileSync(resolve(CLI_ROOT, "..", "..", spec.charterPath), "utf8");
-  const sources = new Map<string, string>();
-  for (const include of parseCharterIncludes(charter, spec.charterPath)) {
-    if (!sources.has(include.file)) {
-      sources.set(include.file, readFileSync(resolve(CLI_ROOT, "..", "..", include.file), "utf8"));
-    }
-  }
-  return { charter, sources };
+  return readLaneInput(spec, resolve(CLI_ROOT, "..", ".."));
 }
 
 function stripKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -468,16 +463,16 @@ try {
   assert(agent?.mode === "primary", "agent mode is primary (--agent selects it regardless)");
   // Every lane gets the same security policy: only the agent key, its
   // description, and its prompt file differ from the down config.
-  for (const spec of LANE_SPECS) {
+  for (const spec of LANE_SPECS.filter((s) => s !== DOWN_LANE_SPEC)) {
     const other = LaneConfigSchema.parse(
       JSON.parse(materializeLane(spec, materializeInput(spec)).configJson),
     );
     const otherAgent = other.agents[spec.agentId];
     assert(
       Object.keys(other.agents).length === 1 &&
-        JSON.stringify(otherAgent?.permissions) === JSON.stringify(agent?.permissions) &&
-        JSON.stringify(other.mcp) === JSON.stringify(config.mcp) &&
-        JSON.stringify(other.compaction) === JSON.stringify(config.compaction),
+        isDeepStrictEqual(otherAgent?.permissions, agent?.permissions) &&
+        isDeepStrictEqual(other.mcp, config.mcp) &&
+        isDeepStrictEqual(other.compaction, config.compaction),
       `${spec.lane} config has one agent with the down lane's permissions, MCP server, and compaction`,
     );
   }
