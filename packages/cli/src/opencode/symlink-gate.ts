@@ -1,5 +1,6 @@
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { errnoCode } from "@warden/core/guards";
 
 /** Decode Git's C-quoted paths, including octal UTF-8 bytes. */
 function gitPath(value: string): string {
@@ -18,7 +19,7 @@ function gitPath(value: string): string {
   };
   const body = value.slice(1, value.lastIndexOf('"'));
   for (let i = 0; i < body.length; i++) {
-    let ch = body[i] as string;
+    let ch = body.charAt(i);
     if (ch === "\\") {
       const octal = /^[0-7]{1,3}/.exec(body.slice(i + 1));
       if (octal !== null) {
@@ -26,7 +27,12 @@ function gitPath(value: string): string {
         i += octal[0].length;
         continue;
       }
-      ch = escapes[body[++i] as string] ?? (body[i] as string);
+      i += 1;
+      // Git never ends a quoted path with a lone backslash. Fail closed, as
+      // the gate does for every path it cannot read.
+      if (i >= body.length) throw new Error(`malformed quoted path in the diff: ${value}`);
+      const escaped = body.charAt(i);
+      ch = escapes[escaped] ?? escaped;
     }
     bytes.push(...Buffer.from(ch));
   }
@@ -75,13 +81,13 @@ function canonicalTarget(path: string, seen = new Set<string>()): string {
   try {
     return realpathSync(path);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if (errnoCode(err) !== "ENOENT") throw err;
     try {
       if (lstatSync(path).isSymbolicLink()) {
         return canonicalTarget(resolve(dirname(path), readlinkSync(path)), seen);
       }
     } catch (statError) {
-      if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      if (errnoCode(statError) !== "ENOENT") throw statError;
     }
     const parent = dirname(path);
     if (parent === path) throw err;
@@ -117,7 +123,7 @@ export function laneSymlinkGate(diff: string, repoRoot: string): string | undefi
     } catch (err) {
       // A deleted regular file has no target to check. A declared symlink
       // or an unreadable existing path must not silently bypass the gate.
-      if (mustCheck || (err as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (mustCheck || errnoCode(err) !== "ENOENT") {
         rejected.add(path);
       }
     }

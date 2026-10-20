@@ -18,6 +18,7 @@ import {
   type DegradedEntry,
   type LaneOutput,
 } from "@warden/core";
+import { isRecord } from "@warden/core/guards";
 import { laneSymlinkGate } from "./symlink-gate.js";
 import { DOWN_LANE_SPEC } from "./materialize.js";
 import { formatCommentSet } from "../format.js";
@@ -205,11 +206,13 @@ function resolveCliEntry(): string {
  */
 export function resolveLoaderFlags(execArgv: string[] = process.execArgv): string[] {
   const out: string[] = [];
-  for (let i = 0; i < execArgv.length; i++) {
-    const arg = execArgv[i] as string;
-    if (arg === "--import" && i + 1 < execArgv.length) {
-      out.push("--import", resolveImportSpecifier(execArgv[i + 1] as string));
-      i += 1;
+  // One iterator for the loop and for the value of a two-token `--import`.
+  const args = execArgv.values();
+  for (const arg of args) {
+    if (arg === "--import") {
+      const value = args.next();
+      if (value.done === true) out.push(arg);
+      else out.push("--import", resolveImportSpecifier(value.value));
     } else if (arg.startsWith("--import=")) {
       out.push(`--import=${resolveImportSpecifier(arg.slice("--import=".length))}`);
     } else {
@@ -394,6 +397,18 @@ const LaneErrorSchema = z.looseObject({
     .catch(undefined),
 });
 
+/** The fenced JSON submission in the lane's final message. */
+const LaneSubmissionSchema = z.looseObject({ findings: z.array(z.unknown()) });
+
+/** The object at `record[key]`, or `undefined` when that value is not an object. */
+function recordField(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
+}
+
 /**
  * Whether an `error` event's `error` object is a provider context
  * overflow. Shape verified with the shipped binary v2.0.32 and a loopback
@@ -437,20 +452,19 @@ export function parseLaneEvents(stdout: string): ParsedLane {
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (trimmed === "") continue;
-    let event: unknown;
+    let record: unknown;
     try {
-      event = JSON.parse(trimmed);
+      record = JSON.parse(trimmed);
     } catch {
       continue;
     }
-    if (typeof event !== "object" || event === null) continue;
-    const record = event as Record<string, unknown>;
+    if (!isRecord(record)) continue;
     if (sessionId === undefined) {
       const sid = record["sessionID"];
       if (typeof sid === "string" && sid !== "") sessionId = sid;
     }
     if (record["type"] === "step_start") {
-      const part = record["part"] as Record<string, unknown> | undefined;
+      const part = recordField(record, "part");
       const id = part?.["messageID"];
       if (typeof id !== "string" || id === "") {
         parseError ??= "step_start without messageID in the event stream";
@@ -459,7 +473,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       announcedStepIds.add(id);
       lastStepId = id;
     } else if (record["type"] === "text") {
-      const part = record["part"] as Record<string, unknown> | undefined;
+      const part = recordField(record, "part");
       const id = part?.["messageID"];
       if (typeof id !== "string" || id === "") {
         parseError ??= "text part without messageID in the event stream";
@@ -471,16 +485,16 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       if (list !== undefined) list.push(text);
       else textsById.set(id, [text]);
     } else if (record["type"] === "tool_use") {
-      const part = record["part"] as Record<string, unknown> | undefined;
+      const part = recordField(record, "part");
       // Wire shape is `part.tool` (verified against a live `--format json`
       // stream); `part.name` is accepted as a fallback for forward tolerance.
       const name = part?.["tool"] ?? part?.["name"];
       if (typeof name !== "string" || name === "") continue;
       seenByTool.set(name, (seenByTool.get(name) ?? 0) + 1);
-      const state = part?.["state"] as Record<string, unknown> | undefined;
+      const state = part === undefined ? undefined : recordField(part, "state");
       if (state?.["status"] === "completed") {
         completedByTool.set(name, (completedByTool.get(name) ?? 0) + 1);
-        const time = state["time"] as Record<string, unknown> | undefined;
+        const time = recordField(state, "time");
         const start = time?.["start"];
         const end = time?.["end"];
         if (typeof start === "number" && typeof end === "number" && end >= start) {
@@ -574,14 +588,10 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
   } catch {
     return fail("submission is not valid JSON");
   }
-  if (
-    typeof submission !== "object" ||
-    submission === null ||
-    !Array.isArray((submission as Record<string, unknown>)["findings"])
-  ) {
-    return fail('submission has no "findings" array');
-  }
-  const findings = (submission as Record<string, unknown>)["findings"] as unknown[];
+  // The post-pass parses each finding (`PostPassLanesSchema`); here only the array is checked.
+  const parsedSubmission = LaneSubmissionSchema.safeParse(submission);
+  if (!parsedSubmission.success) return fail('submission has no "findings" array');
+  const findings = parsedSubmission.data.findings;
   // A lane that never saw the review target is not a clean lane — this is
   // what catches a broken MCP server command (the agent may still submit
   // `[]` and the run would otherwise look clean).
@@ -686,27 +696,27 @@ export interface McpServerState {
  * status:{status, error?}}]}`. Returns `undefined` when the shape is wrong.
  */
 export function parseMcpServers(body: unknown): McpServerState[] | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const data = (body as Record<string, unknown>)["data"];
-  if (!Array.isArray(data)) return undefined;
-  const out: McpServerState[] = [];
-  for (const entry of data) {
-    if (typeof entry !== "object" || entry === null) return undefined;
-    const record = entry as Record<string, unknown>;
-    if (typeof record["name"] !== "string") return undefined;
-    const status = record["status"];
-    if (typeof status !== "object" || status === null) return undefined;
-    const state = (status as Record<string, unknown>)["status"];
-    if (typeof state !== "string") return undefined;
-    const error = (status as Record<string, unknown>)["error"];
-    out.push({
-      name: record["name"],
-      status: state,
-      ...(typeof error === "string" ? { error } : {}),
-    });
-  }
-  return out;
+  const parsed = McpServersBodySchema.safeParse(body);
+  if (!parsed.success) return undefined;
+  return parsed.data.data.map(({ name, status }) => ({
+    name,
+    status: status.status,
+    ...(status.error !== undefined ? { error: status.error } : {}),
+  }));
 }
+
+/** One wrong entry fails the whole body. An `error` that is not a string reads as absent. */
+const McpServersBodySchema = z.looseObject({
+  data: z.array(
+    z.looseObject({
+      name: z.string(),
+      status: z.looseObject({
+        status: z.string(),
+        error: z.string().optional().catch(undefined),
+      }),
+    }),
+  ),
+});
 
 export type WardenMcpReadiness =
   | { state: "connected" }
@@ -740,49 +750,51 @@ export function wardenMcpReadiness(servers: McpServerState[] | undefined): Warde
  * has no variant.
  */
 export function parseSessionUsage(body: unknown, expectedId?: string): SessionUsage | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const data = (body as Record<string, unknown>)["data"];
-  if (typeof data !== "object" || data === null) return undefined;
-  const d = data as Record<string, unknown>;
-  if (expectedId !== undefined && d["id"] !== expectedId) return undefined;
-  if (typeof d["cost"] !== "number" || d["cost"] < 0) return undefined;
-  const tokens = d["tokens"];
-  if (typeof tokens !== "object" || tokens === null) return undefined;
-  const t = tokens as Record<string, unknown>;
-  if (
-    typeof t["input"] !== "number" ||
-    typeof t["output"] !== "number" ||
-    typeof t["reasoning"] !== "number"
-  ) {
-    return undefined;
-  }
-  const cache = t["cache"];
-  if (typeof cache !== "object" || cache === null) return undefined;
-  const c = cache as Record<string, unknown>;
-  if (typeof c["read"] !== "number" || typeof c["write"] !== "number") return undefined;
+  const parsed = SessionBodySchema.safeParse(body);
+  if (!parsed.success) return undefined;
+  const { id, cost, tokens, model } = parsed.data.data;
+  if (expectedId !== undefined && id !== expectedId) return undefined;
   const usage: SessionUsage = {
-    costUsd: d["cost"],
+    costUsd: cost,
     tokens: {
-      input: t["input"],
-      output: t["output"],
-      reasoning: t["reasoning"],
-      cacheRead: c["read"],
-      cacheWrite: c["write"],
+      input: tokens.input,
+      output: tokens.output,
+      reasoning: tokens.reasoning,
+      cacheRead: tokens.cache.read,
+      cacheWrite: tokens.cache.write,
     },
   };
-  const model = d["model"];
-  if (typeof model === "object" && model !== null) {
-    const m = model as Record<string, unknown>;
-    if (typeof m["id"] === "string" && typeof m["providerID"] === "string") {
-      const variant = m["variant"];
-      usage.model =
-        typeof variant === "string" && variant !== ""
-          ? `${m["providerID"]}/${m["id"]}#${variant}`
-          : `${m["providerID"]}/${m["id"]}`;
-    }
+  // A model of the wrong shape leaves `usage.model` unset; it does not fail the body.
+  const m = SessionModelSchema.safeParse(model);
+  if (m.success) {
+    const { id: modelId, providerID, variant } = m.data;
+    usage.model =
+      variant !== undefined && variant !== ""
+        ? `${providerID}/${modelId}#${variant}`
+        : `${providerID}/${modelId}`;
   }
   return usage;
 }
+
+const SessionBodySchema = z.looseObject({
+  data: z.looseObject({
+    id: z.unknown(),
+    cost: z.number().min(0),
+    tokens: z.looseObject({
+      input: z.number(),
+      output: z.number(),
+      reasoning: z.number(),
+      cache: z.looseObject({ read: z.number(), write: z.number() }),
+    }),
+    model: z.unknown(),
+  }),
+});
+
+const SessionModelSchema = z.looseObject({
+  id: z.string(),
+  providerID: z.string(),
+  variant: z.string().optional().catch(undefined),
+});
 
 /**
  * Read one session total from the serve API. Usage is telemetry — any
