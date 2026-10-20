@@ -119,13 +119,24 @@ export interface FixtureSample {
   /** Number of dispatch_worker tool-calls observed during the run (proxy for boss work). */
   dispatchCount: number;
   costUsd: number;
+  /**
+   * Harness samples: the model requests that reported no usage
+   * (`metadata.usageUnknownRequests`, or the `spend` of a
+   * `ReviewFailedError`). When set, `costUsd` is a lower bound and the
+   * reports print it as `≥ $x`. Absent when every request reported its
+   * usage, and on OpenCode samples.
+   */
+  usageUnknownRequests?: number;
   durationMs: number;
   /** Any error during the run; null when clean. */
   error: string | null;
   /**
    * Whether the sample's spend was measured. Harness samples report
-   * `metadata.costUsd` (the catalog prices them); a harness throw after
-   * spend reports $0, so this does not fail closed for the reference.
+   * `metadata.costUsd` (the catalog prices them). A harness sample whose
+   * boss failed reports the spend known at the failure (the `spend` of a
+   * `ReviewFailedError`), or $0 when the harness threw before any model
+   * spend or could not read the usage. A lower bound
+   * (`usageUnknownRequests`) is still measured: it does not fail closed.
    * OpenCode samples: when no `opencode run` was spawned (fixture build
    * failure, empty scope, MCP warmup failure) the spend is a known $0.
    * Otherwise measured only when the session usage was read AND
@@ -184,6 +195,11 @@ export interface FixtureScore {
   /** Median of `unlabeledComments` — used for false-positive gauge on clean fixtures. */
   medianUnlabeled: number;
   medianCost: number;
+  /**
+   * Sum of `usageUnknownRequests` over the samples. When set, `medianCost`
+   * can be a lower bound. Absent when 0.
+   */
+  usageUnknownRequests?: number;
   medianDispatches: number;
   medianDurationMs: number;
   /** True when ≥⌈samples/2⌉ samples produced an error. */
@@ -212,6 +228,11 @@ export interface AggregateScore {
   cleanFixtureUnlabeled: number;
   /** Total cost summed across all (fixture × samples). */
   totalCost: number;
+  /**
+   * Sum of `usageUnknownRequests` over the rows. When set, `totalCost` is a
+   * lower bound. Absent when 0.
+   */
+  usageUnknownRequests?: number;
   /** Median dispatch count across fixtures expected to have ≥1 substantive file. */
   medianDispatchesOnSubstantive: number;
   /** Per-fixture rows in stable display order. */

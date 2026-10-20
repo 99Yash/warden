@@ -40,10 +40,12 @@ import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ReviewFailedError,
   runReviewHarness,
   type CommentSet,
   type LaneOutput,
   type ReviewHarnessInput,
+  type ReviewSpend,
 } from "@warden/core";
 import { configuredReviewLlmProviders, loadWardenRuntime, providerApiKey } from "@warden/env";
 import {
@@ -63,6 +65,8 @@ import {
   aggregateScores,
   checkParity,
   checkThreshold,
+  formatCost,
+  harnessSampleCost,
   isOpencodeCostMeasured,
   renderMarkdownTable,
   scoreFixtureRun,
@@ -423,6 +427,11 @@ interface OnceResult {
   treeSource: string;
   /** OpenCode runtime only (absent = harness). */
   opencode?: OpencodeScoreExtra;
+  /**
+   * Harness runtime: the spend known when the boss failed (the `spend` of a
+   * `ReviewFailedError`). Absent on success and on other throws.
+   */
+  failedSpend?: ReviewSpend;
 }
 
 /** Extra scoring inputs for the OpenCode runtime. */
@@ -593,6 +602,10 @@ async function runOnceHarness(
       error: err instanceof Error ? err.message : String(err),
       wallMs: Date.now() - startedAt,
       treeSource,
+      // A failed boss spent tokens: keep the known spend for the sample cost.
+      ...(err instanceof ReviewFailedError && err.spend !== undefined
+        ? { failedSpend: err.spend }
+        : {}),
     };
   } finally {
     cleanupMaterialized(materializedPaths);
@@ -617,6 +630,7 @@ function scoreOne(
   configName: string,
   treeSource: string,
   opencodeExtra?: OpencodeScoreExtra,
+  failedSpend?: ReviewSpend,
 ): FixtureSample {
   const costMeasured =
     opencodeExtra === undefined ||
@@ -651,6 +665,8 @@ function scoreOne(
   };
   if (!result) {
     base.error = "harness threw";
+    // A failed harness review reports the spend known at the failure.
+    if (opencodeExtra === undefined) Object.assign(base, harnessSampleCost(failedSpend));
     return base;
   }
 
@@ -678,7 +694,7 @@ function scoreOne(
         : false;
     base.dispatchCount = laneOk ? 1 : 0;
   } else {
-    base.costUsd = result.metadata.costUsd ?? 0;
+    Object.assign(base, harnessSampleCost(result.metadata));
     base.dispatchCount = approximateDispatchCount(result);
   }
 
@@ -823,6 +839,8 @@ async function main(): Promise<void> {
   // budget. Checked before each sample, so the last sample can exceed the
   // ceiling by at most its own cost.
   let spentUsd = 0;
+  // Model requests that reported no usage: when above 0, `spentUsd` is a lower bound.
+  let spentUnknownRequests = 0;
   let stopReason: StopReason | null = null;
   const aggregates: AggregateScore[] = [];
   for (const config of configs) {
@@ -836,17 +854,25 @@ async function main(): Promise<void> {
         if (spentUsd >= args.maxCost) {
           stopReason = "cost-ceiling";
           process.stdout.write(
-            `[eval] cost ceiling $${args.maxCost} reached ($${spentUsd.toFixed(4)} spent) — stopping\n`,
+            `[eval] cost ceiling $${args.maxCost} reached (${formatCost(spentUsd, spentUnknownRequests)} spent) — stopping\n`,
           );
           configStopped = true;
           break;
         }
-        const { result, error, wallMs, treeSource, opencode } = await runOnce(
+        const { result, error, wallMs, treeSource, opencode, failedSpend } = await runOnce(
           fixture,
           config,
           repoRoot,
         );
-        const score = scoreOne(fixture, result, i + 1, config.name, treeSource, opencode);
+        const score = scoreOne(
+          fixture,
+          result,
+          i + 1,
+          config.name,
+          treeSource,
+          opencode,
+          failedSpend,
+        );
         // A lane's CommentSet duration covers only `runPostPass`, not the
         // lane process; the wall time covers both.
         if (opencode !== undefined) score.durationMs = wallMs;
@@ -862,6 +888,7 @@ async function main(): Promise<void> {
           break;
         }
         spentUsd += score.costUsd;
+        spentUnknownRequests += score.usageUnknownRequests ?? 0;
         const presentLabelCount = fixture.labels.filter(
           (l) => labelExpectation(l) === "present",
         ).length;
@@ -870,7 +897,7 @@ async function main(): Promise<void> {
             `caught ${score.caughtLabels.length}/${presentLabelCount}, ` +
             `forbidden ${score.forbiddenLabels.length}, ` +
             `comments ${score.commentCount}, ` +
-            `cost $${score.costUsd.toFixed(4)}, ` +
+            `cost ${formatCost(score.costUsd, score.usageUnknownRequests)}, ` +
             `${score.durationMs}ms` +
             (error ? ` [error: ${error}]` : "") +
             "\n",
@@ -1073,6 +1100,9 @@ function writeParityScorecard(
 }
 
 function renderCompareTable(a: AggregateScore, b: AggregateScore): string {
+  // A Δ that uses a lower bound (`≥`) is not a measured difference: say so.
+  const lowerBound = a.usageUnknownRequests !== undefined || b.usageUnknownRequests !== undefined;
+  const costDelta = `$${(b.totalCost - a.totalCost).toFixed(4)}${lowerBound ? " (from a lower bound)" : ""}`;
   const lines = [
     `| metric | ${a.config} | ${b.config} | Δ |`,
     `|--------|-------------|-------------|---|`,
@@ -1080,7 +1110,7 @@ function renderCompareTable(a: AggregateScore, b: AggregateScore): string {
     `| real-PR caught | ${a.realCaught}/${a.realPlants} | ${b.realCaught}/${b.realPlants} | ${b.realCaught - a.realCaught} |`,
     `| false-positive trap hits | ${a.falsePositiveTrapHits}/${a.falsePositiveTraps} | ${b.falsePositiveTrapHits}/${b.falsePositiveTraps} | ${b.falsePositiveTrapHits - a.falsePositiveTrapHits} |`,
     `| clean unlabeled | ${a.cleanFixtureUnlabeled} | ${b.cleanFixtureUnlabeled} | ${b.cleanFixtureUnlabeled - a.cleanFixtureUnlabeled} |`,
-    `| total cost | $${a.totalCost.toFixed(4)} | $${b.totalCost.toFixed(4)} | $${(b.totalCost - a.totalCost).toFixed(4)} |`,
+    `| total cost | ${formatCost(a.totalCost, a.usageUnknownRequests)} | ${formatCost(b.totalCost, b.usageUnknownRequests)} | ${costDelta} |`,
   ];
   return lines.join("\n");
 }
