@@ -80,7 +80,7 @@ function renderFailureSpend(spend: ReviewSpend | undefined): string {
   if (spend === undefined) return "spent before the failure: unknown (the usage could not be read)";
   const cost = spend.costUsd ?? 0;
   const unknown = spend.usageUnknownRequests;
-  const amount = cost === 0 ? "$0.00" : formatUsd(cost);
+  const amount = formatUsd(cost);
   const breakdown = renderCostBreakdown(spend.costByTier, spend.costLabels);
   const parts = [
     `spent before the failure: ${unknown !== undefined ? `≥ ${amount}` : amount}` +
@@ -143,6 +143,8 @@ function renderCostBreakdown(
 }
 
 function formatUsd(n: number): string {
+  // A tier with no known spend (a failed request only) is $0.00, not "<$0.01".
+  if (n === 0) return "$0.00";
   if (n < 0.01) return `<$0.01`;
   return `$${n.toFixed(2)}`;
 }
