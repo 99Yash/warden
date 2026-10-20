@@ -44,8 +44,8 @@ function categoryLabel(category: Category): string {
 
 function sourceLabel(source: Source): string {
   if (source.path && source.line) return `${source.path}:${source.line}`;
-  if (typeof source.title === "string") return source.title;
-  if (typeof source.id === "string") return source.id;
+  if (source.title !== undefined) return source.title;
+  if (source.id !== undefined) return source.id;
   return sourceHref(source) ?? String(source.type);
 }
 

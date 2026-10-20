@@ -207,9 +207,9 @@ export class CheapSignalsSelector implements ContextSelector {
       embeddingProvider != null &&
       embeddingStore != null &&
       chunkStore != null &&
-      typeof lockedModelId === "string" &&
-      typeof lockedModelVersionForDocument === "string" &&
-      typeof diff === "string" &&
+      lockedModelId !== undefined &&
+      lockedModelVersionForDocument !== undefined &&
+      diff !== undefined &&
       diff.length > 0
     ) {
       const semantic = await semanticSignal({

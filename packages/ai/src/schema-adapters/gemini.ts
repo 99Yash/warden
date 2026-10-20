@@ -228,7 +228,8 @@ function isNumericLiteralUnion(def: ZodDef): boolean {
     const values = optDef.values;
     if (!values || values.length === 0) return false;
     for (const v of values) {
-      if (typeof v !== "number" || !Number.isFinite(v)) return false;
+      // `Number.isFinite` does not coerce: it is false for each value that is not a number.
+      if (!Number.isFinite(v)) return false;
     }
   }
   return true;
