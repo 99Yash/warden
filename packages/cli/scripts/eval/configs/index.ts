@@ -225,3 +225,26 @@ const claudeCodeUp: EvalConfig = {
 };
 
 export const LANE_CONFIGS: EvalConfig[] = [opencodeDown, claudeCodeDown, opencodeUp, claudeCodeUp];
+
+/**
+ * Whether `--opencode-model` has the OpenCode `--model` shape:
+ * `<provider>/<model>`, with an optional `#<variant>`. The model part can
+ * hold more slashes (`openrouter/vendor/model`).
+ */
+export function isOpencodeModelId(raw: string): boolean {
+  return /^[^/\s#]+\/[^\s#]+(#[^\s#]+)?$/.test(raw);
+}
+
+/**
+ * Apply `--opencode-model`: every OpenCode-runtime config runs `model`;
+ * harness and Claude Code configs are unchanged. `undefined` when no
+ * config is an OpenCode runtime, so the flag would change nothing (a
+ * usage error in `run.mts`).
+ */
+export function withOpencodeModel(
+  configs: readonly EvalConfig[],
+  model: string,
+): EvalConfig[] | undefined {
+  if (!configs.some((c) => c.runtime === "opencode")) return undefined;
+  return configs.map((c) => (c.runtime === "opencode" ? { ...c, opencodeModel: model } : c));
+}

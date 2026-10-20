@@ -18,6 +18,7 @@
  *   pnpm eval --compare <cfgA> <cfgB>    # side-by-side scorecard diff
  *   pnpm eval --parity <ref> <cand>      # parity gate + opencode-parity scorecard
  *   pnpm eval --max-cost <usd>           # cumulative spend ceiling (default 4)
+ *   pnpm eval --opencode-model <p/m>     # model for the OpenCode-runtime configs only
  *
  * Requires at least one configured review LLM provider key; emits a skip
  * notice and exits 0 when unset. Each run takes ~$0.20–$1.00 per fixture per sample per
@@ -30,8 +31,9 @@
  *
  * Usage errors (an unknown flag, a missing or flag-shaped value, an
  * unknown config name, a bad `--max-cost` or `--samples`, `--parity` with
- * `--config` or `--compare`, or `--parity` roles reversed) print one line
- * and exit 2 before any preflight or spend.
+ * `--config` or `--compare`, `--parity` roles reversed, or an
+ * `--opencode-model` that is not `<provider>/<model>` or that no selected
+ * config can use) print one line and exit 2 before any preflight or spend.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -55,7 +57,12 @@ import {
 } from "../../src/opencode/drive.js";
 import { laneSpecFor, type LaneSpec } from "../../src/opencode/materialize.js";
 import { driveClaudeCodeLane } from "./claude-code-lane.mjs";
-import { ALL_CONFIGS, LANE_CONFIGS } from "./configs/index.js";
+import {
+  ALL_CONFIGS,
+  isOpencodeModelId,
+  LANE_CONFIGS,
+  withOpencodeModel,
+} from "./configs/index.js";
 import {
   buildFixtureRepo,
   cleanupMaterialized,
@@ -97,6 +104,8 @@ interface Args {
   compare?: [string, string];
   parity?: [string, string];
   maxCost: number;
+  /** `--opencode-model`: the model for every selected OpenCode-runtime config. */
+  opencodeModel?: string;
 }
 
 const DEFAULT_MAX_COST_USD = 4;
@@ -153,6 +162,12 @@ function parseArgs(argv: string[]): Args {
         usageError(`--max-cost needs a finite number ≥ 0 (got "${raw}")`);
       }
       args.maxCost = n;
+    } else if (arg === "--opencode-model") {
+      const raw = value(arg);
+      if (!isOpencodeModelId(raw)) {
+        usageError(`--opencode-model needs <provider>/<model>[#<variant>] (got "${raw}")`);
+      }
+      args.opencodeModel = raw;
     } else {
       usageError(`unknown argument "${arg}"`);
     }
@@ -207,13 +222,34 @@ function resolveConfigNames(names: string[]): EvalConfig[] {
 }
 
 /**
- * Select the configs to run. `--compare a b` without `--config` runs just
- * that pair. `--parity <ref> <cand>` needs a harness reference and an
- * OpenCode candidate (the gate's roles, not only its names), and runs the
- * candidate first: its cost is the unknown, while the harness reference
- * cost is known.
+ * Select the configs to run, then apply `--opencode-model` to the
+ * OpenCode-runtime configs. The flag is a usage error when no selected
+ * config is an OpenCode runtime. It is allowed with `--parity`: P6
+ * compares the session model with the driver's requested model, which is
+ * the override, and the scorecard records both. A free model reports
+ * `cost 0` with tokens, so P5 fails (unmeasured spend) and such a run
+ * never reads MET.
  */
 function selectConfigs(args: Args): EvalConfig[] {
+  const selected = selectConfigsByName(args);
+  if (args.opencodeModel === undefined) return selected;
+  const overridden = withOpencodeModel(selected, args.opencodeModel);
+  if (overridden === undefined) {
+    usageError(
+      `--opencode-model applies only to OpenCode-runtime configs; none selected ` +
+        `(${selected.map((c) => c.name).join(", ")})`,
+    );
+  }
+  return overridden;
+}
+
+/**
+ * `--compare a b` without `--config` runs just that pair. `--parity <ref>
+ * <cand>` needs a harness reference and an OpenCode candidate (the gate's
+ * roles, not only its names), and runs the candidate first: its cost is
+ * the unknown, while the harness reference cost is known.
+ */
+function selectConfigsByName(args: Args): EvalConfig[] {
   if (args.parity) {
     const [reference, candidate] = resolveConfigNames(args.parity);
     if (!reference || !candidate) usageError("--parity needs two config names");

@@ -30,7 +30,10 @@ export interface EvalConfig {
    * on the operator's subscription login (eval-only).
    */
   runtime?: "harness" | "opencode" | "claude-code";
-  /** OpenCode lane model override; absent means the driver default. */
+  /**
+   * OpenCode lane model override; absent means the driver default. The
+   * `--opencode-model` flag sets it on every selected OpenCode config.
+   */
   opencodeModel?: string;
   /**
    * The lane a lane runtime runs (`laneSpecFor`); absent means the down
