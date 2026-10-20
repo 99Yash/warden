@@ -4,6 +4,7 @@
 // always returns a model instance at runtime; the narrower type is what both
 // `streamText` (a supertype consumer) and `createRetryable` (which generics
 // strictly over `LanguageModelV3`) want.
+import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import type { LanguageModel } from "ai-retry";
 import {
   configuredLlmExplicitPrimaryProvider,
@@ -114,7 +115,8 @@ const ANTHROPIC_HAIKU_4_5 = {
 // not a silent 400. This is the second variant of the landmine in
 // `project_warden_boss_structured_output`; the `z.url()` → `format:"uri"`
 // fix lives in `SourceSchema` itself. Anthropic ignores `openai` provider
-// options, so this is a no-op on that path.
+// options, so this is a no-op on that path. Function tools have their own
+// `strict` flag; `OPENAI_NON_STRICT_TOOLS` below turns it off.
 //
 // 2026-10-09 prices: GPT-6.1 Sol ($2/$10) replaces GPT-5.5 ($5/$30), and
 // GPT-6 Luna ($0.1/$0.5) replaces GPT-5.4 mini ($0.75/$4.5).
@@ -354,7 +356,10 @@ function modelFromInfo(info: ResolvedLlmModel): LanguageModel {
     case "anthropic":
       return anthropicProvider()(info.modelId);
     case "openai":
-      return openaiProvider()(info.modelId);
+      return wrapLanguageModel({
+        model: openaiProvider()(info.modelId),
+        middleware: OPENAI_NON_STRICT_TOOLS,
+      });
     case "google": {
       const g = googleProvider();
       if (!g) {
@@ -364,6 +369,41 @@ function modelFromInfo(info: ResolvedLlmModel): LanguageModel {
     }
   }
 }
+
+/**
+ * Sends each OpenAI function tool with `strict: false`, unless the tool sets
+ * `strict` itself.
+ *
+ * The SDK omits `strict` from a tool that does not set it, and the OpenAI
+ * Responses API then makes the tool strict (the response echoes
+ * `strict: true`). In strict mode the model must write every property,
+ * optional ones too. Thus `gpt-6.1-sol` wrote `url: ""` in each
+ * `submit_review` source, and `SourceSchema` rejected it. Constrained
+ * decoding made the model write the same value on each retry, so the review
+ * failed. Not strict, the model omits a field it has no value for. The zod
+ * parse of each tool still validates every value that the model writes.
+ * This is the tool-side twin of `strictJsonSchema: false` above, which
+ * covers only the `Output.object` response format (ADR-0030 amendment
+ * 2026-10-20, OpenAI tool strict).
+ *
+ * It is OpenAI-only on purpose: `@ai-sdk/anthropic` 3.0.74 logs a warning
+ * for each tool with `strict` set when it does not know the model's
+ * structured-output support (it does not know `claude-opus-5-5`).
+ */
+const OPENAI_NON_STRICT_TOOLS: LanguageModelMiddleware = {
+  specificationVersion: "v3",
+  transformParams: ({ params }) =>
+    Promise.resolve(
+      params.tools === undefined
+        ? params
+        : {
+            ...params,
+            tools: params.tools.map((t) =>
+              t.type === "function" && t.strict === undefined ? { ...t, strict: false } : t,
+            ),
+          },
+    ),
+};
 
 function throwMissingReviewLlmProvider(): never {
   requireAnyProviderApiKey(["anthropic", "openai"], "warden review");
