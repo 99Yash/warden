@@ -7,12 +7,19 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { spawnCapture } from "@warden/core/runners/_shared";
+import { z } from "zod";
 import { buildMcpConfigContent } from "../src/opencode/drive.js";
+
+/** The part of `buildMcpConfigContent`'s output that this smoke runs: the warden server's argv. */
+const McpConfigSchema = z.object({
+  mcp: z.object({
+    servers: z.object({ warden: z.object({ command: z.tuple([z.string()], z.string()) }) }),
+  }),
+});
 
 const root = mkdtempSync(resolve(tmpdir(), "warden-secret-isolation-"));
 const cliRoot = fileURLToPath(new URL("..", import.meta.url));
-// This is a private core helper, outside the CLI's composite TS project.
-const { spawnCapture } = await import(resolve(cliRoot, "../core/src/runners/_shared.ts"));
 const secrets = {
   ANTHROPIC_API_KEY: "smoke-provider-value",
   OPENAI_API_KEY: "smoke-provider-value",
@@ -44,11 +51,13 @@ try {
   check(childEnv.NODE_OPTIONS === undefined, "detector child excludes Node startup hooks");
   check(childEnv.PATH === process.env.PATH, "detector child retains PATH");
 
-  const config = JSON.parse(
-    buildMcpConfigContent({
-      cwd: root,
-      command: [process.execPath, "-e", "process.stdout.write(JSON.stringify(process.env))"],
-    }),
+  const config = McpConfigSchema.parse(
+    JSON.parse(
+      buildMcpConfigContent({
+        cwd: root,
+        command: [process.execPath, "-e", "process.stdout.write(JSON.stringify(process.env))"],
+      }),
+    ),
   );
   const [bin, ...argv] = config.mcp.servers.warden.command;
   const mcpEnv = JSON.parse(

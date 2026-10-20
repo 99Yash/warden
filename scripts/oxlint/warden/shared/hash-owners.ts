@@ -109,7 +109,8 @@ function parseManifest(root: string, manifest: unknown): PackageExports | null {
 
   const exports = new Map<string, string | null>();
 
-  for (const [subpath, target] of Object.entries(exportsField)) {
+  for (const subpath of Object.keys(exportsField)) {
+    const target: unknown = Reflect.get(exportsField, subpath);
     if (isString(target) || target === null) exports.set(subpath, target);
   }
 
