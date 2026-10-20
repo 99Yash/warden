@@ -35,7 +35,7 @@ pnpm warden <cmd>    # run the CLI from the workspace
 
 Workspace packages export TS source directly (`./src/index.ts`), so `pnpm check-types` works on a fresh tree without a prior build. **Never `db:push` outside local exploration** — always `db:generate` → `db:migrate`. See [`docs/conventions.md`](./docs/conventions.md) for the full schema-change workflow.
 
-Run `pnpm verify` before you call a change done. You do not need to memorize what `.oxlintrc.json` enforces: `.claude/hooks/lint-on-edit.mjs` reports it on each file you write. Spend review attention on the rules that [`docs/code-style.md`](./docs/code-style.md) tags _Review_. A lint exception takes `// oxlint-disable-next-line <rule> -- <reason>`. A new rule goes to `"error"` only when the tree is at zero for it ([`docs/gate-design.md`](./docs/gate-design.md)).
+Run `pnpm verify` before you call a change done. You do not need to memorize what `.oxlintrc.json` enforces: `.claude/hooks/lint-on-edit.mjs` reports it on each file you write. Spend review attention on the rules that [`docs/code-style.md`](./docs/code-style.md) tags _Review_. A lint exception takes `// oxlint-disable-next-line <rule> -- <reason>`. A new rule goes to `"error"` only when the tree is at zero for it ([`docs/gate-design.md`](./docs/gate-design.md)). A PR that adds, removes or changes a lint rule, a `tsc` flag or a check script runs `pnpm rules:catalog`, which regenerates [`docs/enforced-rules.md`](./docs/enforced-rules.md); `pnpm check:rules-catalog` fails while it is stale.
 
 <!-- effect-solutions:start -->
 
