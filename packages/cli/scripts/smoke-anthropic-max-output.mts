@@ -33,10 +33,14 @@ import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { LlmJsonValue } from "@warden/ai";
+import { z } from "zod";
 
 /** `reject`: answer HTTP 400. `cutoff`: stream a response cut off at `max_tokens`. */
 let mode: "reject" | "cutoff" = "reject";
 const bodies: unknown[] = [];
+
+/** The `model` of a recorded Messages API request body. */
+const RequestModelSchema = z.looseObject({ model: z.string() });
 
 /** One Messages API stream event, or a content block or delta in one. */
 interface StreamPart {
@@ -94,10 +98,7 @@ const server = createServer((req, res) => {
       body = undefined;
     }
     bodies.push(body);
-    const model =
-      typeof body === "object" && body !== null && "model" in body && typeof body.model === "string"
-        ? body.model
-        : "unknown";
+    const model = RequestModelSchema.safeParse(body).data?.model ?? "unknown";
     if (mode === "reject") {
       res.writeHead(400, { "content-type": "application/json" });
       res.end(
@@ -131,6 +132,7 @@ const server = createServer((req, res) => {
 });
 await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const address: AddressInfo | string | null = server.address();
+// oxlint-disable-next-line anti-slop/no-runtime-typeof -- `server.address()` gives `AddressInfo | string | null`, and a string is a pipe address: the check splits the Node API's own union
 const port = typeof address === "object" && address !== null ? address.port : 0;
 
 // The Anthropic-only path: workers resolve to Anthropic Sonnet only when no

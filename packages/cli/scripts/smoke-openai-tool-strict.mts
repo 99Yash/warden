@@ -58,6 +58,7 @@ const server = createServer((req, res) => {
 });
 await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const address: AddressInfo | string | null = server.address();
+// oxlint-disable-next-line anti-slop/no-runtime-typeof -- `server.address()` gives `AddressInfo | string | null`, and a string is a pipe address: the check splits the Node API's own union
 const port = typeof address === "object" && address !== null ? address.port : 0;
 
 // The OpenAI-only path: the boss resolves to OpenAI only when no Anthropic
