@@ -17,6 +17,7 @@
     "dev": "drizzle-kit studio"
   },
   "dependencies": {
+    "@warden/env": "workspace:*",
     "better-sqlite3": "catalog:",
     "drizzle-orm": "catalog:",
     "nanoid": "catalog:"

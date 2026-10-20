@@ -260,6 +260,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@warden/env':
+        specifier: workspace:*
+        version: link:../env
       better-sqlite3:
         specifier: 'catalog:'
         version: 13.0.3
