@@ -1,72 +1,75 @@
 ---
 title: Overview
-description: What Warden does and how to use it.
+description: What Warden does, how it splits the work with your agent runtime, and how to use it.
 ---
 
-<p class="doc-lede">Warden reviews TypeScript and JavaScript changes by collecting mechanical evidence first, verifying claims second, and using the model only to triage and phrase what survived.</p>
+<p class="doc-lede">Warden is the ground truth for an AI code review. It runs the deterministic checks, serves them to your agent runtime over MCP, and publishes only the findings that pass gates the model cannot skip.</p>
 
 <div class="doc-feature-list" aria-label="Warden review contract">
   <a class="doc-card" href="#review-flow">
     <span class="doc-card-icon">01</span>
-    <strong>Detectors first</strong>
-    <p>TSC, ESLint, npm audit, OSV, jscpd, leverage, security, and other detectors produce the initial record.</p>
+    <strong>Evidence over MCP</strong>
+    <p>TSC, ESLint, npm audit with OSV, duplication, security lint, and real <code>.d.ts</code> lookups, served as versioned tools.</p>
+  </a>
+  <a class="doc-card" href="#review-flow">
+    <span class="doc-card-icon">02</span>
+    <strong>Lanes in your runtime</strong>
+    <p>Review agents run in your MCP client — OpenCode first — with read-only tools.</p>
   </a>
   <a class="doc-card" href="#output-contract">
-    <span class="doc-card-icon">02</span>
-    <strong>Scoped sub-agents</strong>
-    <p>Review mode adds committability, library leverage, and security triage questions with citation discipline.</p>
-  </a>
-  <a class="doc-card" href="#commands">
     <span class="doc-card-icon">03</span>
-    <strong>Typed output</strong>
-    <p>Every run returns a stable <code>CommentSet</code> for the CLI and future wrappers.</p>
+    <strong>Post-pass decides</strong>
+    <p>Citations, scope, confidence, and volume are checked outside the model before a stable <code>CommentSet</code> ships.</p>
   </a>
 </div>
 
 <div class="doc-callout doc-callout-check">
   <strong>Core rule</strong>
-  <p>The model is a formatter and triage layer. It is not the source of truth for vulnerabilities, library APIs, repository state, or tool output.</p>
+  <p>The model reads, reasons, and phrases. It is not the source of truth for vulnerabilities, library APIs, repository state, or tool output, and it never decides on its own what gets published.</p>
 </div>
+
+## Why the split
+
+The review loop — sub-agents, model routing, permissions, sessions — is solved again with every model release, and general agent runtimes solve it well. A detector corpus, verified advisories, a repo index, and an eval harness are not something a runtime ships. So Warden keeps the method and the gates and hands the loop to the runtime. [ADR-0053](https://github.com/99Yash/warden/blob/main/decisions.md) records the decision.
 
 ## Review flow
 
 <ol class="doc-steps">
-  <li><span>Detect</span><p>Find the repo root, package manager, diff source, and changed files. The diff-level noise filter prunes generated or irrelevant subtrees before runners start.</p></li>
-  <li><span>Run</span><p>Execute deterministic checks: TypeScript, ESLint, Warden-managed security lint, dependency audit, duplication, context selection, leverage, and category-specific detectors.</p></li>
-  <li><span>Triage</span><p>In <code>review</code> mode, cheap-tier sub-agents ask scoped questions for committability, library leverage, and security residue.</p></li>
-  <li><span>Verify</span><p>Check external claims against OSV records, package type definitions, or cited repository snippets. Unsupported sources are removed.</p></li>
-  <li><span>Format</span><p>Ask the model to order, clarify, and write the review from the verified findings. It can also ask a question when intent is unclear.</p></li>
-  <li><span>Return</span><p>Emit a stable <code>CommentSet</code> with comment ids, tiers, categories, confidence, source records, and degraded-worker metadata.</p></li>
+  <li><span>Diff</span><p>Resolve the base by merge-base, prune generated files, and reject unsafe input such as a symlink that leaves the repository.</p></li>
+  <li><span>Det-priors</span><p>The lane calls <code>run_det_priors</code> first. Warden runs the deterministic checks and returns a bounded, paged bundle.</p></li>
+  <li><span>Lanes</span><p>Lanes investigate in your runtime. The down lane proves invariants; the up lane searches for structural drift. The six concerns — correctness, scalability, consistency, security, committability, leverage — are focus areas inside a lane.</p></li>
+  <li><span>Post-pass</span><p>Verify each citation by substring against the repo, OSV, or the package's type definitions. Keep each finding inside its lane's file scope, screen secrets, apply confidence and volume rules.</p></li>
+  <li><span>Publish</span><p>Emit one stable <code>CommentSet</code>. Lane prose never reaches you directly.</p></li>
 </ol>
 
 ## Commands
 
 <div class="doc-card-grid">
   <div class="doc-code-card doc-code-card-compact">
-    <div class="doc-code-header"><span>Build context index</span><code>once per repo</code></div>
-    <pre><code>warden init</code></pre>
-    <p>Chunks the codebase, embeds supported languages, and stores the content-addressed index in <code>.warden/cache.sqlite</code>.</p>
+    <div class="doc-code-header"><span>MCP server</span><code>stdio</code></div>
+    <pre><code>warden mcp</code></pre>
+    <p>Serves Warden's tools to any MCP client. See <a href="/docs/mcp/">MCP and OpenCode</a>.</p>
+  </div>
+  <div class="doc-code-card doc-code-card-compact">
+    <div class="doc-code-header"><span>Lane review</span><code>OpenCode</code></div>
+    <pre><code>warden opencode-review</code></pre>
+    <p>Runs a lane in OpenCode and publishes only the post-pass result.</p>
   </div>
   <div class="doc-code-card doc-code-card-compact">
     <div class="doc-code-header"><span>Deterministic pass</span><code>no LLM</code></div>
     <pre><code>warden check</code></pre>
-    <p>Runs the mechanical checks and deterministic synthesizer. This is the low-friction CI/pre-commit path.</p>
-  </div>
-  <div class="doc-code-card doc-code-card-compact">
-    <div class="doc-code-header"><span>Full review</span><code>LLM triage</code></div>
-    <pre><code>warden review</code></pre>
-    <p>Adds semantic context selection, scoped sub-agents, verified API-claim lookup, and the cited review synthesizer.</p>
+    <p>Runs the mechanical checks only. The low-friction CI and pre-commit path.</p>
   </div>
 </div>
 
-Both <code>check</code> and <code>review</code> accept <code>--json</code>. <code>review</code> also supports <code>--base</code>, <code>--stdin</code>, and <code>--verbose</code> when you need explicit diff control or machine-readable output. See <a href="/docs/review/">Review pipeline</a> for the current review spine and the deferred deep-security boundary.
+<code>warden init</code> builds the embedding-backed context index once per repo. <code>warden review</code> still runs the original in-process review loop and stays the default until the parity eval clears; see <a href="/docs/review/">Review pipeline</a>.
 
 ## Output contract
 
 <div class="doc-property-list">
   <div><code>comments[]</code><span>Stable review comments with ids, file ranges, tiers, categories, claims, suggestions, and verified sources.</span></div>
-  <div><code>degradedWorkers[]</code><span>Structured notes when a worker is missing context, partially fails, or intentionally refuses a weak finding.</span></div>
-  <div><code>metadata</code><span>Runtime context such as mode, base branch, cache behavior, and runner phase information.</span></div>
+  <div><code>degradedWorkers[]</code><span>Structured notes when a lane or detector is missing context, partly fails, or refuses a weak finding.</span></div>
+  <div><code>metadata</code><span>Run context such as mode, base branch, cost, and phase timings.</span></div>
 </div>
 
-That contract is why the CLI can stay one-shot while future GitHub, Slack, or ClickUp surfaces render the same result without scraping terminal output.
+Every path — `check`, `review`, `opencode-review`, and `post-pass` — emits this same contract, so a CI job or a bot renders the result without scraping terminal output.

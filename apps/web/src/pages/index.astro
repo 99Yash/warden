@@ -5,31 +5,31 @@ import MarketingShell from "../components/MarketingShell.astro";
 
 <MarketingShell
   title="Code review that brings receipts"
-  description="Warden is a local code review CLI that runs deterministic tools, verifies every external claim, and only lets the model phrase what the evidence already supports."
+  description="Warden gives your agent runtime the ground truth for code review over MCP — detectors, verified advisories, real type definitions — and publishes only what survives gates the model cannot skip."
 >
   <main>
     <section class="hero-section">
       <div class="hero-copy reveal-in">
-        <p class="eyebrow">Local code review CLI</p>
+        <p class="eyebrow">Review ground truth over MCP</p>
         <h1>
           Reviews with <span class="accent">receipts.</span>
         </h1>
         <p class="hero-lede">
-          Most AI reviewers ask you to trust a paragraph. Warden starts with the boring evidence —
-          type errors, lint findings, dependency records, source snippets — and only then lets the
-          model <em>rank, clarify, and phrase</em>. Nothing reaches the comment without a cite.
+          Your agent runs the review. Warden supplies the parts it cannot make up — type errors, lint
+          findings, advisories checked against OSV, real <code>.d.ts</code> signatures — and then its
+          gates decide what gets published. <em>The model never gets the last word.</em>
         </p>
         <div class="hero-actions">
-          <a class="button primary" href="/docs/install/" data-astro-prefetch>
-            Install Warden
+          <a class="button primary" href="/docs/mcp/" data-astro-prefetch>
+            Connect over MCP
             <span class="button-arrow" aria-hidden="true">→</span>
           </a>
-          <a class="button secondary" href="/docs/review/" data-astro-prefetch>Understand review</a>
+          <a class="button secondary" href="/docs/review/" data-astro-prefetch>How a review runs</a>
         </div>
         <p class="hero-meta">
-          <span>Default review spine</span>
-          <span>Leverage checks</span>
-          <span>Security triage</span>
+          <span>Any MCP client</span>
+          <span>OpenCode first</span>
+          <span>Gates outside the model</span>
         </p>
       </div>
       <div class="reveal-in delay-2">
@@ -38,48 +38,49 @@ import MarketingShell from "../components/MarketingShell.astro";
     </section>
 
     <section class="proof-strip" aria-label="Review contract">
-      <p><strong>Runs in your repo</strong><span>no hosted review backend, no upload</span></p>
-      <p><strong>Detectors before prose</strong><span>type, lint, audit, dedup, leverage, security</span></p>
-      <p><strong>Sub-agents ask</strong><span>committability, library leverage, security residue</span></p>
-      <p><strong>Verifier has veto</strong><span>unsupported snippets and API claims get cut</span></p>
+      <p><strong>Runs in your repo</strong><span>a local stdio server, no hosted backend, no upload</span></p>
+      <p><strong>Any MCP client</strong><span>OpenCode is the first client, not a dependency</span></p>
+      <p><strong>Gates are not tools</strong><span>verification runs after the model, every time</span></p>
+      <p><strong>Measured, not vibed</strong><span>recall and precision evals gate each change</span></p>
     </section>
 
     <section class="home-band">
       <div class="section-heading">
-        <p class="eyebrow">The thesis</p>
-        <h2>A reviewer should know what it can <span class="accent">prove.</span></h2>
+        <p class="eyebrow">The split</p>
+        <h2>The loop is a commodity. The evidence is <span class="accent">not.</span></h2>
         <p class="section-sub">
-          Confidence is cheap. The discipline is what makes a review worth reading. Warden splits the
-          work into three honest layers — evidence, verification, prose — and refuses to let the
-          model skip ahead.
+          Agent runtimes get better at sub-agents, model routing, and permissions with every release.
+          None of them ships a detector corpus, verified advisories, or a repo index. So Warden stopped
+          running the loop and kept the parts that have to be right.
         </p>
       </div>
       <div class="feature-grid">
         <article>
           <span class="feature-kicker">01 · EVIDENCE</span>
-          <h3>The facts come <em>first.</em></h3>
+          <h3>Ground truth, <em>over MCP.</em></h3>
           <p>
-            TypeScript, ESLint, duplication checks, dependency audits, context selection, leverage
-            patterns, and Warden-managed security lint form the evidence layer. The review starts
-            with things that can point at a file, rule, lockfile, or advisory.
+            <code>run_det_priors</code> returns TSC, ESLint, npm audit with OSV, duplication, security
+            lint, and context selection as a bounded, versioned, paged bundle.
+            <code>lookup_type_def</code> answers library API questions from installed type
+            definitions.
           </p>
         </article>
         <article>
-          <span class="feature-kicker">02 · TRIAGE</span>
-          <h3>Sub-agents stay <em>scoped.</em></h3>
+          <span class="feature-kicker">02 · LANES</span>
+          <h3>Your runtime does <em>the reading.</em></h3>
           <p>
-            Cheap-tier LLM sub-agents handle the open-ended tails: committability questions, library
-            substitution opportunities, and security residue that deterministic security lint cannot
-            model cleanly.
+            Review lanes run as agents in your client, with read-only tools. The down lane traces a
+            claimed behavior through callers, state, and failure paths. The up lane looks for
+            structural drift.
           </p>
         </article>
         <article>
-          <span class="feature-kicker">03 · VERIFICATION</span>
-          <h3>Claims earn <em>sources.</em></h3>
+          <span class="feature-kicker">03 · POST-PASS</span>
+          <h3>Gates the model <em>can't skip.</em></h3>
           <p>
-            Repository snippets are substring-matched. Vulnerability claims are checked against OSV.
-            Library API claims use installed <code>.d.ts</code> files. If the source does not verify,
-            the comment does not ship.
+            A model can decline to call a tool, so verification is not a tool. After the lanes return,
+            Warden checks every citation, scopes findings to the diff, screens secrets, applies the
+            confidence and volume rules, and emits the <code>CommentSet</code>.
           </p>
         </article>
       </div>
@@ -87,40 +88,86 @@ import MarketingShell from "../components/MarketingShell.astro";
 
     <section class="workflow-band">
       <div class="section-heading">
-        <p class="eyebrow">Default review</p>
-        <h2>The review spine is <span class="accent">explicit.</span></h2>
+        <p class="eyebrow">How a review runs</p>
+        <h2>Evidence in, receipts <span class="accent">out.</span></h2>
         <p class="section-sub">
-          <code>warden review</code> is not the deep security harness. It is the everyday review path:
-          deterministic producers, bounded sub-agents, one synthesizer, then the citation verifier.
+          <code>warden opencode-review</code> drives the whole path: it starts the MCP server, runs a
+          lane in OpenCode, and publishes only what the post-pass returns. Lane prose never reaches
+          you directly.
         </p>
       </div>
       <ol class="review-spine">
         <li>
-          <span>Diff gate</span>
-          <p>Detect the ecosystem, choose the diff source, and prune generated or irrelevant subtrees before any runner spends time.</p>
+          <span>Diff</span>
+          <em class="spine-status">shipped</em>
+          <p>Resolve the base by merge-base, prune generated files, and stop before spawn on unsafe input such as a symlink that leaves the repo.</p>
         </li>
         <li>
-          <span>Detectors</span>
-          <p>Run TSC, ESLint, npm audit plus OSV, jscpd, context selection, consistency, deadcode, scalability, leverage, and security lint.</p>
+          <span>Det-priors</span>
+          <em class="spine-status">shipped</em>
+          <p>The lane calls <code>run_det_priors</code> first and reads the findings page by page, by handle, without flooding its context.</p>
         </li>
         <li>
-          <span>Sub-agents</span>
-          <p>Ask cheap-tier scoped questions for committability, library leverage, and security residue. Each source still has to verify.</p>
+          <span>Lanes</span>
+          <em class="spine-status partial">partial</em>
+          <p>Down proves invariants. Up searches for structural drift and is opt-in. Surface and judge come next.</p>
         </li>
         <li>
-          <span>Synthesizer</span>
-          <p>Let the boss model rank and phrase the surviving findings into a stable <code>CommentSet</code>.</p>
+          <span>Post-pass</span>
+          <em class="spine-status">shipped</em>
+          <p>Verify citations, keep each finding inside its lane's file scope, demote by confidence, and cap volume. Tier 1 always survives the cap.</p>
         </li>
         <li>
-          <span>Verifier</span>
-          <p>Drop citations that do not substring-match the repo, OSV record, or package type definition. Comments with no verified source are dropped.</p>
+          <span>Publish</span>
+          <em class="spine-status">shipped</em>
+          <p>Emit one stable <code>CommentSet</code>. The trusted scope envelope comes from the driver, never from the model.</p>
         </li>
       </ol>
       <div class="review-boundary" role="note">
-        <strong>Deep security is not the default surface.</strong>
+        <strong>Mid-pivot, said out loud.</strong>
         <p>
-          The deep security harness is design-locked for <code>warden security</code> and <code>warden review --deep</code>, but it is intentionally deferred until
-          the everyday review and init loops earn more dogfood signal.
+          <code>warden review</code> still runs the original in-process boss loop, and it stays the
+          default until the parity eval shows the MCP path matches it on recall and precision. The CI
+          runner is a tracer today: it writes to the job summary and does not comment on PRs yet.
+        </p>
+      </div>
+    </section>
+
+    <section class="connect-band">
+      <div class="section-heading connect-copy">
+        <p class="eyebrow">Connect</p>
+        <h2>One server. Any <span class="accent">client.</span></h2>
+        <p class="section-sub">
+          <code>warden mcp</code> speaks JSON-RPC over stdio and nothing else. Every result carries a
+          schema version, stays under a size bound, and degrades to a structured reason instead of
+          throwing.
+        </p>
+        <ul class="connect-facts">
+          <li><code>run_det_priors</code><span>the deterministic evidence bundle, paged</span></li>
+          <li><code>lookup_type_def</code><span>library API signatures from installed <code>.d.ts</code></span></li>
+          <li><code>search_index</code><span>semantic repo search, next</span></li>
+        </ul>
+      </div>
+      <div class="terminal-window connect-code">
+        <div class="terminal-bar" aria-hidden="true">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="terminal-title">opencode.jsonc</span>
+        </div>
+        <pre class="terminal-body"><code><span class="tok-punct">&#123;</span>
+  <span class="tok-key">"mcp"</span><span class="tok-punct">: &#123;</span>
+    <span class="tok-key">"servers"</span><span class="tok-punct">: &#123;</span>
+      <span class="tok-key">"warden"</span><span class="tok-punct">: &#123;</span>
+        <span class="tok-key">"type"</span><span class="tok-punct">:</span> <span class="tok-str">"local"</span><span class="tok-punct">,</span>
+        <span class="tok-key">"command"</span><span class="tok-punct">: [</span><span class="tok-str">"warden"</span><span class="tok-punct">,</span> <span class="tok-str">"mcp"</span><span class="tok-punct">]</span>
+      <span class="tok-punct">&#125;</span>
+    <span class="tok-punct">&#125;</span>
+  <span class="tok-punct">&#125;</span>
+<span class="tok-punct">&#125;</span></code></pre>
+        <p class="connect-note">
+          Warden is not on npm yet. Point <code>command</code> at a local checkout —
+          <a href="/docs/mcp/" data-astro-prefetch>the docs show the exact form</a>.
         </p>
       </div>
     </section>
@@ -132,7 +179,8 @@ import MarketingShell from "../components/MarketingShell.astro";
           <h2>What lands in a <span class="accent">comment.</span></h2>
           <p class="section-sub">
             Every Warden comment is a small receipt: a tiered claim, a category, a confidence
-            number, and the sources that earned it the right to interrupt you.
+            number, the lane that found it, and the sources that earned it the right to interrupt
+            you.
           </p>
           <ul>
             <li>
@@ -146,21 +194,21 @@ import MarketingShell from "../components/MarketingShell.astro";
               <span class="anatomy-key">Category</span>
               <div>
                 <strong>correctness, security, scalability, …</strong>
-                <p>Reading order, not severity. Leverage now sits before dedup because a library or stdlib swap can dissolve repeated code.</p>
+                <p>Reading order, not severity. The six concerns are focus areas inside a lane, not lanes of their own.</p>
               </div>
             </li>
             <li>
               <span class="anatomy-key">Sources</span>
               <div>
                 <strong>Path, line, snippet — verified</strong>
-                <p>Every external claim must point at a real artifact. The verifier substring-matches before the comment ships.</p>
+                <p>Every external claim points at a real artifact. The post-pass substring-matches it before the comment ships.</p>
               </div>
             </li>
             <li>
               <span class="anatomy-key">Degraded</span>
               <div>
                 <strong>What didn't run, said out loud</strong>
-                <p>If a worker fails, the run admits it. Silence is the failure mode Warden refuses.</p>
+                <p>If a lane or a detector fails, the run admits it. Silence is the failure mode Warden refuses.</p>
               </div>
             </li>
           </ul>
@@ -175,8 +223,8 @@ import MarketingShell from "../components/MarketingShell.astro";
             <span class="receipt-val tier-1">1 · Block</span>
           </div>
           <div class="receipt-row">
-            <span class="receipt-key">category</span>
-            <span class="receipt-val">security</span>
+            <span class="receipt-key">lane</span>
+            <span class="receipt-val">down · correctness</span>
           </div>
           <div class="receipt-row">
             <span class="receipt-key">confidence</span>
@@ -206,15 +254,15 @@ import MarketingShell from "../components/MarketingShell.astro";
     <section class="closing-band">
       <div>
         <p class="eyebrow">Design record</p>
-        <h2>Personal tool, <span class="accent">public</span> craft bar.</h2>
+        <h2>Every choice is <span class="accent">written down.</span></h2>
         <p>
-          Warden is being built for one person first, but not as a throwaway. The decisions are
-          written down. The vocabulary is named. The review page follows the shipped spine before it
-          talks about deferred harnesses or future bot surfaces.
+          More than fifty ADRs record what Warden does, what it refused, and why. ADR-0053 is the one
+          behind this page: keep the method and the gates, hand the loop to a runtime that does it
+          better.
         </p>
       </div>
       <div class="closing-actions">
-        <a class="button primary" href="/docs/review/" data-astro-prefetch>Read review docs</a>
+        <a class="button primary" href="https://github.com/99Yash/warden/blob/main/decisions.md" rel="noreferrer">Read the decisions</a>
         <a class="button secondary" href="/notes/" data-astro-prefetch>Field notes</a>
       </div>
     </section>

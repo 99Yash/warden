@@ -17,8 +17,9 @@ export default defineConfig({
     starlight({
       title: "Warden",
       description:
-        "AI code review CLI that runs deterministic tools, verifies external claims, and uses an LLM only for triage.",
+        "Code review ground truth over MCP: deterministic detectors, verified citations, and gates the model cannot skip.",
       favicon: "/favicon.svg",
+      logo: { src: "./src/assets/warden-logo.svg", alt: "" },
       customCss: ["./src/styles/global.css"],
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/99Yash/warden" }],
       pagefind: true,
@@ -47,6 +48,11 @@ export default defineConfig({
             {
               label: "Review pipeline",
               link: "/docs/review/",
+              attrs: { "data-astro-prefetch": true },
+            },
+            {
+              label: "MCP and OpenCode",
+              link: "/docs/mcp/",
               attrs: { "data-astro-prefetch": true },
             },
             { label: "CI usage", link: "/docs/ci/", attrs: { "data-astro-prefetch": true } },

@@ -1,0 +1,32 @@
+---
+// The Warden mark. Same paths and colours as public/favicon.svg; keep them in sync.
+interface Props {
+  size?: number;
+  class?: string;
+  // Draw the check in once. The header persists across view transitions, so it
+  // plays on the first page load only.
+  draw?: boolean;
+}
+
+const { size = 28, class: className, draw = false } = Astro.props;
+---
+
+<svg
+  class:list={["warden-logo", className, { "warden-logo-draw": draw }]}
+  viewBox="0 0 64 64"
+  width={size}
+  height={size}
+  aria-hidden="true"
+>
+  <rect width="64" height="64" rx="12" fill="#111418"></rect>
+  <path d="M16 13h32v18c0 10.8-6.3 17.1-16 21-9.7-3.9-16-10.2-16-21V13Z" fill="#f5f1e8"></path>
+  <path
+    class="warden-logo-check"
+    d="M24 27.5 30 37l10-17"
+    pathLength="1"
+    fill="none"
+    stroke="#138a63"
+    stroke-width="5"
+    stroke-linecap="round"
+    stroke-linejoin="round"></path>
+</svg>

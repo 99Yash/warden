@@ -1,6 +1,7 @@
 ---
 import { ClientRouter } from "astro:transitions";
 import "../styles/global.css";
+import Logo from "./Logo.astro";
 
 interface Props {
   title: string;
@@ -20,7 +21,7 @@ const ogTitle = `${title} - Warden`;
     <meta name="description" content={description} />
     <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
-    <link rel="icon" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -41,15 +42,10 @@ const ogTitle = `${title} - Warden`;
   </head>
   <body class="marketing-shell">
     <header class="site-header">
-      <a class="brand" href="/" data-astro-prefetch aria-label="Warden home">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z" />
-            <path d="m9 12 2 2 4-4" />
-          </svg>
-        </span>
+      <a class="brand" href="/" data-astro-prefetch aria-label="Warden home" transition:persist="brand">
+        <Logo size={28} class="brand-logo" draw />
         <span class="brand-word">Warden</span>
-        <span class="brand-status" aria-hidden="true">v0 · personal</span>
+        <span class="brand-status" aria-hidden="true">v0 · preview</span>
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
         <a href="/docs/" data-astro-prefetch>Docs</a>
@@ -67,8 +63,8 @@ const ogTitle = `${title} - Warden`;
     <slot />
     <footer class="site-footer">
       <div class="footer-row">
-        <span class="footer-brand"><span class="brand-mark small" aria-hidden="true">W</span>Warden</span>
-        <span class="footer-meta">Static · local-first · receipts-only</span>
+        <span class="footer-brand"><Logo size={20} class="brand-logo" />Warden</span>
+        <span class="footer-meta">Local-first · MCP · receipts-only</span>
       </div>
       <div class="footer-row footer-links">
         <a href="/docs/" data-astro-prefetch>Docs</a>

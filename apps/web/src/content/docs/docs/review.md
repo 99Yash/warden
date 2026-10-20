@@ -1,37 +1,50 @@
 ---
 title: Review pipeline
-description: What `warden review` runs today, what it verifies, and where deep security fits later.
+description: How a Warden review runs on the MCP path, what the in-process path still does, and where the cutover stands.
 ---
 
-<p class="doc-lede"><code>warden review</code> is the everyday cited-review path: deterministic producers and scoped sub-agents feed the orchestration spine, the boss model synthesizes a <code>CommentSet</code>, and the verifier drops unsupported claims.</p>
+<p class="doc-lede">A Warden review has three phases. Warden owns the first and the last: deterministic evidence before the model, and deterministic gates after it. The middle phase — the lanes — runs in your agent runtime.</p>
 
 <div class="doc-callout doc-callout-note">
-  <strong>Current boundary</strong>
-  <p>The deep security harness is design-locked, but not part of this default surface. This page describes the shipped review path.</p>
+  <strong>Two paths, one contract</strong>
+  <p><code>warden opencode-review</code> runs the MCP path described here. <code>warden review</code> still runs the original in-process boss loop and stays the default until the parity eval shows the MCP path matches it on recall and precision. Both emit the same <code>CommentSet</code>.</p>
 </div>
 
-## Review phases
+## Phases
 
 <ol class="doc-steps">
-  <li><span>Diff and noise filter</span><p>Resolve the review diff, detect the ecosystem, and prune generated or irrelevant subtrees before runners start.</p></li>
-  <li><span>Deterministic producers</span><p>Run TypeScript, ESLint, npm audit plus OSV, jscpd, context selection, scalability, deadcode, consistency, leverage, and Warden-managed security lint.</p></li>
-  <li><span>Scoped sub-agents</span><p>In review mode, committability, library leverage, and security triage sub-agents ask bounded questions when structural tools are not enough.</p></li>
-  <li><span>Synthesis</span><p>The boss model orders findings by priority, chooses the clearest framing, and emits the typed <code>CommentSet</code> shape.</p></li>
-  <li><span>Verification</span><p>Repository snippets, OSV advisory records, and <code>api_def</code> type-definition citations are substring-verified. Comments left without verified sources are dropped.</p></li>
+  <li><span>Det-priors</span><p>Resolve the diff, detect the ecosystem, prune generated files, then run TypeScript, ESLint, npm audit with OSV, jscpd, context selection, scalability, deadcode, consistency, leverage, and Warden-managed security lint. Served to lanes as <code>run_det_priors</code>.</p></li>
+  <li><span>Lanes</span><p>Agents in your runtime investigate with read-only tools — <code>read</code>, <code>grep</code>, <code>glob</code> — plus Warden's MCP tools. Each lane submits findings as JSON. The driver, not the model, records which files each lane was allowed to cite.</p></li>
+  <li><span>Post-pass</span><p>Substring-verify every citation, drop findings outside the lane's file scope or off the added lines, screen secrets, turn low-confidence assertions into questions, apply the volume cap, and emit the <code>CommentSet</code>.</p></li>
 </ol>
 
-## What review adds beyond check
+## Lanes
+
+The method has three motions plus a judge. The six concerns are focus areas inside a motion, not lanes of their own.
 
 <div class="doc-property-list">
-  <div><code>context selection</code><span>Cheap signals and, after <code>warden init</code>, embedding-backed candidates give the formatter nearby code with evidence ranges.</span></div>
-  <div><code>committability</code><span>A cheap-tier sub-agent asks about merge-readiness risks that are too repository-specific for a reliable detector.</span></div>
-  <div><code>leverage</code><span>A deterministic detector catches bounded stdlib swaps; a sub-agent can ask about library substitutions after checking installed <code>.d.ts</code> definitions.</span></div>
-  <div><code>security</code><span>A Warden-managed ESLint security pass runs in both modes; review also adds a Haiku triage sub-agent for security residue, subject to a confidence floor and citation verification.</span></div>
+  <div><code>down</code><span>Invariant proof. Starts from a behavior the change claims and traces it through callers, state, persistence, and failure until the paths hold or a counterexample breaks them. Shipped; the default lane.</span></div>
+  <div><code>up</code><span>Structural search. Infers a better domain shape and measures the change against it: one fact with many homes, a seam in the wrong place, a dependency that points the wrong way. Shipped behind <code>--lane up</code>.</span></div>
+  <div><code>surface</code><span>Rule-guided sweep over the deterministic findings. Not shipped yet.</span></div>
+  <div><code>judge</code><span>Synthesis and adjudication across lanes. Not shipped yet.</span></div>
+</div>
+
+The method's order is "fund up first, earn down selectively": structure comes before local nits, so local findings do not anchor the synthesis.
+
+## Post-pass
+
+<div class="doc-property-list">
+  <div><code>citations</code><span>Repository snippets, OSV advisory records, and <code>api_def</code> type-definition citations are substring-verified. A comment with no verified source is dropped.</span></div>
+  <div><code>scope</code><span>Each finding must cite files inside its lane's trusted scope envelope and anchor on an added line.</span></div>
+  <div><code>secrets</code><span>Findings that would echo a credential or cite a secret file are screened out before output.</span></div>
+  <div><code>confidence</code><span>A low-confidence assertion becomes a question. Demotion never drops a finding.</span></div>
+  <div><code>tier 3</code><span>Style and dedup findings are gated unless you pass <code>--verbose</code>.</span></div>
+  <div><code>volume</code><span>At most five comments by default. Tier 1 is always kept.</span></div>
 </div>
 
 <div class="doc-callout doc-callout-check">
   <strong>Verifier veto</strong>
-  <p>The formatter can lower confidence or ask a question, but it cannot rescue a claim whose cited source fails verification.</p>
+  <p>A lane can lower its confidence or ask a question, but nothing it writes can rescue a claim whose cited source fails verification.</p>
 </div>
 
 ## Deep security status
@@ -40,9 +53,5 @@ description: What `warden review` runs today, what it verifies, and where deep s
   <div class="doc-code-header"><span>Planned deep surfaces</span><code>direction</code></div>
   <pre><code>warden security
 warden review --deep</code></pre>
-  <p>These are planned as opt-in deep security paths with a dedicated harness. They are not aliases: the verb is focused SAST; the flag means normal review plus deep security. Marketing them before the shipped review loop feels right would overstate the current product.</p>
+  <p>Opt-in deep security is design-locked but deferred. Under ADR-0053 it becomes a client lane that consumes Warden's tools, not a second harness inside Warden.</p>
 </div>
-
-## Output contract
-
-<p>The review result is still the same <code>CommentSet</code> consumed by the examples page and future wrappers. The important part is that every producer, whether deterministic or LLM-backed, has to fit the same comment, source, confidence, tier, and degraded-worker contract.</p>
