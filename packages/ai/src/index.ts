@@ -9,7 +9,7 @@ export { transformSchemaForGemini, type GeminiSchemaPair } from "./schema-adapte
 // boundary table in CLAUDE.md, `core` is forbidden from importing `ai`
 // directly — every AI SDK touchpoint flows through `@warden/ai`.
 export { Output, hasToolCall, stepCountIs, streamText, generateText, tool } from "ai";
-export type { LanguageModelUsage, ToolSet } from "ai";
+export type { LanguageModelUsage, ModelMessage, ToolSet } from "ai";
 // LanguageModel is narrowed to ai-retry's alias (`LanguageModelV3`) so it can
 // flow into both `streamText` (a supertype consumer) and `createRetryable`
 // (strictly generic over `LanguageModelV3`). `ai`'s wider union with gateway
