@@ -158,6 +158,7 @@ const TimingsFileSchema = z.object({
 
 /** The port of a server that listens on TCP. */
 function tcpPort(address: AddressInfo | string | null): number {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- `server.address()` gives `AddressInfo | string | null`, and a string is a pipe address: the check splits the Node API's own union
   if (address === null || typeof address === "string") {
     throw new Error("smoke: the server is not listening on a TCP port");
   }
@@ -419,7 +420,7 @@ try {
   );
   assert(agent?.mode === "primary", "agent mode is primary (--agent selects it regardless)");
   assert(
-    typeof agent?.model === "string",
+    z.string().safeParse(agent?.model).success,
     "agent carries a model default (--model still required: run ignores it)",
   );
   const schemaJson = JSON.stringify(z.toJSONSchema(LaneFindingSchema), null, 2);
@@ -1499,7 +1500,7 @@ if (mode === "runfail") {
       timingsFile.runSpawned === true &&
       timingsFile.usage?.costUsd === 0.0123 &&
       timingsFile.compactions === 0 &&
-      spawnedPhases.every((p) => typeof timingsFile.timings.phases[p] === "number") &&
+      spawnedPhases.every((p) => timingsFile.timings.phases[p] !== undefined) &&
       timingsFile.timings.tools.some((t) => t.name === "warden_run_det_priors") &&
       lanePhaseMs !== undefined &&
       timingsFile.timings.totalMs >= lanePhaseMs,
@@ -1761,8 +1762,8 @@ if (mode === "runfail") {
   const warmupPhases = warmupFailed.timings?.phases;
   assert(
     warmupPhases !== undefined &&
-      typeof warmupPhases.mcpReady === "number" &&
-      typeof warmupPhases.postPass === "number" &&
+      warmupPhases.mcpReady !== undefined &&
+      warmupPhases.postPass !== undefined &&
       warmupPhases.lane === undefined &&
       warmupPhases.settle === undefined,
     "MCP warmup failure times the MCP wait and the post-pass, with no lane phase",

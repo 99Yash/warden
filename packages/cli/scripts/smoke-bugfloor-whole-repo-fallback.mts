@@ -141,10 +141,7 @@ assert(
   entry?.kind === "actionable" && entry.topic === "diff-source",
   `degraded entry has kind=actionable and topic=diff-source (got ${entry?.kind}/${entry?.topic})`,
 );
-assert(
-  typeof entry?.message === "string" && entry.message.includes("git diff"),
-  "degraded message mentions git diff",
-);
+assert(entry?.message.includes("git diff") === true, "degraded message mentions git diff");
 
 process.stdout.write(`\n[4] semanticSignal drops hits attributed to deleted files\n`);
 

@@ -115,8 +115,10 @@ function errorText(error) {
  * @returns {string}
  */
 function capturedStdout(error) {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- a caught `execFileSync` error is `unknown`, and the type-guard exemption reads a TS return type, which this `.mjs` file cannot write
   if (typeof error !== "object" || error === null || !("stdout" in error)) return "";
 
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the same caught error: `stdout` is a string with the `utf8` encoding, a Buffer without it
   return typeof error.stdout === "string" ? error.stdout : "";
 }
 
