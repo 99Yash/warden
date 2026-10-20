@@ -33,11 +33,15 @@ import { isRecord } from "@warden/core/guards";
 import {
   DOWN_LANE_SPEC,
   LANE_MCP_TOOLS,
+  LANE_SPECS,
   materializeLane,
+  missingRequiredPhrases,
   extractSection,
   parseCharterIncludes,
+  type LaneSpec,
   type MaterializeInput,
 } from "../src/opencode/materialize.js";
+import { sha256Hex } from "@warden/core/hash";
 import {
   buildLaneMessage,
   buildMcpConfigContent,
@@ -79,6 +83,14 @@ async function withEnv<T>(
     }
   }
 }
+
+/**
+ * sha256 of the down lane's `warden-down.md` and `opencode.json` at the
+ * multi-lane seam (PR feat/multi-lane): the seam must not change the down
+ * lane's bytes. Update both only with a deliberate down-lane change.
+ */
+const DOWN_PROMPT_SHA256 = "f80004976c136ec8a49f193f23f069478fa8dd3ba284ebd3af91f39b676a9b33";
+const DOWN_CONFIG_SHA256 = "4835f98208c428504442af8eef1c4c2abe9ca7685531f0c439237fa5ab2720ce";
 
 const TMP_ROOT = mkdtempSync(resolve(tmpdir(), "warden-opencode-lanes-"));
 
@@ -169,13 +181,10 @@ function readCommitted(rel: string): string {
   return readFileSync(resolve(CLI_ROOT, rel), "utf8");
 }
 
-function materializeInput(): MaterializeInput {
-  const charter = readFileSync(
-    resolve(CLI_ROOT, "..", "..", "docs/reference/lanes/down.md"),
-    "utf8",
-  );
+function materializeInput(spec: LaneSpec = DOWN_LANE_SPEC): MaterializeInput {
+  const charter = readFileSync(resolve(CLI_ROOT, "..", "..", spec.charterPath), "utf8");
   const sources = new Map<string, string>();
-  for (const include of parseCharterIncludes(charter)) {
+  for (const include of parseCharterIncludes(charter, spec.charterPath)) {
     if (!sources.has(include.file)) {
       sources.set(include.file, readFileSync(resolve(CLI_ROOT, "..", "..", include.file), "utf8"));
     }
@@ -275,6 +284,42 @@ try {
     checkFailed = true;
   }
   assert(!checkFailed, "lanes:check exits 0 on the committed tree");
+  // Golden: the down lane's materialized bytes, pinned. `lanes:check`
+  // compares against committed files, so a materializer refactor that
+  // regenerates both sides would still pass it; this pin does not move
+  // unless someone changes it. A deliberate down-lane change (its charter
+  // or an included section) updates these two hashes in the same commit.
+  assert(
+    sha256Hex(runA.prompt) === DOWN_PROMPT_SHA256,
+    `down prompt bytes match the golden hash (got ${sha256Hex(runA.prompt)})`,
+  );
+  assert(
+    sha256Hex(runA.configJson) === DOWN_CONFIG_SHA256,
+    `down config bytes match the golden hash (got ${sha256Hex(runA.configJson)})`,
+  );
+  // Every lane spec materializes, and its files are committed.
+  const specFiles = LANE_SPECS.flatMap((spec) => [spec.promptFilename, spec.configFilename]);
+  assert(
+    new Set(specFiles).size === specFiles.length,
+    `lane specs name distinct files (${specFiles.join(", ")})`,
+  );
+  assert(
+    new Set(LANE_SPECS.map((spec) => spec.agentId)).size === LANE_SPECS.length &&
+      new Set(LANE_SPECS.map((spec) => spec.lane)).size === LANE_SPECS.length,
+    "lane specs have distinct lane and agent ids",
+  );
+  for (const spec of LANE_SPECS) {
+    const out = materializeLane(spec, materializeInput(spec));
+    assert(
+      out.prompt === readCommitted(`opencode/${spec.promptFilename}`) &&
+        out.configJson === readCommitted(`opencode/${spec.configFilename}`),
+      `${spec.lane} lane matches its committed ${spec.promptFilename} + ${spec.configFilename}`,
+    );
+    assert(
+      out.configJson.includes(`"system": "{file:./${spec.promptFilename}}"`),
+      `${spec.lane} config points at its own prompt file`,
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // [2] drift — a changed byte or a changed source section breaks the match.
@@ -291,7 +336,7 @@ try {
     "one changed value breaks the config match",
   );
   const changedSources = new Map(input.sources);
-  const [firstInclude] = parseCharterIncludes(input.charter);
+  const [firstInclude] = parseCharterIncludes(input.charter, DOWN_LANE_SPEC.charterPath);
   if (firstInclude === undefined) throw new Error("smoke: the down charter has no includes entry");
   const { file: firstFile, heading: firstHeading } = firstInclude;
   const firstSource = input.sources.get(firstFile);
@@ -431,29 +476,47 @@ try {
   );
   // Issue #57: grep permission keys on the pattern, not the path, so the
   // charter's scope rule is the only thing keeping read/grep out of the
-  // multi-hundred-KB fixtures and ADR corpus.
+  // multi-hundred-KB fixtures and ADR corpus. And the down lane ran out
+  // its timeout because the charter asked for unbounded depth, so the
+  // bound and its route to `unproven` must reach the model. Both live in
+  // `DOWN_LANE_SPEC.requiredPhrases`; `lanes:check` fails without them.
   for (const excluded of ["`**/fixtures/**`", "`**/*.patch`", "root-level `*.md`"]) {
-    assert(runA.prompt.includes(excluded), `prompt excludes ${excluded} from read/grep`);
+    assert(
+      DOWN_LANE_SPEC.requiredPhrases.includes(excluded),
+      `down spec requires the read/grep exclusion ${excluded}`,
+    );
   }
-  // Issue #57: the down lane ran out its timeout because the charter asked
-  // for unbounded depth. The bound and its route to `unproven` must reach
-  // the model; whitespace is collapsed so a reflow does not trip this.
+  assert(
+    DOWN_LANE_SPEC.requiredPhrases.includes("open **at most 3 files per claim**"),
+    "down spec requires the 3-files-per-claim bound",
+  );
+  for (const spec of LANE_SPECS) {
+    const out = materializeLane(spec, materializeInput(spec));
+    const missing = missingRequiredPhrases(spec, out.prompt);
+    assert(
+      missing.length === 0,
+      `${spec.lane} prompt keeps every required phrase (missing: ${missing.join(" | ")})`,
+    );
+  }
   const flat = (text: string): string => text.replace(/\s+/g, " ");
-  const boundPhrases = [
-    "trace each claim **one hop** from a changed symbol",
+  // A reflowed phrase still counts; a removed phrase is reported.
+  const reflowed = runA.prompt.replace(
     "open **at most 3 files per claim**",
-    "**Reaching the bound is a normal end, not a failure.**",
-    "conclude **unproven**: the missing evidence is the next file you would have opened",
-    "where they differ, the bound wins",
-    "A claim that reaches the step 2 bound is **unproven**",
-  ];
+    "open **at most 3\nfiles per claim**",
+  );
+  assert(
+    missingRequiredPhrases(DOWN_LANE_SPEC, reflowed).length === 0,
+    "a line break inside a required phrase does not count as missing",
+  );
+  const lost = runA.prompt.replace("open **at most 3 files per claim**", "open some files");
+  assert(
+    missingRequiredPhrases(DOWN_LANE_SPEC, lost).includes("open **at most 3 files per claim**"),
+    "a removed read bound is reported as missing",
+  );
   for (const [label, text] of [
     ["charter", input.charter],
     ["prompt", runA.prompt],
   ] as const) {
-    for (const phrase of boundPhrases) {
-      assert(flat(text).includes(phrase), `${label} keeps the depth bound: "${phrase}"`);
-    }
     assert(
       !flat(text).includes("trace changed symbols to their callers; follow called functions"),
       `${label} drops the unbounded depth instruction`,
@@ -968,6 +1031,7 @@ try {
   process.stdout.write("\n[6] command — argv shape and warden MCP command\n");
   const cmd = buildOpencodeCommand({
     serverUrl: "http://127.0.0.1:4123",
+    agentId: DOWN_LANE_SPEC.agentId,
     model: "anthropic/claude-opus-5-5#high",
     message: "hello",
   });
@@ -1912,10 +1976,11 @@ if (mode === "runfail") {
   );
   const scopeOf = (n: number): string[] => Array.from({ length: n }, (_, i) => `src/f${i}.ts`);
   assert(
-    laneScopeOverCeiling(scopeOf(DOWN_LANE_MAX_SCOPE_FILES)) === undefined,
+    laneScopeOverCeiling(scopeOf(DOWN_LANE_MAX_SCOPE_FILES), DOWN_LANE_SPEC) === undefined,
     `scope at the ceiling (${DOWN_LANE_MAX_SCOPE_FILES} files) is allowed`,
   );
-  const overReason = laneScopeOverCeiling(scopeOf(DOWN_LANE_MAX_SCOPE_FILES + 1)) ?? "";
+  const overReason =
+    laneScopeOverCeiling(scopeOf(DOWN_LANE_MAX_SCOPE_FILES + 1), DOWN_LANE_SPEC) ?? "";
   assert(
     overReason.includes(`${DOWN_LANE_MAX_SCOPE_FILES + 1} changed files`) &&
       overReason.includes(`ceiling of ${DOWN_LANE_MAX_SCOPE_FILES}`) &&

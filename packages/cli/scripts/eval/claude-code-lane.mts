@@ -16,7 +16,7 @@ import {
   type SessionUsage,
   type ToolCallCount,
 } from "../../src/opencode/drive.js";
-import { DOWN_LANE_SPEC, PROMPT_FILENAME } from "../../src/opencode/materialize.js";
+import { DOWN_LANE_SPEC } from "../../src/opencode/materialize.js";
 
 /**
  * Eval-only: the down lane run by Claude Code (`claude -p`) instead of
@@ -328,7 +328,10 @@ export async function driveClaudeCodeLane(opts: ClaudeCodeDriveOptions): Promise
   const argv = buildClaudeCodeArgv({
     model: opts.model ?? CLAUDE_CODE_DEFAULT_MODEL,
     effort: opts.effort ?? CLAUDE_CODE_DEFAULT_EFFORT,
-    systemPromptFile: resolve(dirname(resolveLaneConfigPath()), PROMPT_FILENAME),
+    systemPromptFile: resolve(
+      dirname(resolveLaneConfigPath(DOWN_LANE_SPEC)),
+      DOWN_LANE_SPEC.promptFilename,
+    ),
     mcpCommand: resolveWardenMcpCommand(),
     message: buildClaudeCodeMessage(baseRef),
   });
