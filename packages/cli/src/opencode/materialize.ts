@@ -98,8 +98,38 @@ export const DOWN_LANE_SPEC: LaneSpec = {
   ],
 };
 
+/**
+ * ADR-0052 (Lever D), proposed and not ratified: the up lane ships
+ * default-off. `lanes:materialize` writes its files, but the driver runs
+ * it only on `--lane up` (`warden opencode-review`) or the eval config
+ * `opencode-up`. Option A (2026-10-20): the down lane keeps its read cap,
+ * and the up lane has its own bound — at most 3 confirmed candidates, at
+ * most 3 home files per candidate.
+ */
+export const UP_LANE_SPEC: LaneSpec = {
+  lane: "up",
+  agentId: "warden-up",
+  tier: "strong",
+  defaultModel: "anthropic/claude-opus-5-5#high",
+  steps: 60,
+  description:
+    "Warden up lane: structural search with a drift focus. Maps where each changed fact lives, confirms gated restructures, and submits findings as JSON.",
+  allowedTools: ["read", "grep", "glob"],
+  charterPath: "docs/reference/lanes/up.md",
+  promptFilename: "warden-up.md",
+  configFilename: "opencode-up.json",
+  requiredPhrases: [
+    ...READ_EXCLUSION_PHRASES,
+    "Confirm **at most 3 candidates**",
+    "open **at most 3 home files per candidate**",
+    "**Reaching the bound is a normal end, not a failure.**",
+    "where they differ, the bound wins",
+    "the right answer when no candidate clears the admission gates",
+  ],
+};
+
 /** Every lane that `lanes:materialize` writes, in output order. */
-export const LANE_SPECS: readonly LaneSpec[] = [DOWN_LANE_SPEC];
+export const LANE_SPECS: readonly LaneSpec[] = [DOWN_LANE_SPEC, UP_LANE_SPEC];
 
 /** MCP tool actions the lane may call (server `warden` + tool name). */
 export const LANE_MCP_TOOLS = ["warden_run_det_priors", "warden_lookup_type_def"] as const;
