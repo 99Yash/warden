@@ -55,9 +55,7 @@ export const typeDefCache = sqliteTable(
      * `retrievedAt` field on cache hits. */
     retrievedAt: text("retrieved_at").notNull(),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.package, t.version, t.symbol] }),
-  }),
+  (t) => [primaryKey({ columns: [t.package, t.version, t.symbol] })],
 );
 
 export type TypeDefCache = typeof typeDefCache.$inferSelect;

@@ -572,8 +572,8 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       bossTokens = {
         inputTokens: usage.inputTokens ?? 0,
         outputTokens: usage.outputTokens ?? 0,
-        ...(usage.cachedInputTokens !== undefined
-          ? { cachedInputTokens: usage.cachedInputTokens }
+        ...(usage.inputTokenDetails.cacheReadTokens !== undefined
+          ? { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }
           : {}),
       };
     } catch {

@@ -34,9 +34,7 @@ export const llmReviewCache = sqliteTable(
 
     ...lifecycle_dates,
   },
-  (t) => ({
-    providerIdx: index("llm_review_cache_provider_idx").on(t.provider),
-  }),
+  (t) => [index("llm_review_cache_provider_idx").on(t.provider)],
 );
 
 export type LlmReviewCache = typeof llmReviewCache.$inferSelect;

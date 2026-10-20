@@ -55,6 +55,12 @@
       { "considerDefaultExhaustiveForUnions": true }
     ],
     "typescript/no-explicit-any": "error",
+    // no-deprecated: a use of a symbol whose declaration carries `@deprecated`, from a
+    // dependency (zod 4, the AI SDK, the TypeScript API, drizzle, the MCP SDK) or from this
+    // repo. Migrate to the replacement the tag names. A site that must keep the old symbol
+    // carries a directive with the reason (`packages/mcp/src/server.ts` keeps the low-level
+    // MCP `Server`).
+    "typescript/no-deprecated": "error",
     "unicorn/no-useless-spread": "error",
     // return-await, correctness option only: a promise returned without `await` inside a `try`
     // (or a `catch` that has a `finally`) settles after the block exits, so its `catch` never

@@ -55,17 +55,17 @@ const DiagnosticSchema = z
     endLine: z.number().optional(),
     endColumn: z.number().optional(),
   })
-  .passthrough();
+  .loose();
 
 const JsonReportSchema = z
   .object({
     // schemaVersion 1 (full/diff/staged) or 2 (baseline, `--scope changed`).
     schemaVersion: z.union([z.literal(1), z.literal(2)]),
     ok: z.boolean(),
-    error: z.object({ message: z.string() }).passthrough().nullable().optional(),
+    error: z.object({ message: z.string() }).loose().nullable().optional(),
     diagnostics: z.array(DiagnosticSchema),
   })
-  .passthrough();
+  .loose();
 
 type Diagnostic = z.infer<typeof DiagnosticSchema>;
 
