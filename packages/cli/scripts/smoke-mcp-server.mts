@@ -51,6 +51,11 @@ function assert(cond: unknown, msg: string): void {
   }
 }
 
+/** `Array.isArray` narrows `unknown` to `any[]`; this keeps the elements `unknown`. */
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 const client = new Client({ name: "warden-mcp-smoke", version: "0.0.1" });
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -149,14 +154,14 @@ try {
   const outputSchema = lookup?.outputSchema;
   assert(outputSchema?.type === "object", "output schema advertises an object envelope");
   assert(
-    Array.isArray(outputSchema?.oneOf) &&
+    isUnknownArray(outputSchema?.oneOf) &&
       outputSchema.oneOf.length === 2 &&
       outputSchema.oneOf.every(
         (branch) =>
           typeof branch === "object" &&
           branch !== null &&
           "required" in branch &&
-          Array.isArray(branch.required) &&
+          isUnknownArray(branch.required) &&
           branch.required.includes("envelopeVersion") &&
           branch.required.includes("tool") &&
           branch.required.includes("status"),

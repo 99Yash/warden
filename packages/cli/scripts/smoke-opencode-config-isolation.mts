@@ -6,6 +6,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { text } from "node:stream/consumers";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { allocFreePort, createOpencodeIsolation } from "../src/opencode/drive.js";
@@ -27,8 +28,7 @@ const isolation = createOpencodeIsolation();
 const requests: string[] = [];
 // oxlint-disable-next-line typescript/no-misused-promises -- a rejected handler crashes the probe, which is the loud failure a smoke run wants
 const provider = createServer(async (req, res) => {
-  let body = "";
-  for await (const chunk of req) body += chunk.toString();
+  const body = await text(req);
   requests.push(body);
   res.writeHead(200, { "content-type": "text/event-stream" });
   const events = [

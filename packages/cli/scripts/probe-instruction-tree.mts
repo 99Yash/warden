@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
+import { text } from "node:stream/consumers";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveDiff, runPostPass } from "@warden/core";
@@ -43,8 +44,7 @@ let requests: Array<Record<string, unknown>> = [];
 let step = 0;
 // oxlint-disable-next-line typescript/no-misused-promises -- a rejected handler crashes the probe, which is the loud failure a smoke run wants
 const provider = createServer(async (req, res) => {
-  let body = "";
-  for await (const chunk of req) body += chunk.toString();
+  const body = await text(req);
   const request = ProviderRequestSchema.parse(JSON.parse(body));
   requests.push(request);
   // Title/summary calls have no tools. Reply without advancing the read sequence.
