@@ -25,7 +25,12 @@ import type {
 import { BOSS_LOOP_DEFAULTS, runBossLoop, type BossLoopConfig } from "./boss-loop.js";
 import { scopeCommentsToDiff } from "./comment-scope.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
-import { accumulateTokenUsage, ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
+import {
+  accumulateTokenUsage,
+  ReviewScratchpad,
+  type CallUsage,
+  type TokenUsage,
+} from "./scratchpad.js";
 import type { DispatchConcurrency } from "./tools/dispatch-worker.js";
 import { makeWorkerRoute } from "./workers/index.js";
 
@@ -176,18 +181,33 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   // bypass the harness can omit the env vars entirely.
   const concurrency = buildDispatchConcurrency();
 
-  const bossOutput = await runBossLoop({
-    repoRoot: input.repoRoot,
-    diff: input.diff,
-    detPriors,
-    scratchpad,
-    route,
-    runId,
-    ...(workerBudget !== undefined ? { workerBudget } : {}),
-    concurrency,
-    ...(input.config.bossLoop !== undefined ? { config: input.config.bossLoop } : {}),
-    ...(input.emit ? { emit: input.emit } : {}),
-  });
+  let bossOutput: Awaited<ReturnType<typeof runBossLoop>>;
+  try {
+    bossOutput = await runBossLoop({
+      repoRoot: input.repoRoot,
+      diff: input.diff,
+      detPriors,
+      scratchpad,
+      route,
+      runId,
+      ...(workerBudget !== undefined ? { workerBudget } : {}),
+      concurrency,
+      ...(input.config.bossLoop !== undefined ? { config: input.config.bossLoop } : {}),
+      ...(input.emit ? { emit: input.emit } : {}),
+    });
+  } catch (err) {
+    // The boss hard-fails the review (ADR-0017 amendment), but the boss and
+    // the workers already spent tokens. Write that spend to the review-run
+    // row before the rethrow. Best-effort: this path never replaces `err`.
+    await recordFailedReviewRun({
+      runId,
+      inputHash,
+      mode: input.config.mode,
+      modelLabels,
+      scratchpad,
+    });
+    throw err;
+  }
 
   // Phase 3 — citation verify. Substring-checks every `{path, line, snippet}`
   // citation against the cited file at `line ± DRIFT` and drops Comments
@@ -274,8 +294,11 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   // Per-tier token-usage bucket: opus (boss) + sonnet/haiku (workers).
   // Workers record their actual tier in the scratchpad even when the boss
   // overrode the per-concern default, so this aggregation is honest.
-  const tokenUsage = buildTokenUsageByTier(scratchpad.bossTokens(), scratchpad.workerOutputs());
+  const { tokenUsage, unknownRequests } = summarizeUsage(scratchpad);
   const costs = await computeCosts(tokenUsage);
+  if (unknownRequests > 0) {
+    aggregatedDegraded.push(unknownUsageEntry(unknownRequests));
+  }
 
   // ADR-0048 §2 — persist the review-run row best-effort. Failure surfaces as
   // an info degraded entry and never blocks the review (caveat in the ADR).
@@ -287,6 +310,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
     tokenUsage,
     costUsd: costs?.costUsd ?? 0,
     commentsEmitted: finalComments.length,
+    usageUnknownRequests: unknownRequests,
   });
   aggregatedDegraded.push(...recordDegraded);
 
@@ -304,6 +328,7 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
             costLabels: costs.costLabels,
           }
         : {}),
+      ...(unknownRequests > 0 ? { usageUnknownRequests: unknownRequests } : {}),
     },
   };
 }
@@ -367,6 +392,7 @@ function recordReviewRun(input: {
   tokenUsage: TokenUsageByTier | undefined;
   costUsd: number;
   commentsEmitted: number;
+  usageUnknownRequests: number;
 }): DegradedEntry[] {
   // Sum input/output tokens across all tiers for the run-level row. The
   // per-tier breakdown lives on the live Langfuse spans (ADR-0048 §5); this
@@ -392,6 +418,7 @@ function recordReviewRun(input: {
         outputTokens,
         costUsd: input.costUsd,
         commentsEmitted: input.commentsEmitted,
+        usageUnknownRequests: input.usageUnknownRequests,
       })
       .run();
     return [];
@@ -403,6 +430,37 @@ function recordReviewRun(input: {
         message: `review run record failed (${formatErr(err)})`,
       },
     ];
+  }
+}
+
+/**
+ * Write the review-run row for a review whose boss loop threw. The row
+ * carries the spend known at the failure, so the durable record does not
+ * read $0 for a run that spent tokens. `commentsEmitted` is 0: the review
+ * emitted nothing. Never throws.
+ */
+async function recordFailedReviewRun(input: {
+  runId: string;
+  inputHash: string;
+  mode: "check" | "review";
+  modelLabels: Record<ReviewCostTier, string>;
+  scratchpad: ReviewScratchpad;
+}): Promise<void> {
+  try {
+    const { tokenUsage, unknownRequests } = summarizeUsage(input.scratchpad);
+    const costs = await computeCosts(tokenUsage);
+    recordReviewRun({
+      runId: input.runId,
+      inputHash: input.inputHash,
+      mode: input.mode,
+      modelLabels: input.modelLabels,
+      tokenUsage,
+      costUsd: costs?.costUsd ?? 0,
+      commentsEmitted: 0,
+      usageUnknownRequests: unknownRequests,
+    });
+  } catch {
+    // Usage is telemetry; the boss error is the one the caller must see.
   }
 }
 
@@ -454,20 +512,46 @@ function addUsage(acc: TokenUsageBlock, next: TokenUsage): TokenUsageBlock {
   return block;
 }
 
+/**
+ * Per-tier token usage plus the count of model requests whose usage is
+ * unknown, over the boss and every worker (failed ones included).
+ */
+function summarizeUsage(scratchpad: ReviewScratchpad): {
+  tokenUsage: TokenUsageByTier | undefined;
+  unknownRequests: number;
+} {
+  const boss = scratchpad.bossUsage();
+  const workers = scratchpad.workerOutputs();
+  let unknownRequests = boss?.unknownRequests ?? 0;
+  for (const w of workers) unknownRequests += w.usage?.unknownRequests ?? 0;
+  return { tokenUsage: buildTokenUsageByTier(boss, workers), unknownRequests };
+}
+
+function unknownUsageEntry(unknownRequests: number): DegradedEntry {
+  return {
+    kind: "info",
+    topic: "cost",
+    message:
+      `cost: ${unknownRequests} model request${unknownRequests === 1 ? "" : "s"} ` +
+      "failed, timed out, or aborted before the provider reported usage — " +
+      "the token counts and the cost are lower bounds",
+  };
+}
+
 function buildTokenUsageByTier(
-  bossTokens: TokenUsage | undefined,
-  workerOutputs: readonly { tokenUsage?: TokenUsage; tier?: "sonnet" | "haiku" }[],
+  bossUsage: CallUsage | undefined,
+  workerOutputs: readonly { usage?: CallUsage; tier?: "sonnet" | "haiku" }[],
 ): TokenUsageByTier | undefined {
   let opus: TokenUsageBlock | undefined;
   let sonnet: TokenUsageBlock | undefined;
   let haiku: TokenUsageBlock | undefined;
-  if (bossTokens) opus = toUsageBlock(bossTokens);
+  if (bossUsage) opus = toUsageBlock(bossUsage.total);
   for (const w of workerOutputs) {
-    if (!w.tokenUsage || !w.tier) continue;
+    if (!w.usage || !w.tier) continue;
     if (w.tier === "sonnet") {
-      sonnet = sonnet ? addUsage(sonnet, w.tokenUsage) : toUsageBlock(w.tokenUsage);
+      sonnet = sonnet ? addUsage(sonnet, w.usage.total) : toUsageBlock(w.usage.total);
     } else {
-      haiku = haiku ? addUsage(haiku, w.tokenUsage) : toUsageBlock(w.tokenUsage);
+      haiku = haiku ? addUsage(haiku, w.usage.total) : toUsageBlock(w.usage.total);
     }
   }
   if (opus === undefined && sonnet === undefined && haiku === undefined) {

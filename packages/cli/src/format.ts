@@ -58,6 +58,7 @@ function tierSwatch(tier: Tier): string {
 
 /**
  * "Done in 47.3s · $0.42 (claude-opus-4-8 $0.31 · gpt-5.4-mini $0.08)"
+ * ("≥ $0.42" when `metadata.usageUnknownRequests` is set: a lower bound).
  *
  * Falls back to "duration: 4660ms" (the pre-M14 shape) when cost is
  * absent — that's the `warden check` path (no LLM calls) and the
@@ -74,7 +75,9 @@ function renderSummaryLine(result: CommentSet): string {
     return `duration: ${result.metadata.durationMs}ms`;
   }
   const breakdown = renderCostBreakdown(result.metadata.costByTier, result.metadata.costLabels);
-  const costStr = formatUsd(cost);
+  // Some model requests reported no usage: the cost is a lower bound.
+  const lowerBound = result.metadata.usageUnknownRequests !== undefined;
+  const costStr = lowerBound ? `≥ ${formatUsd(cost)}` : formatUsd(cost);
   return breakdown ? `Done in ${wall} · ${costStr} (${breakdown})` : `Done in ${wall} · ${costStr}`;
 }
 

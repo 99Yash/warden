@@ -1,0 +1,1 @@
+ALTER TABLE `review_runs` ADD `usage_unknown_requests` integer DEFAULT 0 NOT NULL;

@@ -217,6 +217,14 @@ export const CommentSetMetadataSchema = z.object({
    */
   costByTier: CostByTierSchema.optional(),
   /**
+   * Model requests (or retried attempts) that started but reported no
+   * usage, because they failed, timed out, or aborted during the request.
+   * The provider can bill them, so when this field is set, `tokenUsage`
+   * and `costUsd` are lower bounds. Absent when every request reported its
+   * usage.
+   */
+  usageUnknownRequests: z.number().int().positive().optional(),
+  /**
    * Display labels for the cost tiers above. The JSON keys remain the legacy
    * logical tiers for compatibility; labels carry the resolved provider model
    * (`claude-opus-4-8`, `gpt-5.4-mini`, etc.).

@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Semaphore } from "../../orchestration/semaphore.js";
 import type { Comment, DegradedEntry } from "../../schema.js";
 import { commentInScope } from "../comment-scope.js";
-import type { ReviewScratchpad, TokenUsage } from "../scratchpad.js";
+import type { CallUsage, ReviewScratchpad } from "../scratchpad.js";
 
 /**
  * M14 (ADR-0030): `dispatch_worker` tool — the *only* tool the boss has
@@ -162,7 +162,11 @@ export interface WorkerInvocationResult {
   toolCalls: number;
   degraded: DegradedEntry[];
   durationMs: number;
-  tokenUsage?: TokenUsage;
+  /**
+   * Usage of the worker's LLM call. Set on a failed call too when the call
+   * spent tokens before it failed.
+   */
+  usage?: CallUsage;
   /**
    * True when the worker's LLM call errored (provider 400/timeout, model
    * unavailable) and produced *no* output — distinct from a worker that ran
@@ -354,7 +358,7 @@ export function makeDispatchWorkerTool(opts: MakeDispatchWorkerToolOptions) {
       degraded: laneDegraded,
       phase: args.phase,
       durationMs: result.durationMs,
-      ...(result.tokenUsage !== undefined ? { tokenUsage: result.tokenUsage } : {}),
+      ...(result.usage !== undefined ? { usage: result.usage } : {}),
       ...(result.tier !== undefined ? { tier: result.tier } : {}),
       ...(result.failed === true ? { failed: true } : {}),
     });

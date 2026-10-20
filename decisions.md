@@ -2793,6 +2793,15 @@ ADR-0044 §7 already designed half of this and must not be reopened by accident.
 
 **Ripple:** ADR-0053 carries this as an open risk — "trace coverage must not silently disappear." ADR-0047's `expect: absent` FP-trap discipline and the dropped-candidate events (§4) **stay in warden**, because the post-pass is where findings actually get dropped, and that is the signal worth keeping.
 
+**Amendment 2026-10-20 (a failed call records its usage; unknown usage is a count, not a guess).** PR #79 left one gap open: a worker or boss call that failed recorded no usage, so `costUsd` and the `reviewRuns` row were too low. Decision:
+
+- Usage is counted per step with `streamText`'s `prepareStep` and `onStepFinish` (`CallUsageMeter` in `scratchpad.ts`), not read from `result.totalUsage`. In `ai@6.0.77`, `totalUsage` rejects when no step finished, and resolves to the all-`undefined` usage when a later step errors or the call aborts. Both cases lose the steps that did finish.
+- A failed call keeps the usage of each finished step. A request that started and reported no usage (an error, a timeout, an abort, or a failed `ai-retry` attempt) adds 1 to `unknownRequests`. Warden does not estimate a number for it.
+- The count goes to `CommentSet.metadata.usageUnknownRequests` (absent when 0), to an info degraded entry (`topic: "cost"`), and to the new `review_runs.usage_unknown_requests` column (default 0; migration `0009`). When the count is above 0, the token counts and the cost are lower bounds. The CLI cost line shows `≥ $X`.
+- When the boss hard-fails, the harness writes the `reviewRuns` row with the spend known at the failure before it rethrows. That write is best-effort and never replaces the boss error.
+
+Usage stays telemetry: no usage read can fail a review or a lane.
+
 ---
 
 ## ADR-0049 — Lever B (intent-context): feed stated intent as adjudication context — `gh`-sourced PR description + referenced design docs, compressed by a configured cheap-model summarizer (a routing policy, not a hard-wired provider) into a claimed-intent digest the boss verifies against code (never trusts)
