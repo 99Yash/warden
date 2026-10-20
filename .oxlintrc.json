@@ -84,6 +84,7 @@
     "typescript/no-unsafe-return": "error",
     "typescript/no-unsafe-argument": "error",
     "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
     // A `catch` handles the failure, logs safe fields, or holds a comment that says why the

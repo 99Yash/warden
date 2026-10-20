@@ -17,6 +17,14 @@ const McpConfigSchema = z.object({
     servers: z.object({ warden: z.object({ command: z.tuple([z.string()], z.string()) }) }),
   }),
 });
+/** A child's `JSON.stringify(process.env)`. */
+const EnvSchema = z.record(z.string(), z.string());
+/** What `runtime-probe.mjs` prints. The smoke counts the env files and does not read them. */
+const RuntimeProbeSchema = z.object({
+  env: EnvSchema,
+  files: z.array(z.unknown()),
+  nextFiles: z.array(z.unknown()),
+});
 
 const root = mkdtempSync(resolve(tmpdir(), "warden-secret-isolation-"));
 const cliRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -43,7 +51,7 @@ try {
     },
   );
   assert(capture.ok);
-  const childEnv = JSON.parse(capture.stdout);
+  const childEnv = EnvSchema.parse(JSON.parse(capture.stdout));
   check(
     Object.keys(secrets).every((key) => childEnv[key] === undefined),
     "detector child excludes all supplied secrets",
@@ -60,8 +68,10 @@ try {
     ),
   );
   const [bin, ...argv] = config.mcp.servers.warden.command;
-  const mcpEnv = JSON.parse(
-    execFileSync(bin, argv, { cwd: root, env: { ...process.env, ...secrets }, encoding: "utf8" }),
+  const mcpEnv = EnvSchema.parse(
+    JSON.parse(
+      execFileSync(bin, argv, { cwd: root, env: { ...process.env, ...secrets }, encoding: "utf8" }),
+    ),
   );
   check(
     Object.keys(secrets).every((key) => mcpEnv[key] === undefined),
@@ -115,14 +125,21 @@ try {
     process.stdout.write(JSON.stringify({ env: process.env, files: runtime.envFiles, nextFiles: next.envFiles }));
   `,
   );
-  const runtime = JSON.parse(
-    execFileSync(
-      process.execPath,
-      ["--import", fileURLToPath(import.meta.resolve("tsx/esm")), runtimeProbe],
-      {
-        env: { ...process.env, ...secrets, XDG_CONFIG_HOME: configHome, WARDEN_ENV_FILE: override },
-        encoding: "utf8",
-      },
+  const runtime = RuntimeProbeSchema.parse(
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["--import", fileURLToPath(import.meta.resolve("tsx/esm")), runtimeProbe],
+        {
+          env: {
+            ...process.env,
+            ...secrets,
+            XDG_CONFIG_HOME: configHome,
+            WARDEN_ENV_FILE: override,
+          },
+          encoding: "utf8",
+        },
+      ),
     ),
   );
   check(
@@ -177,7 +194,9 @@ try {
   });
   check(!result.isError, "real MCP runs the fixture detectors");
   for (const name of ["eslint", "tsc"]) {
-    const env = JSON.parse(readFileSync(resolve(root, `${name}-env.json`), "utf8"));
+    const env = EnvSchema.parse(
+      JSON.parse(readFileSync(resolve(root, `${name}-env.json`), "utf8")),
+    );
     check(
       Object.keys(secrets).every((key) => env[key] === undefined),
       `${name} repo code cannot read inherited secrets`,
