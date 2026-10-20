@@ -5,13 +5,13 @@ import {
   getBossModel,
   getBossModelInfo,
   getModelKey,
-  hasToolCall,
   stepCountIs,
   streamText,
   timeout as timeoutCondition,
   tool,
   transformSchemaForGemini,
   type LanguageModel,
+  type ModelMessage,
   type Retries,
   type RetryContext,
   type SuccessContext,
@@ -48,7 +48,9 @@ import {
  * calling the terminal `submit_review` tool in its last turn (tool-call
  * structured output is more robust across model versions than the
  * experimental `Output.object` channel under a tool-use loop — see
- * `BossOutputSchema` and the `submit_review` wiring below).
+ * `BossOutputSchema` and the `submit_review` wiring below). The last
+ * allowed step offers only `submit_review` (see `makeBossPrepareStep`), so
+ * the step cap cannot end the loop before the boss submits.
  *
  * Boss model is `getBossModel()` (Opus 4.6 per ADR-0030 §2). Per the
  * ADR-0017 2026-05-17 "tools + structured-output exception" amendment,
@@ -412,6 +414,76 @@ function resolveBossRounds(): number {
   return Math.min(MAX_BOSS_ROUNDS, Math.max(MIN_BOSS_ROUNDS, Math.trunc(n)));
 }
 
+/** Tool names the boss `streamText` loop registers. */
+type BossToolName = "dispatch_worker" | "submit_review";
+
+/** The per-step override that the boss `prepareStep` hook returns. */
+export interface BossStepOverride {
+  activeTools: BossToolName[];
+  messages: ModelMessage[];
+}
+
+/**
+ * The user message appended to the last allowed step. `dispatch_worker` is
+ * not sent on that step, so the instruction names it as unavailable.
+ */
+export const BOSS_FINAL_STEP_INSTRUCTION = [
+  "<final_step>",
+  "This is your final step: the step cap is reached and `dispatch_worker` is no longer available.",
+  "Call `submit_review` now, with the comments that the worker outputs and det-priors you already have support.",
+  "An empty `comments` array is valid only when no finding survives your adjudication.",
+  "</final_step>",
+].join("\n");
+
+/**
+ * The boss `streamText({ stopWhen })` conditions: the step cap, or a VALID
+ * `submit_review` call (`submitted()` is true once its `execute` ran).
+ *
+ * Do not use `hasToolCall("submit_review")` here. It also matches a call
+ * that failed input validation, so it ended the review with no retry. With
+ * this condition, the boss sees the tool error in the next step and can
+ * submit again.
+ */
+export function bossStopConditions(
+  stepCap: number,
+  submitted: () => boolean,
+): [ReturnType<typeof stepCountIs>, () => boolean] {
+  return [stepCountIs(stepCap), submitted];
+}
+
+/**
+ * Build the boss `streamText({ prepareStep })` hook.
+ *
+ * Every step calls `meter.prepareStep()` first, so the request count of
+ * `CallUsageMeter` stays correct. The last allowed step (`stepNumber` is
+ * 0-based, so `stepCap - 1`; with `stepCap === 1` this is the first step)
+ * sends only `submit_review` and appends `BOSS_FINAL_STEP_INSTRUCTION`.
+ * Without this, a boss that dispatches a worker in its last step hits
+ * `stepCountIs(stepCap)` before it calls `submit_review`, and the review
+ * fails.
+ *
+ * The hook does not force `toolChoice`: Anthropic rejects a forced tool
+ * choice when extended thinking is on. If the boss still does not call
+ * `submit_review`, `runBossLoop()` fails loudly (no false-clean).
+ *
+ * The appended message is for this step only. The tool results of the
+ * steps before are already in `messages`, so the boss can use the output
+ * of a worker it dispatched in the step before.
+ */
+export function makeBossPrepareStep(opts: {
+  stepCap: number;
+  meter: Pick<CallUsageMeter, "prepareStep">;
+}): (step: { stepNumber: number; messages: ModelMessage[] }) => BossStepOverride | undefined {
+  return (step) => {
+    opts.meter.prepareStep();
+    if (step.stepNumber < opts.stepCap - 1) return undefined;
+    return {
+      activeTools: ["submit_review"],
+      messages: [...step.messages, { role: "user", content: BOSS_FINAL_STEP_INSTRUCTION }],
+    };
+  };
+}
+
 export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput> {
   const startedAt = Date.now();
   const degraded: DegradedEntry[] = [];
@@ -528,16 +600,17 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
   // structured output composes far more reliably with a tool-use loop across
   // model versions: opus-4-8 deterministically failed `Output.object` here with
   // "No object generated: could not parse the response", while opus-4-6 did
-  // not. The tool's `execute` captures the SDK-validated input;
-  // `hasToolCall("submit_review")` ends the loop as soon as it fires.
+  // not. The tool's `execute` captures the SDK-validated input, and the loop
+  // ends as soon as `submittedRaw` is set (see `stopWhen`).
   let submittedRaw: unknown;
   const submitReviewTool = tool({
     description: [
       "Submit the final review. Call this exactly once, as your LAST action,",
       "with the complete review as `{ comments: Comment[] }`. Copy each",
-      "Comment's `sources` verbatim from worker findings. Calling this ends",
+      "Comment's `sources` verbatim from worker findings. A valid call ends",
       "the review; an empty `comments` array is the correct submission for a",
-      "clean diff.",
+      "clean diff. A call with invalid input returns the validation error:",
+      "fix the input and call again.",
     ].join(" "),
     inputSchema: geminiPair.requestSchema,
     execute: (args: unknown) => {
@@ -556,8 +629,8 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
         dispatch_worker: dispatchHandle.tool,
         submit_review: submitReviewTool,
       },
-      stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
-      prepareStep: meter.prepareStep,
+      stopWhen: bossStopConditions(stepCap, () => submittedRaw !== undefined),
+      prepareStep: makeBossPrepareStep({ stepCap, meter }),
       onStepFinish: meter.onStepFinish,
       ...(primaryInfo.providerOptions !== undefined
         ? { providerOptions: primaryInfo.providerOptions }
@@ -580,7 +653,22 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     }
 
     if (submittedRaw === undefined) {
-      throw new Error("boss ended without calling submit_review (no final comment set emitted)");
+      // Fail loudly: a 0-comment review here would be a false-clean.
+      const steps = await result.steps;
+      const rejected = steps
+        .at(-1)
+        ?.toolCalls.find((c) => c.toolName === "submit_review" && c.invalid === true);
+      throw new Error(
+        describeMissingSubmit({
+          stepCount: steps.length,
+          stepCap,
+          rejectedIssues:
+            rejected === undefined
+              ? undefined
+              : (schemaIssues(geminiPair.requestSchema, rejected.input) ??
+                errorSummary(rejected.error)),
+        }),
+      );
     }
     // Coerce string-form numeric literals back to numbers. No-op when the
     // schema contained no numeric-literal-union (geminiPair is identity).
@@ -745,6 +833,41 @@ const BossOutputSchema = z.object({
     .array(CommentSchema)
     .describe("Final review-comment array. Sources must be copied verbatim from worker outputs."),
 });
+
+const SUBMIT_ISSUES_CHAR_CAP = 400;
+
+/** The schema issues of `value`, on one line, or `undefined` when it parses. */
+function schemaIssues(schema: z.ZodType, value: unknown): string | undefined {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return undefined;
+  return truncate(z.prettifyError(parsed.error).replace(/\s*\n\s*/g, " "), SUBMIT_ISSUES_CHAR_CAP);
+}
+
+/**
+ * The error text for a boss loop that ended with no valid `submit_review`
+ * call. The harness keeps only the first 80 characters in its top-level
+ * message (the full text stays on `cause`), so the reason comes first.
+ */
+function describeMissingSubmit(opts: {
+  stepCount: number;
+  stepCap: number;
+  /**
+   * Set when the last step made a `submit_review` call that failed input
+   * validation: its schema issues, or the SDK error when the input did not
+   * parse. `undefined` when there was no such call.
+   */
+  rejectedIssues: string | undefined;
+}): string {
+  const at = `step ${opts.stepCount}/${opts.stepCap}`;
+  if (opts.rejectedIssues !== undefined) {
+    return `boss submit_review input invalid at ${at}: ${opts.rejectedIssues}`;
+  }
+  const where =
+    opts.stepCount >= opts.stepCap
+      ? `final ${at} made no valid submit_review call`
+      : `stopped at ${at} with no tool call`;
+  return `boss ended without calling submit_review (${where}; no final comment set emitted)`;
+}
 
 function normalizeBossComments(comments: Comment[]): Comment[] {
   // The boss-emitted ids are LLM-authored placeholders; re-derive stable

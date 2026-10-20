@@ -1844,6 +1844,14 @@ ADR-0029 status flipped to Superseded with a pointer here; the original M14-secu
 
 **Unaffected and reaffirmed:** ADR-0033's per-tier semaphores become a client/limit concern; the `CommentSet` output contract is canonical in both paths; the M14 dogfood limitation recorded above (boss laziness, `project_warden_m14_boss_laziness.md`) is now *evidence for the pivot* rather than an embarrassment — a hand-rolled loop that emits 0 comments on a reviewable diff is the argument for handing the loop to a runtime.
 
+**Amendment 2026-10-20 — the last boss step is a submit step.** §3 says that the final round emits the comment set. The loop did not make sure of this. It stopped on `stepCountIs(stepCap)`, so a boss that dispatched a worker in its last allowed step never called `submit_review`, and the review failed with exit 1. This failed every time with `WARDEN_REVIEW_BOSS_ROUNDS=1` (smoke scenario 2). It also failed at the default of 5 rounds on alfred PR #254 (2026-06-24).
+
+- **Final step.** The boss `prepareStep` hook (`makeBossPrepareStep` in `boss-loop.ts`) sends only `submit_review` on the last allowed step (`stepNumber === stepCap - 1`). It also appends a `<final_step>` user message that tells the boss to submit now. The tool results of the steps before stay in the messages, so the boss can use a worker result from the step before. The hook calls `CallUsageMeter.prepareStep` first on every step, so the usage count does not change.
+- **No forced tool choice.** The hook does not set `toolChoice`. Anthropic rejects a forced tool choice when extended thinking is on. The tool set and the instruction are sufficient in the live smoke.
+- **`stepCap === 1`.** The first step is also the final step. The boss cannot dispatch a worker. It adjudicates the Round 0 outputs (ADR-0031) and the det-priors only. This is the cost trade-off that §3 accepts for one round.
+- **Invalid submit.** The loop now stops on a valid `submit_review` call (`bossStopConditions`), not on `hasToolCall("submit_review")`. Before, a call that failed input validation also stopped the loop, with no retry. Now the boss sees the validation error in the next step and can submit again.
+- **Failure stays loud.** If the final step makes no valid `submit_review` call, `runBossLoop()` still throws. The error names the step, the step cap, and the schema issues of a rejected call. A 0-comment result here would be a false-clean, so the loop does not return one.
+
 ---
 
 ## ADR-0031 — M15: review-eval + boss-loop calibration + Gemini schema adapter
