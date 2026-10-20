@@ -254,7 +254,9 @@ function extractEnvClaims(doc: DocFile): EnvClaim[] {
   ENV_CLAIM_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = ENV_CLAIM_RE.exec(doc.content)) !== null) {
-    const envVar = m[1]!;
+    const envVar = m[1];
+    // Group 1 is not optional, so a match always captures it.
+    if (envVar === undefined) throw new Error("ENV_CLAIM_RE matched without its env-var group");
     const predicate = (m[2] ?? "").toLowerCase();
     const defaultValue = m[3] ?? m[4];
     const line = lineOfOffset(doc.content, m.index);
@@ -282,7 +284,9 @@ function extractCliClaims(doc: DocFile): CliClaim[] {
     CLI_CLAIM_RE.lastIndex = 0;
     let cm: RegExpExecArray | null;
     while ((cm = CLI_CLAIM_RE.exec(fenceText)) !== null) {
-      const verb = cm[1]!;
+      const verb = cm[1];
+      // Group 1 is not optional, so a match always captures it.
+      if (verb === undefined) throw new Error("CLI_CLAIM_RE matched without its verb group");
       const flagsBlob = cm[2] ?? "";
       const flags: string[] = [];
       const flagRe = /--[a-z][a-z0-9-]*/g;
@@ -368,8 +372,8 @@ function findZObjectLiteral(sf: ts.SourceFile): ts.ObjectLiteralExpression | und
       ts.isIdentifier(node.expression.expression) &&
       node.expression.expression.text === "z" &&
       node.expression.name.text === "object" &&
-      node.arguments.length >= 1 &&
-      ts.isObjectLiteralExpression(node.arguments[0]!)
+      node.arguments[0] !== undefined &&
+      ts.isObjectLiteralExpression(node.arguments[0])
     ) {
       found = node.arguments[0];
       return;
@@ -391,8 +395,9 @@ function analyzeZodChain(expr: ts.Expression): EnvFact | undefined {
     if (ts.isCallExpression(cur) && ts.isPropertyAccessExpression(cur.expression)) {
       const methodName = cur.expression.name.text;
       if (methodName === "optional") hasOptional = true;
-      if (methodName === "default" && cur.arguments.length >= 1) {
-        defaultLiteral = literalToString(cur.arguments[0]!);
+      const [firstArg] = cur.arguments;
+      if (methodName === "default" && firstArg !== undefined) {
+        defaultLiteral = literalToString(firstArg);
       }
       cur = cur.expression.expression;
       continue;
@@ -538,13 +543,13 @@ function parseCliFile(abs: string, content: string, out: CliFacts): void {
     return;
   }
   function visit(node: ts.Node): void {
+    const firstArg = ts.isCallExpression(node) ? node.arguments[0] : undefined;
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      node.arguments.length >= 1
+      firstArg !== undefined
     ) {
       const methodName = node.expression.name.text;
-      const firstArg = node.arguments[0]!;
       if (
         methodName === "command" &&
         (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg))
@@ -560,7 +565,8 @@ function parseCliFile(abs: string, content: string, out: CliFacts): void {
       ) {
         // Flag spec like "--rebuild" or "--max-cost <usd>" — extract the leading --name.
         const flagMatch = /--([a-z][a-z0-9-]*)/.exec(firstArg.text);
-        if (flagMatch) out.flags.add(`--${flagMatch[1]!}`);
+        const flagName = flagMatch?.[1];
+        if (flagName !== undefined) out.flags.add(`--${flagName}`);
       }
     }
     ts.forEachChild(node, visit);

@@ -109,9 +109,10 @@ process.stdout.write(`\n[2] Strong-cap saturation does not delay cheap acquires\
       }
     })(),
   ]);
+  const [cheapAt] = cheapAcquiredAt;
   assert(
-    cheapAcquiredAt.length === 1 && cheapAcquiredAt[0]! < SLOT_MS,
-    `cheap acquire happened at ${cheapAcquiredAt[0]}ms (< ${SLOT_MS}ms)`,
+    cheapAcquiredAt.length === 1 && cheapAt !== undefined && cheapAt < SLOT_MS,
+    `cheap acquire happened at ${cheapAt}ms (< ${SLOT_MS}ms)`,
   );
 }
 

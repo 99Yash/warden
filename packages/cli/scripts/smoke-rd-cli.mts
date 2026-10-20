@@ -142,18 +142,20 @@ if (security.evidence?.path !== "src/db.ts" || security.evidence?.line !== 3) {
 }
 
 const perf = parsed.findings.find((f) => f.rdCategory === "Performance");
-const perfMap = mapSeverity(perf!);
+if (!perf) fail("missing Performance finding");
+const perfMap = mapSeverity(perf);
 if (perfMap.tier !== 2 || perfMap.category !== "scalability") {
   fail(`Performance → expected {tier:2, scalability}, got ${JSON.stringify(perfMap)}`);
 }
 
 const maint = parsed.findings.find((f) => f.rdCategory === "Maintainability");
-const maintMap = mapSeverity(maint!);
+if (!maint) fail("missing Maintainability finding");
+const maintMap = mapSeverity(maint);
 if (maintMap.tier !== 3 || maintMap.category !== "clarity") {
   fail(`Maintainability → expected {tier:3, clarity}, got ${JSON.stringify(maintMap)}`);
 }
-if (maint!.severity !== "info") {
-  fail(`non-error/warning severity should normalize to info, got ${maint!.severity}`);
+if (maint.severity !== "info") {
+  fail(`non-error/warning severity should normalize to info, got ${maint.severity}`);
 }
 console.log("✓ parse + category→{tier,category} mapping + evidence snippet");
 

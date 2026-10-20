@@ -69,8 +69,10 @@ function changedTargets(diff: string): string[] {
       // differing rename/copy targets come from their explicit metadata.
       const samePath = /^diff --git a\/(.+) b\/\1$/.exec(line);
       const quoted = /^diff --git ("(?:\\.|[^"\\])*") ("(?:\\.|[^"\\])*")$/.exec(line);
-      const oldPath = quoted === null ? undefined : decodeGitPath(quoted[1]!)?.slice(2);
-      const newPath = quoted === null ? undefined : decodeGitPath(quoted[2]!)?.slice(2);
+      const quotedOld = quoted?.[1];
+      const quotedNew = quoted?.[2];
+      const oldPath = quotedOld === undefined ? undefined : decodeGitPath(quotedOld)?.slice(2);
+      const newPath = quotedNew === undefined ? undefined : decodeGitPath(quotedNew)?.slice(2);
       target = samePath?.[1] ?? (oldPath === newPath ? newPath : undefined);
     } else if (line.startsWith("deleted file mode ")) {
       deleted = true;

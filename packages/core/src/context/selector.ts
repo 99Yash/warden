@@ -195,23 +195,31 @@ export class CheapSignalsSelector implements ContextSelector {
     //     when any of them are missing, semantic stays off and the selector
     //     reduces to its M5 behavior. Voyage failure during a configured run
     //     degrades to cheap-signals + a degraded[] entry; never hard-fails.
-    const semanticReady =
-      this.opts.embeddingProvider != null &&
-      this.opts.embeddingStore != null &&
-      this.opts.chunkStore != null &&
-      typeof this.opts.lockedModelId === "string" &&
-      typeof this.opts.lockedModelVersionForDocument === "string" &&
-      typeof input.diff === "string" &&
-      input.diff.length > 0;
-    if (semanticReady) {
+    const {
+      embeddingProvider,
+      embeddingStore,
+      chunkStore,
+      lockedModelId,
+      lockedModelVersionForDocument,
+    } = this.opts;
+    const { diff } = input;
+    if (
+      embeddingProvider != null &&
+      embeddingStore != null &&
+      chunkStore != null &&
+      typeof lockedModelId === "string" &&
+      typeof lockedModelVersionForDocument === "string" &&
+      typeof diff === "string" &&
+      diff.length > 0
+    ) {
       const semantic = await semanticSignal({
-        diff: input.diff ?? "",
-        embeddingProvider: this.opts.embeddingProvider!,
-        embeddingStore: this.opts.embeddingStore!,
-        chunkStore: this.opts.chunkStore!,
+        diff,
+        embeddingProvider,
+        embeddingStore,
+        chunkStore,
         repoRoot,
-        lockedModelId: this.opts.lockedModelId!,
-        lockedModelVersionForDocument: this.opts.lockedModelVersionForDocument!,
+        lockedModelId,
+        lockedModelVersionForDocument,
       });
       degraded.push(...semantic.degraded);
       for (const [filePath, hit] of semantic.hitsByFile) {

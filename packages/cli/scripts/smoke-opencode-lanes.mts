@@ -1247,6 +1247,7 @@ if (mode === "runfail") {
     timings: { phases: Record<string, number>; tools: { name: string }[]; totalMs: number };
     usage?: { costUsd: number };
   };
+  const lanePhaseMs = timingsFile.timings.phases["lane"];
   const spawnedPhases = ["resolveDiff", "gates", "mcpReady", "settle", "lane", "usage", "postPass"];
   assert(
     timingsFile.version === 1 &&
@@ -1254,7 +1255,8 @@ if (mode === "runfail") {
       timingsFile.usage?.costUsd === 0.0123 &&
       spawnedPhases.every((p) => typeof timingsFile.timings.phases[p] === "number") &&
       timingsFile.timings.tools.some((t) => t.name === "warden_run_det_priors") &&
-      timingsFile.timings.totalMs >= timingsFile.timings.phases["lane"]!,
+      lanePhaseMs !== undefined &&
+      timingsFile.timings.totalMs >= lanePhaseMs,
     "--timings-out records every phase of a spawned run, the tool list, and the session cost",
   );
   assert(
