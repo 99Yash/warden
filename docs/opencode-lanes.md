@@ -49,7 +49,8 @@ resolves it relative to its own module in dev and dist):
   codemode: false}` (the driver re-states the full server object per install
   via `OPENCODE_CONFIG_CONTENT` — the host resolves config per top-level
   key, so a partial override would replace the whole `mcp` key and drop
-  `type`/`codemode`).
+  `type`/`codemode`), and the top-level `compaction: {auto: false}` (see
+  [Compaction is off](#compaction-is-off)).
 
 ## Permission list
 
@@ -99,6 +100,68 @@ Verified at commit `b1e3a7b222` and in the shipped binary v2.0.25:
 Context is re-sent every turn, so even bounded calls compound: a 50 KiB
 page of `decisions.md` or a fixture `diff.patch` costs its tokens on every
 later turn.
+
+## Compaction is off
+
+A review lane must not compact. Compaction replaces the older turns with
+a model-written summary. A lane finding cites the code that the lane
+read, and a summary does not keep that code. So the lane config sets the
+top-level `compaction: {auto: false}`.
+
+Facts from the shipped binary v2.0.32 (the strings, and a loopback
+Anthropic stub that costs $0):
+
+- The config key is top-level `compaction` (`Config.Compaction`: `auto`,
+  `keep.tokens`, `buffer`). No agent field exists, so the key applies to
+  every session on the driver's private `serve`. The default is
+  `{auto: true, keep: 15000}`.
+- OpenCode compacts at two points: before a step when the context is near
+  the model limit (reason `auto`), and after a provider rejects a request
+  as too long (reason `overflow`). With `auto: false`, both return
+  `skipped`. Only a manual compact still runs, and the driver never sends
+  one.
+- Without the key, the stub showed one compaction before the second step
+  (199,000 of 200,000 input tokens) and one after a 400 "prompt is too
+  long". With the key, the stub showed none.
+
+**At the context limit.** The provider rejects the request. The run
+client then writes this event and exits 1:
+
+```json
+{"type":"error","error":{"type":"provider.invalid-request","message":"prompt is too long: …","status":400,"response":{"body":"…"}}}
+```
+
+`provider.invalid-request` is the class of every invalid request. So the
+driver applies the binary's own context-overflow patterns to the message
+and the response body (`isContextOverflowError`). When one matches, the
+lane fails with the reason `context_limit: the lane reached the model
+context limit, and auto-compaction is off (<provider message>)`. This
+check runs before the exit-code check, so the reason does not become
+only `opencode run exited 1`. The lane-health entry is actionable, so
+the result is not clean.
+
+**Compaction count.** The `--format json` stream has no compaction
+event. The run client writes only `step_start`, `text`, `reasoning`,
+`tool_use`, `step_finish`, and `error`. So the driver reads
+`GET /api/session/<id>/message?type=compaction` from the serve API
+before it stops `serve` (`parseSessionCompactions`). The count includes
+completed and failed compactions.
+
+- The `lane-trace` entry ends with `· compactions <n>`, or
+  `· compactions unknown` when the read fails.
+- `DriveLaneResult.compactions` and the `--timings-out` record carry the
+  count.
+- A count above 0 fails a lane that is otherwise `ok`, with the reason
+  `compaction: the lane session compacted <n> times, …`. The findings
+  still go to the post-pass, but the result is not clean. A count above 0
+  means that the binary did not apply the config key.
+
+**How to check.** For an eval run, every OpenCode sample must have
+`compactions 0` in its `lane-trace` entry, and no lane reason may start
+with `compaction:`. `smoke:opencode-lanes` checks the config key, the
+`context_limit` reason, the count parser, and the failed lane for a count
+above 0. After an OpenCode upgrade, repeat the stub check against the new
+binary.
 
 ## Model tier and `--model`
 
@@ -368,14 +431,17 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   killed on every path.
 - Lane `failed` reasons are specific: MCP not ready (never connects,
   failed status, poll rejected), non-zero exit (with the stderr tail),
-  timeout (default 900 s, child killed), error event, `text` part without
+  timeout (default 900 s, child killed), `context_limit` (a provider
+  context-overflow error; see [Compaction is off](#compaction-is-off)),
+  error event, `text` part without
   a `messageID`, `step_start` without a `messageID`, `text` from a message
   with no `step_start` (final message identity unknown), no `step_start`
   in the event stream, no fenced block, multiple fenced json submissions,
-  invalid JSON, no `findings` array, or zero completed
-  `warden_run_det_priors` calls. Only the zero-det-priors failure forwards
-  parsed findings — the timeout, non-zero exit, and error-event paths fail
-  before parsing and forward `findings: []`. `--lanes-out` writes the
+  invalid JSON, no `findings` array, zero completed
+  `warden_run_det_priors` calls, or a session compaction count above 0.
+  Only the zero-det-priors and compaction failures forward parsed
+  findings — the timeout, context-limit, non-zero exit, and error-event
+  paths fail before parsing and forward `findings: []`. `--lanes-out` writes the
   envelope for audit / replay through `warden post-pass`.
 - Output matches `warden post-pass` exactly; exit 1 when
   `isNotClean(result)` (actionable `lane-health` / `diff-source` / `secret-guard`).
@@ -387,14 +453,16 @@ warden opencode-review [--base <ref>] [--model <provider/model#variant>]
   `location[directory]` query as the MCP poll); when known, the
   `lane-trace` entry gains a `· cost $<4dp> · tokens <in>/<out>` suffix
   (`in` = input + cache reads + cache writes). A failed read leaves the
-  entry as it was — usage is telemetry and never fails the lane. The
+  entry as it was — usage is telemetry and never fails the lane. On a
+  spawned run, the entry then ends with `· compactions <n>` (or
+  `unknown`), from the same serve read phase. The
   MCP-warmup failure, empty-scope, and scope-over-ceiling paths have no
   run and no usage.
 - `--timings-out <path>` writes the phase timings as JSON:
-  `{version: 1, timings, runSpawned, model, usage?}`. The driver
+  `{version: 1, timings, runSpawned, model, usage?, compactions?}`. The driver
   records the wall-clock time of each phase that runs: `resolveDiff`,
   `gates`, `mcpReady` (this includes the serve boot), `settle`, `lane`,
-  `usage`, and `postPass`. A phase that does not run has no entry.
+  `usage` (the session usage and compaction reads), and `postPass`. A phase that does not run has no entry.
   `timings.tools` gives the completed calls for each tool and their sum
   of `state.time.end - state.time.start`. The v2.0.25 binary sets these
   two values on each completed `tool_use` part. The start is the time
