@@ -43,7 +43,7 @@ Warden's claim is that every external fact is verified through a citable source.
 ## 4. Environment, subprocesses, and output
 
 - **Configuration goes through `@warden/env`.** `wardenEnv()`, the provider helpers, or the setup and runtime helpers. Never `process.env` in product code. _Gate: `node/no-process-env` (`packages/env` is the owner and is exempt)._
-- **Repo-controlled tools get the deterministic env.** A child process that runs code from the repo under review takes `deterministicProcessEnv()` from `@warden/env`, never the parent env with provider keys in it (ADR-0054). A child that needs more, such as the OpenCode lane, says why at the spawn site. _Review._
+- **Repo-controlled tools get the deterministic env.** A child process that runs code from the repo under review takes `deterministicProcessEnv()` from `@warden/env`, never the parent env with provider keys in it (ADR-0054). A child that needs more, such as the OpenCode lane, says why at the spawn site. A `git` child takes `gitProcessEnv()`, which adds only the named git keys (ADR-0054 amendment 2026-10-20). _Review._
 - **Product code never writes through `console`.** `warden mcp` speaks JSON-RPC over stdio, so one stray `console.log` corrupts the protocol stream. Write to `process.stdout` / `process.stderr` on purpose, or through the CLI's renderer. Scripts are exempt. _Gate: `no-console`._
 - **Never log a full error object.** It can carry a key or a token. Log the message and safe fields. _Review._
 
