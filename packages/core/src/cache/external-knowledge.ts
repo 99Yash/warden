@@ -1,5 +1,5 @@
 import { createId, db, eq, externalKnowledge, sql, type NewExternalKnowledge } from "@warden/db";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import type { SourceType } from "../schema.js";
 
 /**
@@ -37,17 +37,19 @@ export function getCached<T>(queryKey: string, schema: ZodType<T>): CachedEntry<
     .get();
 
   if (!row) return undefined;
+  // A text column can still hold a BLOB or a NULL (a hand edit); a payload that is not text is a miss.
+  const payloadText = z.string().safeParse(row.payload);
   const expiresAt = row.ttlExpiresAt.getTime();
   if (
     !Number.isFinite(expiresAt) ||
     expiresAt <= Date.now() ||
     !Number.isFinite(row.retrievedAt.getTime()) ||
-    typeof row.payload !== "string"
+    !payloadText.success
   )
     return undefined;
   let payload: unknown;
   try {
-    payload = JSON.parse(row.payload);
+    payload = JSON.parse(payloadText.data);
   } catch {
     return undefined;
   }

@@ -7,6 +7,7 @@ import {
   merkle as merkleTable,
   sql,
 } from "@warden/db";
+import { z } from "zod";
 import { isRecord } from "../guards.js";
 import type { ExportCounts, IndexImporter } from "./interfaces.js";
 
@@ -131,7 +132,8 @@ export class SqliteIndexImporter implements IndexImporter {
 }
 
 function parseDate(v: unknown): Date | null {
-  if (typeof v !== "string") return null;
-  const d = new Date(v);
+  const text = z.string().safeParse(v);
+  if (!text.success) return null;
+  const d = new Date(text.data);
   return Number.isNaN(d.getTime()) ? null : d;
 }

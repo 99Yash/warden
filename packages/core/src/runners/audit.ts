@@ -82,16 +82,24 @@ function parseAuditOutput(stdout: string): AuditAdvisory[] | undefined {
   } catch {
     return undefined;
   }
-  if (!raw || typeof raw !== "object") return undefined;
-  if ("advisories" in raw && raw.advisories && typeof raw.advisories === "object") {
-    return parsePnpmShape(Object.values(raw.advisories));
-  }
-  if ("vulnerabilities" in raw && raw.vulnerabilities && typeof raw.vulnerabilities === "object") {
-    return parseNpmShape(Object.values(raw.vulnerabilities));
-  }
+  const output = AuditOutputSchema.safeParse(raw);
+  if (!output.success) return undefined;
+  const { advisories, vulnerabilities } = output.data;
+  if (advisories !== undefined) return parsePnpmShape(Object.values(advisories));
+  if (vulnerabilities !== undefined) return parseNpmShape(Object.values(vulnerabilities));
   // Empty result — both registries omit the key entirely when nothing matched.
   return [];
 }
+
+/** A map of the wrong type reads as absent, the same as a missing map. */
+const optionalMap = z.record(z.string(), z.unknown()).optional().catch(undefined);
+
+/**
+ * The top level of the audit JSON: pnpm v1 keys its advisories by id under
+ * `advisories`, and npm v2 keys its vulnerabilities by package name under
+ * `vulnerabilities`. Each entry is parsed by the shape's own schema.
+ */
+const AuditOutputSchema = z.object({ advisories: optionalMap, vulnerabilities: optionalMap });
 
 /** A field of the wrong type reads as absent, the same as a missing field. */
 const optionalString = z.string().optional().catch(undefined);

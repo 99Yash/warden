@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,6 +154,14 @@ export function buildOpencodeServeCommand(opts: { bin?: string; port: number }):
   };
 }
 
+/**
+ * Whether `server.address()` gave a TCP address. It gives a string for a
+ * pipe or a Unix socket, and `null` when the server does not listen.
+ */
+function isTcpAddress(address: AddressInfo | string | null): address is AddressInfo {
+  return address !== null && typeof address === "object";
+}
+
 /** A free loopback port from the OS (listen on 0, read, close). */
 export function allocFreePort(): Promise<number> {
   return new Promise((resolveP, rejectP) => {
@@ -162,7 +170,7 @@ export function allocFreePort(): Promise<number> {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       server.close(() => {
-        if (address !== null && typeof address === "object") resolveP(address.port);
+        if (isTcpAddress(address)) resolveP(address.port);
         else rejectP(new Error("opencode-review: could not allocate a free port"));
       });
     });
@@ -400,6 +408,15 @@ const LaneErrorSchema = z.looseObject({
     .catch(undefined),
 });
 
+/** A wire id or tool name in the event stream. An empty string reads as absent. */
+const EventIdSchema = z.string().min(1);
+
+/** A `text` part's text. A blank string reads as absent. */
+const EventTextSchema = z.string().refine((text) => text.trim() !== "");
+
+/** `part.state.time` of a completed `tool_use` event, in epoch ms. */
+const ToolTimeSchema = z.object({ start: z.number(), end: z.number() });
+
 /** The fenced JSON submission in the lane's final message. */
 const LaneSubmissionSchema = z.looseObject({ findings: z.array(z.unknown()) });
 
@@ -459,13 +476,12 @@ export function parseLaneEvents(stdout: string): ParsedLane {
     }
     if (!isRecord(record)) continue;
     if (sessionId === undefined) {
-      const sid = record["sessionID"];
-      if (typeof sid === "string" && sid !== "") sessionId = sid;
+      sessionId = EventIdSchema.safeParse(record["sessionID"]).data;
     }
     if (record["type"] === "step_start") {
       const part = asRecord(record["part"]);
-      const id = part?.["messageID"];
-      if (typeof id !== "string" || id === "") {
+      const id = EventIdSchema.safeParse(part?.["messageID"]).data;
+      if (id === undefined) {
         parseError ??= "step_start without messageID in the event stream";
         continue;
       }
@@ -473,13 +489,13 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       lastStepId = id;
     } else if (record["type"] === "text") {
       const part = asRecord(record["part"]);
-      const id = part?.["messageID"];
-      if (typeof id !== "string" || id === "") {
+      const id = EventIdSchema.safeParse(part?.["messageID"]).data;
+      if (id === undefined) {
         parseError ??= "text part without messageID in the event stream";
         continue;
       }
-      const text = part?.["text"];
-      if (typeof text !== "string" || text.trim() === "") continue;
+      const text = EventTextSchema.safeParse(part?.["text"]).data;
+      if (text === undefined) continue;
       const list = textsById.get(id);
       if (list !== undefined) list.push(text);
       else textsById.set(id, [text]);
@@ -487,17 +503,15 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       const part = asRecord(record["part"]);
       // Wire shape is `part.tool` (verified against a live `--format json`
       // stream); `part.name` is accepted as a fallback for forward tolerance.
-      const name = part?.["tool"] ?? part?.["name"];
-      if (typeof name !== "string" || name === "") continue;
+      const name = EventIdSchema.safeParse(part?.["tool"] ?? part?.["name"]).data;
+      if (name === undefined) continue;
       seenByTool.set(name, (seenByTool.get(name) ?? 0) + 1);
       const state = asRecord(part?.["state"]);
       if (state?.["status"] === "completed") {
         completedByTool.set(name, (completedByTool.get(name) ?? 0) + 1);
-        const time = asRecord(state["time"]);
-        const start = time?.["start"];
-        const end = time?.["end"];
-        if (typeof start === "number" && typeof end === "number" && end >= start) {
-          durationByTool.set(name, (durationByTool.get(name) ?? 0) + (end - start));
+        const time = ToolTimeSchema.safeParse(state["time"]).data;
+        if (time !== undefined && time.end >= time.start) {
+          durationByTool.set(name, (durationByTool.get(name) ?? 0) + (time.end - time.start));
         }
       }
     } else if (record["type"] === "error") {
