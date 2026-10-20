@@ -15,6 +15,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveDiff, runPostPass } from "@warden/core";
+import { z } from "zod";
 import { allocFreePort, createOpencodeIsolation } from "../src/opencode/drive.js";
 
 const root = mkdtempSync(join(tmpdir(), "warden-instruction-tree-"));
@@ -34,18 +35,20 @@ const paths = [
   "local/index.ts",
   "node_modules/vendor/index.d.ts",
 ];
+/** The fields the fake provider reads from an Anthropic Messages request; the rest is kept. */
+const ProviderRequestSchema = z.looseObject({
+  tools: z.array(z.looseObject({ name: z.string() })).optional(),
+});
 let requests: Array<Record<string, unknown>> = [];
 let step = 0;
 // oxlint-disable-next-line typescript/no-misused-promises -- a rejected handler crashes the probe, which is the loud failure a smoke run wants
 const provider = createServer(async (req, res) => {
   let body = "";
   for await (const chunk of req) body += chunk.toString();
-  const request = JSON.parse(body) as Record<string, unknown>;
+  const request = ProviderRequestSchema.parse(JSON.parse(body));
   requests.push(request);
   // Title/summary calls have no tools. Reply without advancing the read sequence.
-  const hasRead = (request["tools"] as Array<{ name: string }> | undefined)?.some(
-    (t) => t.name === "read",
-  );
+  const hasRead = request.tools?.some((t) => t.name === "read");
   const path = hasRead ? paths[step++] : undefined;
   res.writeHead(200, { "content-type": "text/event-stream" });
   const content =
@@ -95,7 +98,11 @@ async function readProbe(directory: string) {
   step = 0;
   const port = await allocFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const providerPort = (provider.address() as { port: number }).port;
+  const providerAddress = provider.address();
+  if (providerAddress === null || typeof providerAddress === "string") {
+    throw new Error("probe: the fake provider is not listening on a TCP port");
+  }
+  const providerPort = providerAddress.port;
   const env = {
     ...process.env,
     ...isolation.env,

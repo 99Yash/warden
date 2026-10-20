@@ -17,6 +17,7 @@ import {
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CommentSetSchema, runPostPass, type Comment, type LaneOutput } from "@warden/core";
+import { z } from "zod";
 
 const CLI_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TMP_ROOT = mkdtempSync(resolve(tmpdir(), "warden-mcp-post-pass-"));
@@ -107,7 +108,21 @@ function mkLane(
  * supplied id.
  */
 function claimOf(f: Record<string, unknown>): string {
-  return f["claim"] as string;
+  const claim = f["claim"];
+  if (typeof claim !== "string") throw new Error("smoke: a fixture finding has no string claim");
+  return claim;
+}
+
+/** The exit status and stdout that `execFileSync` attaches to the error it throws. */
+const ExecFailureSchema = z.object({
+  status: z.number().nullish(),
+  stdout: z.string().optional(),
+});
+
+/** Exit status and stdout of a failed `execFileSync`; -1 and "" when the error does not carry them. */
+function execFailure(err: unknown): { exit: number; out: string } {
+  const parsed = ExecFailureSchema.safeParse(err);
+  return { exit: parsed.data?.status ?? -1, out: parsed.data?.stdout ?? "" };
 }
 
 try {
@@ -613,13 +628,13 @@ try {
   const CORE_SRC = resolve(CLI_ROOT, "..", "core", "src");
   const reached = new Set<string>();
   const stack = [resolve(CORE_SRC, "post-pass.ts")];
-  while (stack.length > 0) {
-    const file = stack.pop() as string;
+  for (let file = stack.pop(); file !== undefined; file = stack.pop()) {
     if (reached.has(file)) continue;
     reached.add(file);
     const src = readFileSync(file, "utf8");
     for (const m of src.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
-      const rel = m[1] as string;
+      const rel = m[1];
+      if (rel === undefined) continue;
       const abs = resolve(dirname(file), rel.replace(/\.js$/, ".ts"));
       if (abs.startsWith(CORE_SRC)) stack.push(abs);
     }
@@ -711,8 +726,7 @@ try {
       },
     );
   } catch (err) {
-    exit1 = (err as { status?: number }).status ?? -1;
-    out12c = (err as { stdout?: string }).stdout ?? "";
+    ({ exit: exit1, out: out12c } = execFailure(err));
   }
   assert(exit1 === 1, `empty lanes exits 1 (got ${exit1})`);
   const parsed12c = CommentSetSchema.safeParse(JSON.parse(out12c));
@@ -764,8 +778,7 @@ try {
       },
     );
   } catch (err) {
-    badBaseExit = (err as { status?: number }).status ?? -1;
-    out12dBase = (err as { stdout?: string }).stdout ?? "";
+    ({ exit: badBaseExit, out: out12dBase } = execFailure(err));
   }
   assert(badBaseExit === 1, `bad --base exits 1 (got ${badBaseExit})`);
   const parsed12dBase = CommentSetSchema.safeParse(JSON.parse(out12dBase));
@@ -804,8 +817,7 @@ try {
       },
     );
   } catch (err) {
-    emptyDiffExit = (err as { status?: number }).status ?? -1;
-    out12dEmpty = (err as { stdout?: string }).stdout ?? "";
+    ({ exit: emptyDiffExit, out: out12dEmpty } = execFailure(err));
   }
   assert(emptyDiffExit === 1, `empty --diff-file exits 1 (got ${emptyDiffExit})`);
   const parsed12dEmpty = CommentSetSchema.safeParse(JSON.parse(out12dEmpty));
@@ -870,8 +882,7 @@ try {
     );
     exit14 = 0;
   } catch (err) {
-    exit14 = (err as { status?: number }).status ?? -1;
-    out14 = (err as { stdout?: string }).stdout ?? "";
+    ({ exit: exit14, out: out14 } = execFailure(err));
   }
   assert(exit14 === 0, `pruned diff with ok + empty exits 0 (got ${exit14})`);
   const parsed14 = CommentSetSchema.safeParse(JSON.parse(out14));

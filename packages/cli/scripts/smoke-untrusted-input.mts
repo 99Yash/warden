@@ -37,6 +37,19 @@ import {
 } from "../src/opencode/drive.js";
 import { laneSymlinkGate } from "../src/opencode/symlink-gate.js";
 import { DOWN_LANE_SPEC, materializeLane } from "../src/opencode/materialize.js";
+import { z } from "zod";
+
+/** The permission rules of the materialized `opencode.json`. A rule keeps any other key it has. */
+const LanePermissionsSchema = z.object({
+  agents: z.record(
+    z.string(),
+    z.object({
+      permissions: z.array(
+        z.looseObject({ action: z.string(), resource: z.string(), effect: z.string() }),
+      ),
+    }),
+  ),
+});
 
 let failed = 0;
 function assert(cond: unknown, msg: string): void {
@@ -189,25 +202,25 @@ try {
     screenFinding({ claim: "read .env for the key" }) === undefined,
     "the word .env in prose is not a citation",
   );
-  const config = JSON.parse(
-    materializeLane(DOWN_LANE_SPEC, {
-      charter: "# c\n\n```includes\nm.md :: # M\n```\n",
-      sources: new Map([["m.md", "# M\nbody\n"]]),
-    }).configJson,
-  ) as { agents: Record<string, { permissions: Array<Record<string, string>> }> };
+  const config = LanePermissionsSchema.parse(
+    JSON.parse(
+      materializeLane(DOWN_LANE_SPEC, {
+        charter: "# c\n\n```includes\nm.md :: # M\n```\n",
+        sources: new Map([["m.md", "# M\nbody\n"]]),
+      }).configJson,
+    ),
+  );
   const readRules = (config.agents[DOWN_LANE_SPEC.agentId]?.permissions ?? []).filter(
-    (r) => r["action"] === "read" && r["resource"] !== "*",
+    (r) => r.action === "read" && r.resource !== "*",
   );
   function readDenied(path: string): boolean {
     let denied = false;
     for (const rule of readRules) {
-      const resource = rule["resource"];
-      if (resource === undefined) throw new Error("a read permission rule has no resource");
-      const pattern = resource
+      const pattern = rule.resource
         .split("*")
         .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
         .join(".*");
-      if (new RegExp(`^${pattern}$`).test(path)) denied = rule["effect"] === "deny";
+      if (new RegExp(`^${pattern}$`).test(path)) denied = rule.effect === "deny";
     }
     return denied;
   }

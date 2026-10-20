@@ -83,12 +83,14 @@ assert(origParseNumeric.success, `original schema still accepts numeric input`);
 // -----------------------------------------------------------------------
 process.stdout.write(`\n[3] responseTransform coerces strings back to numbers\n`);
 
-const transformed = pair2.responseTransform({ tier: "3" }) as { tier: unknown };
+const transformed = pair2.responseTransform({ tier: "3" });
+// A view of the one field this step checks; the parse throws if the result is not an object.
+const transformedTier = z.object({ tier: z.unknown() }).parse(transformed).tier;
 assert(
-  typeof transformed.tier === "number",
-  `tier coerced to number (got ${typeof transformed.tier})`,
+  typeof transformedTier === "number",
+  `tier coerced to number (got ${typeof transformedTier})`,
 );
-assert(transformed.tier === 3, `tier value preserved (got ${transformed.tier as number})`);
+assert(transformedTier === 3, `tier value preserved (got ${JSON.stringify(transformedTier)})`);
 
 // Round-trip: original schema accepts the post-transform value.
 const roundTrip = TopLevel.safeParse(transformed);
@@ -142,9 +144,10 @@ const wireBoss = {
 const reqParse = pair4.requestSchema.safeParse(wireBoss);
 assert(reqParse.success, `requestSchema parses string-form BossOutputSchema (wire shape)`);
 
-const coerced = pair4.responseTransform(reqParse.success ? reqParse.data : wireBoss) as {
-  comments: { tier: unknown }[];
-};
+// A loose view: it checks the path to each `tier` and keeps every other key for the round-trip.
+const coerced = z
+  .looseObject({ comments: z.array(z.looseObject({ tier: z.unknown() })) })
+  .parse(pair4.responseTransform(reqParse.success ? reqParse.data : wireBoss));
 const tiersAreNumbers = coerced.comments.every((c) => typeof c.tier === "number");
 assert(
   tiersAreNumbers,
@@ -174,12 +177,11 @@ assert(present.success, `present optional field accepts string`);
 const absent = pair5.requestSchema.safeParse({ required: "2" });
 assert(absent.success, `absent optional field is fine`);
 
-const coerced5 = pair5.responseTransform(present.success ? present.data : {}) as {
-  required: unknown;
-  optional: unknown;
-};
-assert(coerced5.required === 2, `required coerced (got ${coerced5.required as number})`);
-assert(coerced5.optional === 3, `optional coerced (got ${coerced5.optional as number})`);
+const coerced5 = z
+  .object({ required: z.unknown(), optional: z.unknown() })
+  .parse(pair5.responseTransform(present.success ? present.data : {}));
+assert(coerced5.required === 2, `required coerced (got ${JSON.stringify(coerced5.required)})`);
+assert(coerced5.optional === 3, `optional coerced (got ${JSON.stringify(coerced5.optional)})`);
 
 // -----------------------------------------------------------------------
 

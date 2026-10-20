@@ -115,9 +115,9 @@ function errorText(error) {
  * @returns {string}
  */
 function capturedStdout(error) {
-  const stdout = /** @type {{ stdout?: unknown }} */ (error).stdout;
+  if (typeof error !== "object" || error === null || !("stdout" in error)) return "";
 
-  return typeof stdout === "string" ? stdout : "";
+  return typeof error.stdout === "string" ? error.stdout : "";
 }
 
 /**

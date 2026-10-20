@@ -27,7 +27,7 @@ mkdirSync(TMP_ROOT, { recursive: true });
 
 const { makeLookupTypeDefTool } = await import("@warden/core");
 
-import type { DegradedEntry } from "@warden/core";
+import type { DegradedEntry, LookupTypeDefResult } from "@warden/core";
 
 let failed = 0;
 function assert(cond: unknown, msg: string): void {
@@ -44,28 +44,31 @@ process.stdout.write(`\n[1] makeLookupTypeDefTool — node_modules/ missing\n`);
 const degraded: DegradedEntry[] = [];
 const t = makeLookupTypeDefTool({ repoRoot: TMP_ROOT, degraded });
 
-interface ToolExecutor {
-  execute?: (
-    args: { package: string; symbol: string },
-    options: Record<string, unknown>,
-  ) => Promise<{ found: boolean; reason?: string }>;
-}
-
-const execute = (t as ToolExecutor).execute;
+const execute = t.execute;
 if (!execute) {
   process.stdout.write(`  ✗ tool descriptor exposes no execute()\n`);
   process.exit(1);
 }
 
+// The AI SDK `tool().execute` may return an AsyncIterable. This tool returns
+// one result, so a stream is a failure of the smoke.
+const lookup = async (
+  args: { package: string; symbol: string },
+  toolCallId: string,
+): Promise<LookupTypeDefResult> => {
+  const result = await execute(args, { toolCallId, messages: [] });
+  if (Symbol.asyncIterator in result) throw new Error("lookupTypeDef returned a stream");
+  return result;
+};
+
+const reasonOf = (r: LookupTypeDefResult): string | undefined => (r.found ? undefined : r.reason);
+
 // First call: should push exactly one actionable degraded entry.
-const r1 = await execute(
-  { package: "drizzle-orm", symbol: "with" },
-  { toolCallId: "test-1", messages: [] },
-);
+const r1 = await lookup({ package: "drizzle-orm", symbol: "with" }, "test-1");
 assert(r1.found === false, "first call returns found:false");
 assert(
-  r1.reason === "package_not_installed",
-  `first call reason is package_not_installed (got ${r1.reason})`,
+  reasonOf(r1) === "package_not_installed",
+  `first call reason is package_not_installed (got ${reasonOf(r1)})`,
 );
 assert(
   degraded.length === 1,
@@ -85,14 +88,11 @@ assert(
 );
 
 // Second call: should NOT push another entry; collector is once-per-review.
-const r2 = await execute(
-  { package: "react", symbol: "useState" },
-  { toolCallId: "test-2", messages: [] },
-);
+const r2 = await lookup({ package: "react", symbol: "useState" }, "test-2");
 assert(r2.found === false, "second call returns found:false");
 assert(
-  r2.reason === "package_not_installed",
-  `second call reason is package_not_installed (got ${r2.reason})`,
+  reasonOf(r2) === "package_not_installed",
+  `second call reason is package_not_installed (got ${reasonOf(r2)})`,
 );
 assert(
   degraded.length === 1,
@@ -100,10 +100,7 @@ assert(
 );
 
 // Third call into a third "package" to be extra sure — still no new entry.
-const r3 = await execute(
-  { package: "ai", symbol: "generateText" },
-  { toolCallId: "test-3", messages: [] },
-);
+const r3 = await lookup({ package: "ai", symbol: "generateText" }, "test-3");
 assert(r3.found === false, "third call returns found:false");
 assert(
   degraded.length === 1,

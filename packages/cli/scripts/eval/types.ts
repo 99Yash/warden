@@ -5,10 +5,12 @@
  * and `run.mts` reads each config's exported `config: EvalConfig` value.
  *
  * Intentionally non-circular and lightweight: no `@warden/core` import,
- * no `@warden/ai` import. The harness call site lives in `run.mts`.
+ * no `@warden/ai` import. The harness call site lives in `run.mts`. The
+ * one runtime import is zod, for the `meta.json` schema.
  */
 
 import type { BossLoopConfig } from "@warden/core";
+import { z } from "zod";
 
 /**
  * A candidate harness configuration the eval suite tests. `name` is used
@@ -89,13 +91,14 @@ export interface Fixture {
   sparseReason?: string;
 }
 
-/** Shape of a real-PR fixture's optional `meta.json`. */
-export interface FixtureMeta {
+/** Shape of a real-PR fixture's optional `meta.json`. Readers parse the file with it. */
+export const FixtureMetaSchema = z.object({
   /** Logical repo name resolved to a path by `run.mts` (e.g. "warden", "alfred"). */
-  repo: string;
+  repo: z.string(),
   /** Commit-ish to check out (the PR head; its tree is the post-PR ground truth). */
-  commit: string;
-}
+  commit: z.string(),
+});
+export type FixtureMeta = z.infer<typeof FixtureMetaSchema>;
 
 /**
  * One sample of running one config against one fixture. The eval suite

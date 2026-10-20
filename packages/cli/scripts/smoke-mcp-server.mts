@@ -23,6 +23,7 @@ import {
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import {
   LookupTypeDefResultSchema,
   MAX_TOOL_RESULT_BYTES,
@@ -437,19 +438,22 @@ try {
     const send = (msg: Record<string, unknown>): void => {
       child.stdin.write(`${JSON.stringify(msg)}\n`);
     };
-    const waitFor = (id: number, timeoutMs = 10_000): Promise<Record<string, unknown>> =>
+    // A JSON-RPC message on one stdout line: a response carries `id` and,
+    // on success, `result`. The asserts check the values.
+    const RpcLineSchema = z.looseObject({ id: z.unknown(), result: z.unknown() });
+    const waitFor = (id: number, timeoutMs = 10_000): Promise<z.infer<typeof RpcLineSchema>> =>
       new Promise((resolveWait, rejectWait) => {
         const started = Date.now();
         const poll = (): void => {
           const line = childOut.split("\n").find((l) => {
             try {
-              return (JSON.parse(l) as { id?: number }).id === id;
+              return RpcLineSchema.safeParse(JSON.parse(l)).data?.id === id;
             } catch {
               return false;
             }
           });
           if (line) {
-            resolveWait(JSON.parse(line) as Record<string, unknown>);
+            resolveWait(RpcLineSchema.parse(JSON.parse(line)));
           } else if (Date.now() - started > timeoutMs) {
             rejectWait(
               new Error(`timeout waiting for response id ${id}; stderr so far: ${childErr}`),
@@ -485,11 +489,13 @@ try {
     // must still be written, and only then may the server close.
     child.stdin.end();
     const response = await waitFor(2);
-    const parsed = response as { result?: { content?: Array<{ text?: string }> } };
-    const textBlock = parsed.result?.content?.[0]?.text;
-    let toolEnvelope: { status?: string } | undefined;
+    const firstBlock = CallToolResultSchema.safeParse(response.result).data?.content[0];
+    const textBlock = firstBlock?.type === "text" ? firstBlock.text : undefined;
+    let toolEnvelope: { status: string } | undefined;
     try {
-      toolEnvelope = textBlock ? (JSON.parse(textBlock) as { status?: string }) : undefined;
+      toolEnvelope = textBlock
+        ? ToolResultEnvelopeSchema.safeParse(JSON.parse(textBlock)).data
+        : undefined;
     } catch {
       toolEnvelope = undefined;
     }

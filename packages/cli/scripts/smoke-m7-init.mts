@@ -47,7 +47,7 @@ try {
   assert(Array.isArray(dbRows), "db().select().from(chunks).all() returns array");
 } catch (err) {
   failed++;
-  process.stdout.write(`  ✗ db() crashed: ${(err as Error).message}\n`);
+  process.stdout.write(`  ✗ db() crashed: ${err instanceof Error ? err.message : String(err)}\n`);
 }
 assert(existsSync(TMP_DB), "fresh cache.sqlite created on disk");
 
@@ -62,7 +62,9 @@ try {
   assert(summary.chunks >= 0, `chunk phase ran (got ${summary.chunks})`);
 } catch (err) {
   failed++;
-  process.stdout.write(`  ✗ runInit dry-run failed: ${(err as Error).message}\n`);
+  process.stdout.write(
+    `  ✗ runInit dry-run failed: ${err instanceof Error ? err.message : String(err)}\n`,
+  );
 }
 
 // 3. no-embeddings banner state. After a dry-run, chunks may exist but no

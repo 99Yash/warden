@@ -17,11 +17,18 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { CommentSetSchema, LaneFindingSchema, isNotClean, type CommentSet } from "@warden/core";
+import {
+  CommentSetSchema,
+  LaneFindingSchema,
+  PostPassLanesSchema,
+  isNotClean,
+  type CommentSet,
+} from "@warden/core";
 import {
   DOWN_LANE_SPEC,
   LANE_MCP_TOOLS,
@@ -79,6 +86,70 @@ function assert(cond: unknown, msg: string): void {
     process.stdout.write(`  ✗ ${msg}\n`);
     failed++;
   }
+}
+
+/** The exit status and stdout that `execFileSync` attaches to the error it throws. */
+const ExecFailureSchema = z.object({
+  status: z.number().nullish(),
+  stdout: z.string().optional(),
+});
+
+/** Exit status and stdout of a failed `execFileSync`; -1 and "" when the error does not carry them. */
+function execFailure(err: unknown): { exit: number; out: string } {
+  const parsed = ExecFailureSchema.safeParse(err);
+  return { exit: parsed.data?.status ?? -1, out: parsed.data?.stdout ?? "" };
+}
+
+/** The paths of the materialized `opencode.json` that section [4] reads. */
+const LaneConfigSchema = z.object({
+  agents: z.record(
+    z.string(),
+    z.looseObject({
+      mode: z.unknown(),
+      model: z.unknown(),
+      permissions: z.array(
+        z.looseObject({ action: z.string(), resource: z.string(), effect: z.string() }),
+      ),
+    }),
+  ),
+  mcp: z.object({ servers: z.record(z.string(), z.looseObject({ codemode: z.unknown() })) }),
+});
+
+/** The paths of `OPENCODE_CONFIG_CONTENT` that section [6] reads; the asserts check the values. */
+const McpConfigContentSchema = z.looseObject({
+  mcp: z.object({
+    servers: z.object({
+      warden: z.looseObject({
+        type: z.unknown(),
+        command: z.unknown(),
+        cwd: z.unknown(),
+        codemode: z.unknown(),
+      }),
+    }),
+  }),
+  provider: z
+    .object({ anthropic: z.object({ options: z.object({ baseURL: z.unknown() }) }) })
+    .optional(),
+});
+
+/** The `--timings-out` file that `writeTimingsOut` (drive.ts) writes, as far as the asserts read it. */
+const TimingsFileSchema = z.object({
+  version: z.number(),
+  runSpawned: z.boolean(),
+  timings: z.object({
+    phases: z.record(z.string(), z.number()),
+    tools: z.array(z.looseObject({ name: z.string() })),
+    totalMs: z.number(),
+  }),
+  usage: z.object({ costUsd: z.number() }).optional(),
+});
+
+/** The port of a server that listens on TCP. */
+function tcpPort(address: AddressInfo | string | null): number {
+  if (address === null || typeof address === "string") {
+    throw new Error("smoke: the server is not listening on a TCP port");
+  }
+  return address.port;
 }
 
 function readCommitted(rel: string): string {
@@ -207,15 +278,14 @@ try {
     "one changed value breaks the config match",
   );
   const changedSources = new Map(input.sources);
-  const charterIncludes = parseCharterIncludes(input.charter);
-  const firstFile = charterIncludes[0]?.file as string;
-  const firstHeading = charterIncludes[0]?.heading as string;
+  const [firstInclude] = parseCharterIncludes(input.charter);
+  if (firstInclude === undefined) throw new Error("smoke: the down charter has no includes entry");
+  const { file: firstFile, heading: firstHeading } = firstInclude;
+  const firstSource = input.sources.get(firstFile);
+  if (firstSource === undefined) throw new Error(`smoke: no source text for ${firstFile}`);
   changedSources.set(
     firstFile,
-    (input.sources.get(firstFile) as string).replace(
-      `${firstHeading}\n`,
-      `${firstHeading}\nExtra line.\n`,
-    ),
+    firstSource.replace(`${firstHeading}\n`, `${firstHeading}\nExtra line.\n`),
   );
   const driftedSource = materializeLane(DOWN_LANE_SPEC, {
     charter: input.charter,
@@ -291,12 +361,10 @@ try {
   // [4] generated config — deny-first, read-only, codemode off, schema in prompt.
   // ---------------------------------------------------------------------------
   process.stdout.write("\n[4] config — deny-first permissions, codemode false, schema embedded\n");
-  const config = JSON.parse(runA.configJson) as Record<string, unknown>;
-  const agent = (config["agents"] as Record<string, Record<string, unknown>>)[
-    DOWN_LANE_SPEC.agentId
-  ];
+  const config = LaneConfigSchema.parse(JSON.parse(runA.configJson));
+  const agent = config.agents[DOWN_LANE_SPEC.agentId];
   assert(agent !== undefined, `agent ${DOWN_LANE_SPEC.agentId} exists`);
-  const permissions = agent?.["permissions"] as Array<Record<string, string>>;
+  const permissions = agent?.permissions ?? [];
   assert(
     permissions[0]?.action === "*" &&
       permissions[0]?.resource === "*" &&
@@ -328,13 +396,13 @@ try {
   for (const banned of ["shell", "edit", "webfetch", "subagent", "*"]) {
     assert(!allowed.includes(banned), `no allow for ${banned}`);
   }
-  const servers = (config["mcp"] as Record<string, Record<string, Record<string, unknown>>>)[
-    "servers"
-  ];
-  assert(servers?.["warden"]?.["codemode"] === false, "warden MCP server runs with codemode:false");
-  assert(agent?.["mode"] === "primary", "agent mode is primary (--agent selects it regardless)");
   assert(
-    typeof agent?.["model"] === "string",
+    config.mcp.servers["warden"]?.codemode === false,
+    "warden MCP server runs with codemode:false",
+  );
+  assert(agent?.mode === "primary", "agent mode is primary (--agent selects it regardless)");
+  assert(
+    typeof agent?.model === "string",
     "agent carries a model default (--model still required: run ignores it)",
   );
   const schemaJson = JSON.stringify(z.toJSONSchema(LaneFindingSchema), null, 2);
@@ -514,7 +582,7 @@ try {
   const inlineVerdict = evaluateLane(inlineTicks, { exitCode: 0, stdout: "", timedOut: false });
   assert(
     inlineVerdict.status === "ok" &&
-      (inlineVerdict.findings[0] as Record<string, unknown>)["explanation"] ===
+      LaneFindingSchema.safeParse(inlineVerdict.findings[0]).data?.explanation ===
         "wrap it in ``` fences",
     "inline triple backticks inside JSON do not end the block",
   );
@@ -583,7 +651,7 @@ try {
     const verdict = evaluateLane(parseLaneEvents(c.stdout), { ...c.process, stdout: c.stdout });
     assert(
       verdict.status === "failed" &&
-        (verdict.reason ?? "").includes(c.reason.split(" ")[0] as string),
+        (verdict.reason ?? "").includes(c.reason.split(" ")[0] ?? c.reason),
       `${c.name} → failed (${verdict.reason ?? "no reason"})`,
     );
   }
@@ -808,28 +876,30 @@ try {
     buildLaneMessage("origin/main").includes("origin/main"),
     "lane message names the base ref",
   );
-  const content = JSON.parse(
-    buildMcpConfigContent({ command: ["node", "x", "mcp"], cwd: "/tmp/r" }),
-  ) as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
-  const wardenServer = content["mcp"]?.["servers"]?.["warden"];
+  const content = McpConfigContentSchema.parse(
+    JSON.parse(buildMcpConfigContent({ command: ["node", "x", "mcp"], cwd: "/tmp/r" })),
+  );
+  const wardenServer = content.mcp.servers.warden;
   assert(
-    Array.isArray(wardenServer?.["command"]) &&
-      wardenServer?.["type"] === "local" &&
-      wardenServer?.["codemode"] === false &&
-      wardenServer["cwd"] === "/tmp/r",
+    Array.isArray(wardenServer.command) &&
+      wardenServer.type === "local" &&
+      wardenServer.codemode === false &&
+      wardenServer.cwd === "/tmp/r",
     "config content carries the full server object (host replaces the whole mcp key)",
   );
   assert(!("provider" in content), "config content has no provider key without a base URL");
-  const gatewayContent = JSON.parse(
-    buildMcpConfigContent({
-      command: ["node", "x", "mcp"],
-      cwd: "/tmp/r",
-      anthropicBaseUrl: "https://gw.example/anthropic/v1",
-    }),
-  ) as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
+  // The parse proves that the `mcp` key is still there next to `provider`.
+  const gatewayContent = McpConfigContentSchema.parse(
+    JSON.parse(
+      buildMcpConfigContent({
+        command: ["node", "x", "mcp"],
+        cwd: "/tmp/r",
+        anthropicBaseUrl: "https://gw.example/anthropic/v1",
+      }),
+    ),
+  );
   assert(
-    gatewayContent["provider"]?.["anthropic"]?.["options"]?.["baseURL"] ===
-      "https://gw.example/anthropic/v1" && gatewayContent["mcp"] !== undefined,
+    gatewayContent.provider?.anthropic.options.baseURL === "https://gw.example/anthropic/v1",
     "config content forwards ANTHROPIC_BASE_URL as provider.anthropic.options.baseURL",
   );
   const mcpCommand = resolveWardenMcpCommand();
@@ -837,7 +907,7 @@ try {
   assert(mcpCommand[0] === process.execPath, "warden MCP command launches this exact node");
   const flags = resolveLoaderFlags(["--import", "tsx/esm", "--other"]);
   assert(
-    (flags[1] as string).startsWith("/") && flags[1] !== "tsx/esm",
+    flags[1]?.startsWith("/") === true && flags[1] !== "tsx/esm",
     `bare tsx/esm resolves to an absolute path (${flags[1]})`,
   );
 
@@ -882,7 +952,7 @@ try {
       res.end(JSON.stringify(body));
     });
     await new Promise<void>((resolveP) => server.listen(0, "127.0.0.1", resolveP));
-    const port = (server.address() as { port: number }).port;
+    const port = tcpPort(server.address());
     try {
       await waitForWardenMcp({
         baseUrl: `http://127.0.0.1:${port}`,
@@ -1125,8 +1195,7 @@ if (mode === "runfail") {
       );
       return { exit: 0, out };
     } catch (err) {
-      const e = err as { status?: number; stdout?: string };
-      return { exit: e.status ?? -1, out: e.stdout ?? "" };
+      return execFailure(err);
     }
   };
 
@@ -1241,12 +1310,7 @@ if (mode === "runfail") {
   });
   delete process.env.WARDEN_SMOKE_FINDING;
   delete process.env.WARDEN_SMOKE_SERVE_PORT;
-  const timingsFile = JSON.parse(readFileSync(timingsPath, "utf8")) as {
-    version: number;
-    runSpawned: boolean;
-    timings: { phases: Record<string, number>; tools: { name: string }[]; totalMs: number };
-    usage?: { costUsd: number };
-  };
+  const timingsFile = TimingsFileSchema.parse(JSON.parse(readFileSync(timingsPath, "utf8")));
   const lanePhaseMs = timingsFile.timings.phases["lane"];
   const spawnedPhases = ["resolveDiff", "gates", "mcpReady", "settle", "lane", "usage", "postPass"];
   assert(
@@ -1269,9 +1333,9 @@ if (mode === "runfail") {
     if (Array.isArray(value)) return value.map(canonical);
     if (typeof value === "object" && value !== null) {
       return Object.fromEntries(
-        Object.keys(value as Record<string, unknown>)
-          .sort()
-          .map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+        Object.entries(value)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, v]) => [k, canonical(v)]),
       );
     }
     return value;
@@ -1328,8 +1392,7 @@ if (mode === "runfail") {
   const secretLanesOut = readFileSync(resolve(REPO, "lanes-secret.json"), "utf8");
   assert(
     !secretLanesOut.includes(fakeToken) &&
-      (JSON.parse(secretLanesOut) as { lanes: Array<{ findings: unknown[] }> }).lanes[0]
-        ?.findings[0] !== undefined &&
+      PostPassLanesSchema.parse(JSON.parse(secretLanesOut)).lanes[0]?.findings[0] !== undefined &&
       secretLanesOut.includes('"secretGuard": "github-token"'),
     "secret guard: --lanes-out writes the placeholder, not the value",
   );
@@ -1644,9 +1707,7 @@ if (mode === "runfail") {
     );
     nobinExit = 0;
   } catch (err) {
-    const e = err as { status?: number; stdout?: unknown };
-    nobinExit = e.status ?? -1;
-    nobinOut = typeof e.stdout === "string" ? e.stdout : "";
+    ({ exit: nobinExit, out: nobinOut } = execFailure(err));
   }
   const nobinSecs = Math.round((Date.now() - nobinStart) / 1000);
   const nobinSet = parseOut(nobinOut);
