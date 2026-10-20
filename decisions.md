@@ -1852,6 +1852,13 @@ ADR-0029 status flipped to Superseded with a pointer here; the original M14-secu
 - **Invalid submit.** The loop now stops on a valid `submit_review` call (`bossStopConditions`), not on `hasToolCall("submit_review")`. Before, a call that failed input validation also stopped the loop, with no retry. Now the boss sees the validation error in the next step and can submit again.
 - **Failure stays loud.** If the final step makes no valid `submit_review` call, `runBossLoop()` still throws. The error names the step, the step cap, and the schema issues of a rejected call. A 0-comment result here would be a false-clean, so the loop does not return one.
 
+**Amendment 2026-10-20 — OpenAI tool strict.** With the OpenAI boss (`gpt-6.1-sol`), each review failed. The boss called `submit_review` with `url: ""` in each source, and `SourceSchema` rejected it. The boss wrote the same value again after the validation error.
+
+- **Cause.** The AI SDK omits `strict` from a function tool unless the tool sets it. The OpenAI Responses API then makes the tool strict: the response echoes `strict: true`. In strict mode, the model must write every property, optional ones too. Constrained decoding then makes the model write `""` for a URL that it does not have, on each retry. A live probe on 2026-10-20 showed this on `gpt-6.1-sol` and `gpt-6-luna`: `strict` omitted gave `url: ""`, and `strict: false` gave no `url`. The `strictJsonSchema: false` fix for issue #29 covers only the `Output.object` response format, not tools.
+- **Fix.** `OPENAI_NON_STRICT_TOOLS` in `packages/ai/src/models.ts` wraps each OpenAI model. It sets `strict: false` on each function tool that does not set `strict`. The zod parse of each tool still validates each value that the model writes, so a source that has a URL must still have a valid URL. Anthropic models do not get the wrapper. `@ai-sdk/anthropic` 3.0.74 does not know `claude-opus-5-5`, so it would ignore `strict` and log a warning for each tool on each step.
+- **No `""` normalization.** `SourceSchema` does not change. The SDK validates the tool input before `execute`, so a fix after the parse comes too late. A `z.preprocess` would change the JSON schema that the provider gets. With strict off, the model omits the field. A non-strict model that still writes `url: ""` fails loudly, and that is correct. `id`, `title`, and `suggestedAction` accept `""`. The verifier drops a citation with an empty `snippet`.
+- **Check.** `pnpm --filter @warden/cli smoke:openai-tool-strict` runs the real boss loop and a real worker against a local HTTP server, with no network. `smoke:m14-boss-loop` now runs with an OpenAI key only.
+
 ---
 
 ## ADR-0031 — M15: review-eval + boss-loop calibration + Gemini schema adapter
