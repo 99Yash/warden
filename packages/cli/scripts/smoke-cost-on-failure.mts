@@ -39,6 +39,7 @@ import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { isRecord } from "@warden/core/guards";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // The local OpenAI server.
@@ -115,6 +116,7 @@ const server = createServer((req, res) => {
 });
 await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const address: AddressInfo | string | null = server.address();
+// oxlint-disable-next-line anti-slop/no-runtime-typeof -- `server.address()` gives `AddressInfo | string | null`, and a string is a pipe address: the check splits the Node API's own union
 const port = typeof address === "object" && address !== null ? address.port : 0;
 const LOCAL_ORIGIN = `http://127.0.0.1:${port}`;
 
@@ -201,13 +203,19 @@ function assert(cond: unknown, msg: string): void {
   }
 }
 
-/** The first item of a parsed JSON array, or `undefined`. */
-// oxlint-disable-next-line anti-slop/no-unknown-returns -- a JSON walker: each caller narrows the item with isRecord
-function firstItem(value: unknown): unknown {
-  if (!Array.isArray(value)) return undefined;
-  const items: unknown[] = value;
-  return items[0];
-}
+/** The old cost fields of the JSON scorecard, and the new `usageUnknownRequests`. */
+const ScorecardCostJsonSchema = z.looseObject({
+  totalCost: z.number(),
+  usageUnknownRequests: z.number(),
+  rows: z
+    .array(
+      z.looseObject({
+        medianCost: z.number(),
+        rawSamples: z.array(z.looseObject({ costUsd: z.number() })).min(1),
+      }),
+    )
+    .min(1),
+});
 
 /** Remove the ANSI color codes of `picocolors`. */
 function plain(text: string): string {
@@ -432,17 +440,8 @@ assert(
   !renderMarkdownTable(exactAgg).includes("≥"),
   "an exact cost report has no ≥ (the old output)",
 );
-const json: unknown = JSON.parse(JSON.stringify(agg));
-const jsonRow = firstItem(isRecord(json) ? json["rows"] : undefined);
-const jsonSample = firstItem(isRecord(jsonRow) ? jsonRow["rawSamples"] : undefined);
 assert(
-  isRecord(json) &&
-    typeof json["totalCost"] === "number" &&
-    isRecord(jsonRow) &&
-    typeof jsonRow["medianCost"] === "number" &&
-    isRecord(jsonSample) &&
-    typeof jsonSample["costUsd"] === "number" &&
-    typeof json["usageUnknownRequests"] === "number",
+  ScorecardCostJsonSchema.safeParse(JSON.parse(JSON.stringify(agg))).success,
   "the JSON keeps totalCost, medianCost, and costUsd, and adds usageUnknownRequests",
 );
 assert(
