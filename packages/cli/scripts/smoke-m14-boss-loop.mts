@@ -23,7 +23,8 @@
  * territory). Gives the boss two plausible reasons to dispatch
  * different workers but doesn't pin any specific count.
  *
- * Skip semantics: `process.exit(2)` when ANTHROPIC_API_KEY is unset.
+ * Skip semantics: `process.exit(2)` when neither ANTHROPIC_API_KEY nor
+ * OPENAI_API_KEY is set. The boss is Opus with an Anthropic key, else GPT.
  *
  * Usage:
  *   pnpm --filter @warden/cli smoke:m14-boss-loop
@@ -94,11 +95,13 @@ const DIFF = [
   ``,
 ].join("\n");
 
-const hasKey =
-  typeof process.env["ANTHROPIC_API_KEY"] === "string" &&
-  process.env["ANTHROPIC_API_KEY"].length > 0;
+// The boss runs on Anthropic when ANTHROPIC_API_KEY is set, else on OpenAI.
+// Either key runs the smoke; the model line below names the boss that ran.
+const hasKey = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"].some(
+  (k) => (process.env[k]?.length ?? 0) > 0,
+);
 if (!hasKey) {
-  process.stdout.write(`\n[skip] ANTHROPIC_API_KEY not set\n`);
+  process.stdout.write(`\n[skip] neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set\n`);
   if (existsSync(TMP_DB)) unlinkSync(TMP_DB);
   if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
   process.exit(2);
@@ -108,6 +111,10 @@ const { runDetPriors } = await import("@warden/core/review-harness/det-priors");
 const { runBossLoop } = await import("@warden/core/review-harness/boss-loop");
 const { ReviewScratchpad } = await import("@warden/core/review-harness/scratchpad");
 const { makeWorkerRoute } = await import("@warden/core/review-harness/workers/dispatch");
+const { getBossModelInfo, getWorkerStrongModelInfo } = await import("@warden/ai");
+process.stdout.write(
+  `\n[models] boss: ${getBossModelInfo().label}; strong worker: ${getWorkerStrongModelInfo().label}\n`,
+);
 
 let failed = 0;
 function assert(cond: unknown, msg: string): void {
@@ -171,6 +178,13 @@ async function runScenario(label: string): Promise<{
   process.stdout.write(
     `  → boss emitted ${result.comments.length} comment(s) in ${wallMs}ms ` +
       `(workers dispatched: ${scratchpad.workerOutputs().length})\n`,
+  );
+  const fmt = (t: import("@warden/core/review-harness/scratchpad").TokenUsage | undefined) =>
+    t === undefined
+      ? "none"
+      : `in=${t.inputTokens} (cached ${t.cachedInputTokens ?? 0}) out=${t.outputTokens}`;
+  process.stdout.write(
+    `  · tokens: boss ${fmt(scratchpad.bossTokens())}; workers ${fmt(scratchpad.workerTokens())}\n`,
   );
   return {
     scratchpad,
