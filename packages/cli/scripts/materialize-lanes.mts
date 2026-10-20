@@ -1,18 +1,19 @@
 /**
- * Slice #42: materialize the down-lane OpenCode agent config from warden's
- * method sources. Usage:
+ * Slice #42: materialize each lane's OpenCode agent config (`LANE_SPECS`)
+ * from warden's method sources. Usage:
  *   pnpm lanes:materialize       # write packages/cli/opencode/*
  *   pnpm lanes:check             # regenerate in memory, fail on drift
+ *
+ * Both modes fail when a materialized prompt loses one of its spec's
+ * required phrases (the read/grep exclusions and the read bound).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
-  CHARTER_PATH,
-  CONFIG_FILENAME,
-  DOWN_LANE_SPEC,
-  PROMPT_FILENAME,
+  LANE_SPECS,
   materializeLane,
+  missingRequiredPhrases,
   parseCharterIncludes,
 } from "../src/opencode/materialize.js";
 
@@ -24,17 +25,30 @@ function readSource(rel: string): string {
   return readFileSync(resolve(REPO_ROOT, rel), "utf8");
 }
 
-const charter = readSource(CHARTER_PATH);
-const sources = new Map<string, string>();
-for (const include of parseCharterIncludes(charter)) {
-  if (!sources.has(include.file)) sources.set(include.file, readSource(include.file));
+const outputs: Array<{ filename: string; content: string }> = [];
+const lostPhrases: string[] = [];
+for (const spec of LANE_SPECS) {
+  const charter = readSource(spec.charterPath);
+  const sources = new Map<string, string>();
+  for (const include of parseCharterIncludes(charter, spec.charterPath)) {
+    if (!sources.has(include.file)) sources.set(include.file, readSource(include.file));
+  }
+  const { prompt, configJson } = materializeLane(spec, { charter, sources });
+  for (const phrase of missingRequiredPhrases(spec, prompt)) {
+    lostPhrases.push(`${spec.promptFilename}: "${phrase}"`);
+  }
+  outputs.push(
+    { filename: spec.promptFilename, content: prompt },
+    { filename: spec.configFilename, content: configJson },
+  );
 }
-const { prompt, configJson } = materializeLane(DOWN_LANE_SPEC, { charter, sources });
 
-const outputs: Array<{ filename: string; content: string }> = [
-  { filename: PROMPT_FILENAME, content: prompt },
-  { filename: CONFIG_FILENAME, content: configJson },
-];
+if (lostPhrases.length > 0) {
+  process.stderr.write(
+    `lanes: a prompt lost a required phrase (restore it in the charter): ${lostPhrases.join("; ")}\n`,
+  );
+  process.exit(1);
+}
 
 if (process.argv.includes("--check")) {
   const drifted = outputs

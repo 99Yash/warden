@@ -20,12 +20,13 @@ import {
 } from "@warden/core";
 import { isRecord } from "@warden/core/guards";
 import { laneSymlinkGate } from "./symlink-gate.js";
-import { DOWN_LANE_SPEC } from "./materialize.js";
+import { DOWN_LANE_SPEC, type LaneSpec } from "./materialize.js";
 import { formatCommentSet } from "../format.js";
 
 /**
  * Slice #42 / ADR-0053 §4: the driver that enforces the publication rule.
- * Runs the down lane in OpenCode, reads its submission from the event
+ * Runs one lane in OpenCode (`DriveOptions.lane`, a `LaneSpec`; the down
+ * lane when absent), reads its submission from the event
  * stream, builds the trusted lane envelope (lane/status/reason/scope are
  * driver-owned — never model text), and publishes only the `runPostPass`
  * `CommentSet`. Deterministic except for the spawned process; no warden
@@ -59,7 +60,7 @@ const MCP_SETTLE_MS = 1000;
 /** Bounded stderr tail kept for failed-lane diagnostics. */
 export const STDERR_TAIL_BYTES = 2048;
 /**
- * Issue #57: the most changed files the down lane can cover. OpenCode
+ * Issue #57: the most changed files a lane can cover. OpenCode
  * starts the step counter at 1 and forces a text-only step at
  * `step >= steps` (`session/runner/llm.ts`; the same check is in the
  * shipped binary v2.0.25), so `steps` leaves `steps - 1` steps that can
@@ -75,7 +76,12 @@ export const STDERR_TAIL_BYTES = 2048;
  * the issue #57 run (`opencode/space-bunny-free`), the lane made 54 tool
  * calls in 900 s, which is also below this ceiling.
  */
-export const DOWN_LANE_MAX_SCOPE_FILES = DOWN_LANE_SPEC.steps - 2;
+function laneScopeCeiling(spec: LaneSpec): number {
+  return spec.steps - 2;
+}
+
+/** The down lane's scope ceiling (`laneScopeCeiling(DOWN_LANE_SPEC)`). */
+export const DOWN_LANE_MAX_SCOPE_FILES = laneScopeCeiling(DOWN_LANE_SPEC);
 /** Grace between SIGTERM and SIGKILL when stopping the serve child. */
 const SERVE_KILL_GRACE_MS = 2000;
 /** Rejection reason when the MCP wait stops because the serve child failed to start. */
@@ -126,6 +132,8 @@ export interface OpencodeCommand {
 export function buildOpencodeCommand(opts: {
   bin?: string;
   serverUrl: string;
+  /** `LaneSpec.agentId` of the lane to run. */
+  agentId: string;
   model: string;
   message: string;
 }): OpencodeCommand {
@@ -136,7 +144,7 @@ export function buildOpencodeCommand(opts: {
       "--server",
       opts.serverUrl,
       "--agent",
-      DOWN_LANE_SPEC.agentId,
+      opts.agentId,
       "--model",
       opts.model,
       "--format",
@@ -192,13 +200,13 @@ export function buildLaneMessage(baseRef: string): string {
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 
-/** Absolute path of the lane's committed `opencode.json`, dev and dist aware. */
-export function resolveLaneConfigPath(): string {
-  const dev = resolve(DIR, "../../opencode/opencode.json");
+/** Absolute path of the lane's committed config (`LaneSpec.configFilename`), dev and dist aware. */
+export function resolveLaneConfigPath(spec: LaneSpec): string {
+  const dev = resolve(DIR, "../../opencode", spec.configFilename);
   if (existsSync(dev)) return dev;
   // Bundled: tsdown copies `opencode/` to `dist/opencode/` (see
   // `packages/cli/tsdown.config.ts`), next to the bundled entry.
-  return resolve(DIR, "opencode/opencode.json");
+  return resolve(DIR, "opencode", spec.configFilename);
 }
 
 /** Absolute path of this warden install's CLI entry (dev source or bundled dist). */
@@ -622,13 +630,14 @@ export function evaluateLane(parsed: ParsedLane, process: LaneProcessResult): La
 /**
  * The lane failure reason for a scope too large to cover, or `undefined`
  * when the scope fits. The reason names the numbers and the derivation of
- * `DOWN_LANE_MAX_SCOPE_FILES`.
+ * `laneScopeCeiling(spec)`.
  */
-export function laneScopeOverCeiling(scope: string[]): string | undefined {
-  if (scope.length <= DOWN_LANE_MAX_SCOPE_FILES) return undefined;
+export function laneScopeOverCeiling(scope: string[], spec: LaneSpec): string | undefined {
+  const ceiling = laneScopeCeiling(spec);
+  if (scope.length <= ceiling) return undefined;
   return (
-    `review target too large: ${scope.length} changed files exceed the down lane ceiling of ` +
-    `${DOWN_LANE_MAX_SCOPE_FILES} (DOWN_LANE_SPEC.steps ${DOWN_LANE_SPEC.steps} - 1 text-only final step ` +
+    `review target too large: ${scope.length} changed files exceed the ${spec.lane} lane ceiling of ` +
+    `${ceiling} (${spec.lane.toUpperCase()}_LANE_SPEC.steps ${spec.steps} - 1 text-only final step ` +
     `- 1 warden_run_det_priors call, at one read per changed file)`
   );
 }
@@ -985,6 +994,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export interface DriveOptions {
   repoRoot: string;
+  /** The lane to run. Absent means `DOWN_LANE_SPEC`. */
+  lane?: LaneSpec;
   baseRef?: string;
   model?: string;
   json?: boolean;
@@ -1075,7 +1086,7 @@ export interface DriveLaneResult {
    * known $0 (the eval does not infer this from `usage`).
    */
   runSpawned: boolean;
-  /** The requested model: `opts.model`, else `DOWN_LANE_SPEC.defaultModel`. */
+  /** The requested model: `opts.model`, else the lane spec's `defaultModel`. */
   model: string;
   /** Phase timings. Optional so other lane drivers (the eval Claude Code lane) can omit them. */
   timings?: DriveTimings;
@@ -1108,6 +1119,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   // (part of the driver contract). The eval runner calls this directly so
   // the scored output is the same published `CommentSet` a user gets.
   const timer = new PhaseTimer();
+  const spec = laneSpecOf(opts);
   const resolved = await timer.time("resolveDiff", () =>
     resolveDiff({
       repoRoot: opts.repoRoot,
@@ -1129,14 +1141,14 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
     // A nested AGENTS.md the diff changes would reach the lane as
     // instructions.
     return (
-      laneScopeOverCeiling(scope) ??
+      laneScopeOverCeiling(scope, spec) ??
       laneInstructionFileGate(resolved.diff) ??
       laneSymlinkGate(resolved.diff, opts.repoRoot)
     );
   });
   if (gateReason !== undefined) {
     const lanes: LaneOutput[] = [
-      { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: gateReason, scope, findings: [] },
+      { lane: spec.lane, status: "failed", reason: gateReason, scope, findings: [] },
     ];
     writeLanesOut(opts, lanes);
     return await buildLaneResult(opts, resolved, lanes, [...(resolved.degraded ?? [])], {
@@ -1149,7 +1161,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   const model = requestedModel(opts);
   const mcpTimeoutMs = (opts.mcpTimeoutSecs ?? DEFAULT_MCP_TIMEOUT_SECS) * 1000;
   const settleMs = opts.mcpSettleMs ?? MCP_SETTLE_MS;
-  const configPath = resolveLaneConfigPath();
+  const configPath = resolveLaneConfigPath(spec);
   // The serve child reads this env password for its API auth
   // (`server-process.ts`: `Env.password`, else a random fallback the run
   // client could never know); the run client sends it back as Basic
@@ -1246,6 +1258,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
 
       const command = buildOpencodeCommand({
         serverUrl: baseUrl,
+        agentId: spec.agentId,
         model,
         message: buildLaneMessage(baseRef),
         ...(opts.opencodeBin !== undefined ? { bin: opts.opencodeBin } : {}),
@@ -1313,12 +1326,13 @@ function writeLanesOut(opts: DriveOptions, lanes: LaneOutput[]): void {
  * read failed.
  */
 function laneTraceEntry(
+  lane: LaneSpec["lane"],
   status: string,
   reason: string | undefined,
   toolCalls: string,
   session?: { usage?: SessionUsage; compactions: number | "unknown" },
 ): DegradedEntry {
-  let message = `lane-trace: down ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`;
+  let message = `lane-trace: ${lane} ${status}${reason !== undefined ? ` (${reason})` : ""} — ${toolCalls === "" ? "no tool calls" : toolCalls}`;
   const usage = session?.usage;
   if (usage !== undefined) {
     const input = usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite;
@@ -1328,8 +1342,13 @@ function laneTraceEntry(
   return { kind: "info", topic: "lane-trace", message };
 }
 
+/** The lane this run drives: `opts.lane`, else the down lane. */
+function laneSpecOf(opts: DriveOptions): LaneSpec {
+  return opts.lane ?? DOWN_LANE_SPEC;
+}
+
 function requestedModel(opts: DriveOptions): string {
-  return opts.model ?? DOWN_LANE_SPEC.defaultModel;
+  return opts.model ?? laneSpecOf(opts).defaultModel;
 }
 
 /**
@@ -1394,15 +1413,16 @@ async function buildFailed(
   timer: PhaseTimer,
 ): Promise<DriveLaneResult> {
   const screenedReason = screenLaneReason(reason);
+  const lane = laneSpecOf(opts).lane;
   const lanes: LaneOutput[] = [
-    { lane: DOWN_LANE_SPEC.lane, status: "failed", reason: screenedReason, scope, findings: [] },
+    { lane, status: "failed", reason: screenedReason, scope, findings: [] },
   ];
   writeLanesOut(opts, lanes);
   return await buildLaneResult(
     opts,
     resolved,
     lanes,
-    [...(resolved.degraded ?? []), laneTraceEntry("failed", screenedReason, "")],
+    [...(resolved.degraded ?? []), laneTraceEntry(lane, "failed", screenedReason, "")],
     { runSpawned: false, timer },
   );
 }
@@ -1424,9 +1444,10 @@ async function buildVerdict(
     verdict = { ...verdict, status: "failed", reason: compactionReason };
   }
   const traceCounts = verdict.toolCalls.map((t) => `${t.name}×${t.completed}`).join(", ");
+  const lane = laneSpecOf(opts).lane;
   const lanes: LaneOutput[] = [
     {
-      lane: DOWN_LANE_SPEC.lane,
+      lane,
       status: verdict.status,
       ...(verdict.reason !== undefined ? { reason: verdict.reason } : {}),
       scope,
@@ -1440,7 +1461,7 @@ async function buildVerdict(
     lanes,
     [
       ...(resolved.degraded ?? []),
-      laneTraceEntry(verdict.status, verdict.reason, traceCounts, {
+      laneTraceEntry(lane, verdict.status, verdict.reason, traceCounts, {
         ...(usage !== undefined ? { usage } : {}),
         compactions: compactions ?? "unknown",
       }),

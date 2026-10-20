@@ -1,17 +1,30 @@
 import { z } from "zod";
-import { LaneFindingSchema, READ_SECRET_FILE_GLOBS, GIT_METADATA_GLOBS } from "@warden/core";
+import {
+  LaneFindingSchema,
+  READ_SECRET_FILE_GLOBS,
+  GIT_METADATA_GLOBS,
+  type LaneName,
+} from "@warden/core";
 
 /**
- * Slice #42 / ADR-0053 §9: the down-lane prompt materializer. Pure —
- * inputs are file contents, outputs are file contents; no spawning, no
- * disk access. The script entry (`scripts/materialize-lanes.mts`) owns
- * I/O; the smoke drives these functions directly.
+ * Slice #42 / ADR-0053 §9: the lane prompt materializer. Pure — inputs
+ * are file contents, outputs are file contents; no spawning, no disk
+ * access. The script entry (`scripts/materialize-lanes.mts`) owns I/O;
+ * the smoke drives these functions directly.
  *
- * One typed const (`DOWN_LANE_SPEC`) is the single source for the lane
- * id, agent id, tier, default model, step cap, and allowed tools — the
- * agent config and the driver both read it. The included method sections
- * have one home only: the fenced `includes` list in the charter, which
+ * A `LaneSpec` is the single source for one lane: the lane id, agent id,
+ * tier, default model, step cap, allowed tools, charter path, generated
+ * file names, and the phrases its prompt must keep. The materializer and
+ * the driver both take a spec as data, and `LANE_SPECS` lists every lane
+ * that `lanes:materialize` writes. The included method sections have one
+ * home only: the fenced `includes` list in the charter, which
  * `materializeLane` parses (format `<path> :: <heading>`, one per line).
+ *
+ * The output contract is the same for every lane, so it is not spec
+ * data: the final message ends with one fenced ` ```json ` block that
+ * holds `{"findings":[...]}`, each finding validates against
+ * `LaneFindingSchema` (appended to every prompt), and the driver's
+ * `evaluateLane` reads it.
  */
 
 export interface LaneInclude {
@@ -22,16 +35,42 @@ export interface LaneInclude {
 }
 
 export interface LaneSpec {
-  lane: "down";
+  /** The post-pass lane name (`LaneNameEnum`) that the driver writes into the lane envelope. */
+  lane: Extract<LaneName, "down" | "up">;
   agentId: string;
   tier: "strong";
   /** Tier default; the client's provider config owns the real choice. */
   defaultModel: string;
+  /** OpenCode step cap. The driver's scope ceiling derives from it (`laneScopeCeiling`). */
   steps: number;
   description: string;
   /** Read-only v2 tool names, verified against `core/src/tool/plugin/*`. */
   allowedTools: string[];
+  /** Repo-root-relative path of the canonical charter. */
+  charterPath: string;
+  /** Generated system prompt, in `packages/cli/opencode/`. */
+  promptFilename: string;
+  /**
+   * Generated OpenCode config, in `packages/cli/opencode/`. Each lane has
+   * its own file: `compaction` is a top-level key, and the driver points
+   * one private `serve` at one config.
+   */
+  configFilename: string;
+  /**
+   * Phrases that the materialized prompt must keep, compared with
+   * whitespace collapsed: the read/grep exclusions and the lane's read
+   * bound. `lanes:check` fails when one is missing (`missingRequiredPhrases`).
+   */
+  requiredPhrases: readonly string[];
 }
+
+/**
+ * The read/grep exclusions that every charter states (issue #57). The
+ * host keys grep permission on the pattern, not the path, so the charter
+ * is the only thing that keeps read/grep out of the fixtures and the ADR
+ * corpus.
+ */
+const READ_EXCLUSION_PHRASES = ["`**/fixtures/**`", "`**/*.patch`", "root-level `*.md`"] as const;
 
 export const DOWN_LANE_SPEC: LaneSpec = {
   lane: "down",
@@ -42,11 +81,25 @@ export const DOWN_LANE_SPEC: LaneSpec = {
   description:
     "Warden down lane: invariant proof with a correctness focus. Traces claimed behavior through callers, state, and failure; submits findings as JSON.",
   allowedTools: ["read", "grep", "glob"],
+  charterPath: "docs/reference/lanes/down.md",
+  promptFilename: "warden-down.md",
+  configFilename: "opencode.json",
+  // Issue #57: the down lane ran out its timeout because the charter
+  // asked for unbounded depth. The bound and its route to `unproven` must
+  // reach the model.
+  requiredPhrases: [
+    ...READ_EXCLUSION_PHRASES,
+    "trace each claim **one hop** from a changed symbol",
+    "open **at most 3 files per claim**",
+    "**Reaching the bound is a normal end, not a failure.**",
+    "conclude **unproven**: the missing evidence is the next file you would have opened",
+    "where they differ, the bound wins",
+    "A claim that reaches the step 2 bound is **unproven**",
+  ],
 };
 
-export const CHARTER_PATH = "docs/reference/lanes/down.md";
-export const PROMPT_FILENAME = "warden-down.md";
-export const CONFIG_FILENAME = "opencode.json";
+/** Every lane that `lanes:materialize` writes, in output order. */
+export const LANE_SPECS: readonly LaneSpec[] = [DOWN_LANE_SPEC];
 
 /** MCP tool actions the lane may call (server `warden` + tool name). */
 export const LANE_MCP_TOOLS = ["warden_run_det_priors", "warden_lookup_type_def"] as const;
@@ -106,24 +159,26 @@ export interface MaterializeOutput {
 /**
  * Parses the charter's fenced `includes` list — the single home of "the
  * method sections this lane carries". Format `<path> :: <heading>`, one
- * entry per line. A malformed entry fails naming the charter line.
+ * entry per line. A malformed entry fails naming the charter path and
+ * line.
  */
-export function parseCharterIncludes(charter: string): LaneInclude[] {
-  return parseCharterIncludesLined(charter).map(({ include }) => include);
+export function parseCharterIncludes(charter: string, charterPath: string): LaneInclude[] {
+  return parseCharterIncludesLined(charter, charterPath).map(({ include }) => include);
 }
 
 function parseCharterIncludesLined(
   charter: string,
+  charterPath: string,
 ): Array<{ include: LaneInclude; lineNo: number }> {
   const fences = [...charter.matchAll(/```includes[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm)];
   const [fence, second] = fences;
   if (fence === undefined) {
-    throw new Error(`materialize: no fenced includes list in ${CHARTER_PATH}`);
+    throw new Error(`materialize: no fenced includes list in ${charterPath}`);
   }
   if (second !== undefined) {
     const lineNo = charter.slice(0, second.index).split("\n").length;
     throw new Error(
-      `materialize: ${CHARTER_PATH} line ${lineNo}: second includes fence (only one includes list is allowed)`,
+      `materialize: ${charterPath} line ${lineNo}: second includes fence (only one includes list is allowed)`,
     );
   }
   const fenceLine = charter.slice(0, fence.index).split("\n").length;
@@ -139,22 +194,33 @@ function parseCharterIncludesLined(
     const heading = sep === -1 ? "" : trimmed.slice(sep + 4).trim();
     if (sep === -1 || file === "" || heading === "" || !heading.startsWith("#")) {
       throw new Error(
-        `materialize: ${CHARTER_PATH} line ${lineNo}: malformed includes entry "${trimmed}" (want "<path> :: <heading>")`,
+        `materialize: ${charterPath} line ${lineNo}: malformed includes entry "${trimmed}" (want "<path> :: <heading>")`,
       );
     }
     const key = `${file} :: ${heading}`;
     if (seen.has(key)) {
       throw new Error(
-        `materialize: ${CHARTER_PATH} line ${lineNo}: duplicate includes entry "${trimmed}"`,
+        `materialize: ${charterPath} line ${lineNo}: duplicate includes entry "${trimmed}"`,
       );
     }
     seen.add(key);
     includes.push({ include: { file, heading }, lineNo });
   });
   if (includes.length === 0) {
-    throw new Error(`materialize: empty includes list in ${CHARTER_PATH}`);
+    throw new Error(`materialize: empty includes list in ${charterPath}`);
   }
   return includes;
+}
+
+/**
+ * The spec's required phrases that the prompt does not contain, compared
+ * with whitespace collapsed so a reflow does not trip it. Empty when the
+ * prompt keeps all of them.
+ */
+export function missingRequiredPhrases(spec: LaneSpec, prompt: string): string[] {
+  const flat = (text: string): string => text.replace(/\s+/g, " ");
+  const flatPrompt = flat(prompt);
+  return spec.requiredPhrases.filter((phrase) => !flatPrompt.includes(flat(phrase)));
 }
 
 /**
@@ -163,7 +229,7 @@ function parseCharterIncludesLined(
  * key order, `\n` endings, trailing newline.
  */
 export function materializeLane(spec: LaneSpec, input: MaterializeInput): MaterializeOutput {
-  const lined = parseCharterIncludesLined(input.charter);
+  const lined = parseCharterIncludesLined(input.charter, spec.charterPath);
   const includes = lined.map(({ include }) => include);
   const sourceFiles = uniqueFiles(includes);
   for (const file of sourceFiles) {
@@ -171,7 +237,7 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
       throw new Error(`materialize: source file not provided: ${file}`);
     }
   }
-  const bannerSources = [CHARTER_PATH, ...sourceFiles].join(", ");
+  const bannerSources = [spec.charterPath, ...sourceFiles].join(", ");
   const banner = `<!-- GENERATED by pnpm lanes:materialize from ${bannerSources} — do not edit -->`;
   // A charter entry that names a missing section fails naming the charter
   // line, so `lanes:check` catches a stale include list.
@@ -188,7 +254,7 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
       const succinct = detail.startsWith("materialize: ")
         ? detail.slice("materialize: ".length)
         : detail;
-      throw new Error(`materialize: ${CHARTER_PATH} line ${lineNo}: ${succinct}`, {
+      throw new Error(`materialize: ${spec.charterPath} line ${lineNo}: ${succinct}`, {
         cause: err,
       });
     }
@@ -241,7 +307,7 @@ export function materializeLane(spec: LaneSpec, input: MaterializeInput): Materi
         mode: "primary",
         model: spec.defaultModel,
         steps: spec.steps,
-        system: `{file:./${PROMPT_FILENAME}}`,
+        system: `{file:./${spec.promptFilename}}`,
         permissions,
       },
     },
