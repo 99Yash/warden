@@ -284,10 +284,11 @@ function applyPath(value: unknown, path: PathStep[], step: number): unknown {
   }
   if (!Array.isArray(value)) return value;
   let changed = false;
-  const out = value.map((el) => {
+  const out: unknown[] = [];
+  for (const el of value) {
     const r = applyPath(el, path, step + 1);
     if (r !== el) changed = true;
-    return r;
-  });
+    out.push(r);
+  }
   return changed ? out : value;
 }
