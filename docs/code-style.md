@@ -2,7 +2,7 @@
 
 The rules a warden change is held to. Read it before opening a PR, and use it as the checklist when reviewing one. The _why_ for architecture lives in [`decisions.md`](../decisions.md); library mechanics live in [`conventions.md`](./conventions.md). The structure and most of the rules are adapted from alfred's `docs/reference/code-style.md`, kept only where they apply to a CLI that runs tools, calls models, and verifies claims.
 
-Each rule ends with the check that enforces it. _Gate_ names the check that fails `pnpm verify`. _Partly_ names the check for one slice, and review owns the rest. _Review_ means no check enforces it. [`gate-design.md`](./gate-design.md) says which kind of check a new rule gets, and holds the queue of review-only rules with measured counts.
+Each rule ends with the check that enforces it. _Gate_ names the check that fails `pnpm verify`. _Partly_ names the check for one slice, and review owns the rest. _Review_ means no check enforces it. [`gate-design.md`](./gate-design.md) says which kind of check a new rule gets, and holds the queue of review-only rules with measured counts. [`enforced-rules.md`](./enforced-rules.md) is generated from the gate config, and lists each rule that a gate enforces today. When a tag and the catalog disagree, the catalog is correct.
 
 ---
 

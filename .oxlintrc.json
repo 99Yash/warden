@@ -46,14 +46,28 @@
     "warden/no-exported-hasher": "error",
     "warden/sha256-over-json-stringify": "error",
 
-    // Type-aware rules, run through tsgolint (`options.typeAware`).
+    // Type-aware rules, run through tsgolint (`options.typeAware`). The comment directly
+    // above each key is the reason that docs/enforced-rules.md prints for it. Keys that
+    // follow one another with no comment and no blank line share one comment when it
+    // names each of them, or their family (`no-unsafe-*`). See
+    // scripts/enforced-rules-catalog.mjs.
+
+    // no-floating-promises, no-misused-promises: an unawaited promise drops its error, and an
+    // `async` callback where a void callback is expected rejects unhandled. Await it, return
+    // it, or spell fire-and-forget as `void`.
     "typescript/no-floating-promises": "error",
     "typescript/no-misused-promises": "error",
+    // restrict-template-expressions: an array or object in a template literal prints `a,b`
+    // or `[object Object]`.
     "typescript/restrict-template-expressions": "error",
+    // switch-exhaustiveness-check: a switch over a union with no `default` covers every
+    // member. A `default` counts as exhaustive; end it in `assertNever`
+    // (packages/core/src/assert-never.ts), which review checks.
     "typescript/switch-exhaustiveness-check": [
       "error",
       { "considerDefaultExhaustiveForUnions": true }
     ],
+    // no-explicit-any: write `unknown` plus a parse, never `any`.
     "typescript/no-explicit-any": "error",
     // no-non-null-assertion: a postfix `!` is a runtime promise the compiler cannot keep. Keep
     // the narrowing instead (destructure, `.at(-1)` plus a check, `for…of` over `entries()`, a
@@ -62,9 +76,9 @@
     "typescript/no-non-null-assertion": "error",
     // no-deprecated: a use of a symbol whose declaration carries `@deprecated`, from a
     // dependency (zod 4, the AI SDK, the TypeScript API, drizzle, the MCP SDK) or from this
-    // repo. Migrate to the replacement the tag names. A site that must keep the old symbol
-    // carries a directive with the reason (`packages/mcp/src/server.ts` keeps the low-level
-    // MCP `Server`).
+    // repo. A deprecated API works today, and the next major version removes it. Migrate to
+    // the replacement the tag names. A site that must keep the old symbol carries a directive
+    // with the reason (`packages/mcp/src/server.ts` keeps the low-level MCP `Server`).
     "typescript/no-deprecated": "error",
     // no-unnecessary-type-assertion: an `as T` or `<T>` that does not change the type, an
     // `as T` where the context already expects `T` and the value fits it, and a `!` on a
@@ -89,6 +103,7 @@
     "typescript/no-unsafe-call": "error",
     "typescript/no-unsafe-member-access": "error",
     "typescript/no-unsafe-assignment": "error",
+    // no-useless-spread: `{ ...{ a } }` is `{ a }`, and `[...[a]]` is `[a]`.
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
     // A `catch` handles the failure, logs safe fields, or holds a comment that says why the
@@ -118,49 +133,52 @@
     // Default `correctness` rules, each at zero when it landed, default options. The default
     // category arms them at "warn", which `--deny-warnings` already fails; "error" states the
     // fence here, so it does not depend on the category default.
-    // - await-thenable: an `await` of a value that is not a promise. Remove the `await`.
-    // - no-array-delete: `delete xs[i]` leaves a hole. Use `splice` or `filter`.
-    // - no-for-in-array: `for…in` over an array walks string keys. Use `for…of`.
-    // - no-implied-eval: a string passed to `setTimeout` / `new Function` is `eval`. Pass a
-    //   function.
-    // - no-unsafe-unary-minus: unary minus on a value that is not a number or bigint.
-    // - no-useless-default-assignment: a default for a binding that is never `undefined`.
-    //   Delete the default, or widen the type if `undefined` can arrive.
-    // - no-meaningless-void-operator: `void` on an expression that is already `void`.
-    // - no-misused-spread: a spread of a string, a promise, or a class instance. Split a
-    //   string into code points with `Array.from`, which states the intent.
-    // - no-duplicate-type-constituents: a union or intersection that repeats a member. It
-    //   also reports `| undefined` on an optional PARAMETER; an optional property keeps it,
-    //   because `exactOptionalPropertyTypes` is on.
-    // - no-redundant-type-constituents: a union member another member absorbs
-    //   (`unknown | X`, `"a" | string`). Write the wide type and say the rest in the doc
-    //   comment, or derive the exact union.
-    // - require-array-sort-compare: `.sort()` with no comparator orders numbers, tuples and
-    //   objects by their string form. Pass a comparator. `ignoreStringArrays` stays on (its
-    //   default): a `string[]` sorts by UTF-16 code unit, which is deterministic.
-    // - no-base-to-string: `String(v)` or a template on a value that may be an object prints
-    //   `[object Object]`. Narrow the value at its boundary, or pick the text you mean
-    //   (`JSON.stringify` of a JSON value, `error.message`).
-    // - unbound-method: a method read as a value loses `this`. Bind it or wrap it in an
-    //   arrow; declare a member that never reads `this` as a function-typed property.
+
+    // await-thenable: an `await` of a value that is not a promise. Remove the `await`.
     "typescript/await-thenable": "error",
+    // no-array-delete: `delete xs[i]` leaves a hole. Use `splice` or `filter`.
     "typescript/no-array-delete": "error",
+    // no-for-in-array: `for…in` over an array walks string keys. Use `for…of`.
     "typescript/no-for-in-array": "error",
+    // no-implied-eval: a string passed to `setTimeout` / `new Function` is `eval`. Pass a
+    // function.
     "typescript/no-implied-eval": "error",
+    // no-unsafe-unary-minus: unary minus on a value that is not a number or bigint.
     "typescript/no-unsafe-unary-minus": "error",
+    // no-useless-default-assignment: a default for a binding that is never `undefined`.
+    // Delete the default, or widen the type if `undefined` can arrive.
     "typescript/no-useless-default-assignment": "error",
+    // no-meaningless-void-operator: `void` on an expression that is already `void`.
     "typescript/no-meaningless-void-operator": "error",
+    // no-misused-spread: a spread of a string, a promise, or a class instance. Split a
+    // string into code points with `Array.from`, which states the intent.
     "typescript/no-misused-spread": "error",
+    // no-duplicate-type-constituents: a union or intersection that repeats a member. It
+    // also reports `| undefined` on an optional PARAMETER; an optional property keeps it,
+    // because `exactOptionalPropertyTypes` is on.
     "typescript/no-duplicate-type-constituents": "error",
+    // no-redundant-type-constituents: a union member another member absorbs
+    // (`unknown | X`, `"a" | string`). Write the wide type and say the rest in the doc
+    // comment, or derive the exact union.
     "typescript/no-redundant-type-constituents": "error",
+    // require-array-sort-compare: `.sort()` with no comparator orders numbers, tuples and
+    // objects by their string form. Pass a comparator. `ignoreStringArrays` stays on (its
+    // default): a `string[]` sorts by UTF-16 code unit, which is deterministic.
     "typescript/require-array-sort-compare": "error",
+    // no-base-to-string: `String(v)` or a template on a value that may be an object prints
+    // `[object Object]`. Narrow the value at its boundary, or pick the text you mean
+    // (`JSON.stringify` of a JSON value, `error.message`).
     "typescript/no-base-to-string": "error",
+    // unbound-method: a method read as a value loses `this`. Bind it or wrap it in an
+    // arrow; declare a member that never reads `this` as a function-typed property.
     "typescript/unbound-method": "error",
+
     // The import plugin's two default `correctness` rules had zero hits when it landed, so
     // they are set to "error" here instead of the "warn" that the plugin arms them at.
+
     // import/default: a default import from a module that has no default export.
-    // import/namespace: `ns.x` on a namespace import whose module does not export `x`.
     "import/default": "error",
+    // import/namespace: `ns.x` on a namespace import whose module does not export `x`.
     "import/namespace": "error",
     // import/no-cycle: a module that reaches itself again through its imports. ESM loads a
     // cycle without an error, but a binding read during module evaluation can be in its TDZ,
@@ -217,8 +235,11 @@
   },
   "globals": {},
   "ignorePatterns": [
+    // Build output, generated from the linted sources.
     "dist/**",
+    // Drizzle migrations, generated by `pnpm db:generate`.
     "**/migrations/**",
+    // Warden's per-repo cache and run state, not source.
     "**/.warden/**",
     // Vendored verbatim; proven by `pnpm check:oxlint-plugin`, not by linting its source.
     "scripts/oxlint/anti-slop/**"
