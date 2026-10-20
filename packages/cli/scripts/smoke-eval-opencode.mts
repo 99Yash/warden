@@ -36,8 +36,9 @@
  *       child env holds no `ANTHROPIC_*` variable while the parent has
  *       three. `claude-code-up` is a lane config outside `ALL_CONFIGS`.
  *   (g) `--opencode-model`: the id shape, the override on OpenCode
- *       configs only, the usage errors (exit 2, no spend) from `run.mts`,
- *       and the recorded model on a no-spawn OpenCode up-lane run.
+ *       configs only, the usage errors (exit 2, no spend) from `run.mts`
+ *       (including `--parity` without a `#<variant>`), and the recorded
+ *       model on a no-spawn OpenCode up-lane run.
  *
  * Usage:
  *   pnpm --filter @warden/cli smoke:eval-opencode
@@ -960,6 +961,17 @@ process.stdout.write("\n(g) --opencode-model\n");
       "needs <provider>/<model>",
     ],
     ["a missing value", ["--config", "opencode-up", "--opencode-model"], "needs a value"],
+    [
+      "--parity and no #<variant>",
+      [
+        "--parity",
+        "programmatic-dispatch-multi",
+        "opencode-up",
+        "--opencode-model",
+        "opencode/glm-5.3-flash-free",
+      ],
+      "with --parity needs a #<variant>",
+    ],
   ] as const) {
     const r = runEval([...args]);
     assert(

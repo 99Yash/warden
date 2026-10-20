@@ -32,8 +32,9 @@
  * Usage errors (an unknown flag, a missing or flag-shaped value, an
  * unknown config name, a bad `--max-cost` or `--samples`, `--parity` with
  * `--config` or `--compare`, `--parity` roles reversed, or an
- * `--opencode-model` that is not `<provider>/<model>` or that no selected
- * config can use) print one line and exit 2 before any preflight or spend.
+ * `--opencode-model` that is not `<provider>/<model>`, that no selected
+ * config can use, or that has no `#<variant>` under `--parity`) print one
+ * line and exit 2 before any preflight or spend.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -224,15 +225,25 @@ function resolveConfigNames(names: string[]): EvalConfig[] {
 /**
  * Select the configs to run, then apply `--opencode-model` to the
  * OpenCode-runtime configs. The flag is a usage error when no selected
- * config is an OpenCode runtime. It is allowed with `--parity`: P6
- * compares the session model with the driver's requested model, which is
- * the override, and the scorecard records both. A free model reports
+ * config is an OpenCode runtime.
+ *
+ * With `--parity`, the value must name a `#<variant>`. P6 compares the
+ * session model with the driver's requested model (the override) as exact
+ * strings, and the session always reports a variant: a request without
+ * one (`opencode/glm-5.3-flash-free`) runs as `…#default` (live,
+ * 2026-10-20), so P6 would fail every sample. A free model also reports
  * `cost 0` with tokens, so P5 fails (unmeasured spend) and such a run
  * never reads MET.
  */
 function selectConfigs(args: Args): EvalConfig[] {
   const selected = selectConfigsByName(args);
   if (args.opencodeModel === undefined) return selected;
+  if (args.parity !== undefined && !args.opencodeModel.includes("#")) {
+    usageError(
+      `--opencode-model with --parity needs a #<variant> (got "${args.opencodeModel}"): ` +
+        `the session reports one, and P6 compares the two exactly`,
+    );
+  }
   const overridden = withOpencodeModel(selected, args.opencodeModel);
   if (overridden === undefined) {
     usageError(
