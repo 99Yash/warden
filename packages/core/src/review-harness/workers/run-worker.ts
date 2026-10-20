@@ -20,7 +20,7 @@ import { makeLookupTypeDefTool } from "../../llm/tools/lookup-type-def.js";
 import type { Category, Comment, DegradedEntry, Source } from "../../schema.js";
 import type { ReasonedFindingMode } from "../boss-loop.js";
 import { loadWorkerSystemPrompt, type WorkerPromptVariant } from "../prompts/loader.js";
-import { tokenUsageFromSdk, type TokenUsage } from "../scratchpad.js";
+import { CallUsageMeter, type CallUsage } from "../scratchpad.js";
 import {
   resolveWorkerTier,
   type Concern,
@@ -245,11 +245,14 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
       topic: `worker-${input.concern}`,
       message: `${input.concern}: ${call.error}`,
     });
+    // The failed call can still have spent tokens: keep its usage so the
+    // run cost counts it.
     return {
       findings: [],
       toolCalls: 0,
       degraded,
       durationMs: Date.now() - startedAt,
+      usage: call.usage,
       tier,
       failed: true,
     };
@@ -290,7 +293,7 @@ export async function runWorker(input: RunWorkerInput): Promise<WorkerInvocation
     toolCalls: call.toolCalls,
     degraded,
     durationMs: Date.now() - startedAt,
-    ...(call.tokenUsage !== undefined ? { tokenUsage: call.tokenUsage } : {}),
+    usage: call.usage,
     tier,
   };
 }
@@ -425,12 +428,14 @@ interface WorkerCallOk {
   ok: true;
   findings: WorkerFinding[];
   toolCalls: number;
-  tokenUsage?: TokenUsage;
+  usage: CallUsage;
 }
 
 interface WorkerCallErr {
   ok: false;
   error: string;
+  /** Usage spent before the failure; `unknownRequests` counts the rest. */
+  usage: CallUsage;
 }
 
 /**
@@ -457,32 +462,17 @@ export async function callWorker(opts: {
   telemetry?: ReviewTelemetrySettings;
 }): Promise<WorkerCallOk | WorkerCallErr> {
   const first = await tryProvider(opts.primary, opts);
-  if (first.ok) {
-    return {
-      ok: true,
-      findings: first.findings,
-      toolCalls: first.toolCalls,
-      ...(first.tokenUsage !== undefined ? { tokenUsage: first.tokenUsage } : {}),
-    };
-  }
+  if (first.ok) return first;
   const modelLabel = opts.modelLabel ?? `anthropic ${opts.tier}`;
   return {
     ok: false,
     error: `${modelLabel} failed (${first.error}); Gemini fallback skipped (tools required)`,
+    usage: first.usage,
   };
 }
 
-interface ProviderOk {
-  ok: true;
-  findings: WorkerFinding[];
-  toolCalls: number;
-  tokenUsage?: TokenUsage;
-}
-
-interface ProviderErr {
-  ok: false;
-  error: string;
-}
+type ProviderOk = WorkerCallOk;
+type ProviderErr = WorkerCallErr;
 
 async function tryProvider(
   model: LanguageModel,
@@ -496,6 +486,9 @@ async function tryProvider(
     telemetry?: ReviewTelemetrySettings;
   },
 ): Promise<ProviderOk | ProviderErr> {
+  // Count usage per step, so that a call that fails after some steps still
+  // records what it spent (see `CallUsageMeter`).
+  const meter = new CallUsageMeter();
   try {
     const reasoned = opts.reasonedFindingMode === "allow-empty-sources";
     const schemaPair = reasoned ? REASONED_WORKER_GEMINI_PAIR : LEGACY_WORKER_GEMINI_PAIR;
@@ -507,6 +500,8 @@ async function tryProvider(
       tools: opts.tools,
       stopWhen: [stepCountIs(PER_WORKER_STEP_CAP)],
       output: Output.object({ schema: schemaPair.requestSchema }),
+      prepareStep: meter.prepareStep,
+      onStepFinish: meter.onStepFinish,
       ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
       ...(opts.telemetry !== undefined ? { experimental_telemetry: opts.telemetry } : {}),
       timeout: { totalMs: opts.timeoutMs },
@@ -535,24 +530,17 @@ async function tryProvider(
             0,
             160,
           ),
+        usage: meter.snapshot(),
       };
-    }
-    const parsed = checked.data;
-    let tokenUsage: TokenUsage | undefined;
-    try {
-      // `totalUsage` sums every step of the tool loop; `usage` is the last step only.
-      tokenUsage = tokenUsageFromSdk(await result.totalUsage);
-    } catch {
-      tokenUsage = undefined;
     }
     return {
       ok: true,
-      findings: parsed.findings,
+      findings: checked.data.findings,
       toolCalls,
-      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+      usage: meter.snapshot(),
     };
   } catch (err) {
-    return { ok: false, error: formatErr(err) };
+    return { ok: false, error: formatErr(err), usage: meter.snapshot() };
   }
 }
 

@@ -377,6 +377,9 @@ async function runReview(input: ReviewInput): Promise<CommentSet> {
       ...(harness.metadata.costLabels !== undefined
         ? { costLabels: harness.metadata.costLabels }
         : {}),
+      ...(harness.metadata.usageUnknownRequests !== undefined
+        ? { usageUnknownRequests: harness.metadata.usageUnknownRequests }
+        : {}),
     },
   };
 }

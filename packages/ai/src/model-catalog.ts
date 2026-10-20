@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LlmModelPrice, ResolvedLlmModel } from "./models.js";
+import type { LlmContextTier, LlmModelPrice, ResolvedLlmModel } from "./models.js";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const FETCH_TIMEOUT_MS = 2_000;
@@ -15,6 +15,10 @@ const ModelsDevModelSchema = z
         output: z.number().optional(),
         cache_read: z.number().optional(),
         cache_write: z.number().optional(),
+        // Long-context tiers. Kept `unknown` here and parsed one by one in
+        // `contextTiers()`, so one odd tier entry cannot fail the parse of
+        // the whole catalog (that would drop every model to its fallback).
+        tiers: z.unknown().optional(),
       })
       .optional(),
     limit: z
@@ -39,6 +43,24 @@ const ModelsDevCatalogSchema = z.record(
     })
     .loose(),
 );
+
+/**
+ * One models.dev price tier, for example (2026-10-20, `openai/gpt-6.1-sol`):
+ * `{ input: 4, output: 15, cache_read: 0.2, cache_write: 5,
+ *    tier: { type: "context", size: 272000 } }`.
+ * A `context` tier applies to a request whose prompt is more than `size`
+ * input tokens (OpenAI: "Prompts with more than 272K input tokens are priced
+ * at 2x input and cache rates and 1.5x output for the full request").
+ */
+const ModelsDevTierSchema = z
+  .object({
+    input: z.number(),
+    output: z.number(),
+    cache_read: z.number().optional(),
+    cache_write: z.number().optional(),
+    tier: z.object({ type: z.string(), size: z.number().nonnegative() }).loose(),
+  })
+  .loose();
 
 type ModelsDevModel = z.infer<typeof ModelsDevModelSchema>;
 type ModelsDevCatalog = z.infer<typeof ModelsDevCatalogSchema>;
@@ -72,12 +94,39 @@ export async function modelCatalogPrice(model: ResolvedLlmModel): Promise<LlmMod
 function modelPrice(model: ModelsDevModel): LlmModelPrice | undefined {
   const cost = model.cost;
   if (cost?.input === undefined || cost.output === undefined) return undefined;
+  const tiers = contextTiers(cost.tiers);
   return {
     input: cost.input,
     output: cost.output,
     cachedInput: cost.cache_read ?? cost.input,
     cacheWriteInput: cost.cache_write ?? cost.input,
+    ...(tiers.length > 0 ? { contextTiers: tiers } : {}),
   };
+}
+
+/**
+ * Parse the models.dev `cost.tiers` array. Only `context` tiers are priced;
+ * an entry that does not parse is skipped. Inside a tier, a missing cache
+ * price falls back to the tier's input price, the same rule as the base.
+ */
+function contextTiers(raw: unknown): LlmContextTier[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LlmContextTier[] = [];
+  for (const entry of raw) {
+    const parsed = ModelsDevTierSchema.safeParse(entry);
+    if (!parsed.success || parsed.data.tier.type !== "context") continue;
+    const t = parsed.data;
+    out.push({
+      aboveInputTokens: t.tier.size,
+      rates: {
+        input: t.input,
+        output: t.output,
+        cachedInput: t.cache_read ?? t.input,
+        cacheWriteInput: t.cache_write ?? t.input,
+      },
+    });
+  }
+  return out;
 }
 
 async function fetchModelsDevCatalog(): Promise<ModelsDevCatalog | undefined> {

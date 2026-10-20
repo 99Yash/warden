@@ -40,6 +40,14 @@ export const reviewRuns = sqliteTable("review_runs", {
   outputTokens: integer("output_tokens").notNull(),
   costUsd: real("cost_usd").notNull(),
   commentsEmitted: integer("comments_emitted").notNull(),
+  /**
+   * Model requests (or retried attempts) that started but reported no usage
+   * (failed, timed out, or aborted during the request). When above 0, the
+   * token counts and `costUsd` are lower bounds. Rows written before
+   * 2026-10-20 read 0, and those rows also left out the spend of failed
+   * calls.
+   */
+  usageUnknownRequests: integer("usage_unknown_requests").notNull().default(0),
 });
 
 export type ReviewRunRow = typeof reviewRuns.$inferSelect;

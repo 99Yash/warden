@@ -10,8 +10,8 @@ import type { DetPriors } from "./det-priors.js";
  * burned; `degraded` carries the worker's degraded entries (verifier-drop
  * notices, lookup-not-installed, etc.).
  *
- * `tokenUsage` is summed across the worker's inner streamText steps so the
- * cost line in render.ts can break down per concern. `phase` echoes back
+ * `usage` is counted per inner streamText step so the cost line can be
+ * priced per model request, also when the call fails. `phase` echoes back
  * the boss's render-UX label (`plan` / `adjudicate` / `synth`) — kept for
  * post-hoc inspection, not for any control-flow decision.
  */
@@ -30,13 +30,17 @@ export interface WorkerOutput {
   phase: "plan" | "adjudicate" | "synth";
   /** Wall-clock duration of the worker streamText call. */
   durationMs: number;
-  /** Token usage for the worker's streamText call (summed across inner steps). */
-  tokenUsage?: TokenUsage;
+  /**
+   * Usage of the worker's streamText call: the sum, one entry per model
+   * request, and the count of requests whose usage is unknown. Present on
+   * a failed call too when the call spent tokens before it failed.
+   */
+  usage?: CallUsage;
   /**
    * Actual model tier the worker ran on. Captured at dispatch time so
    * `runReviewHarness()` can compute the per-tier cost summary without
    * re-deriving from the (concern, override?) pair. Carried alongside
-   * `tokenUsage` because the boss can promote/demote a worker via the
+   * `usage` because the boss can promote/demote a worker via the
    * dispatch tool's `tier?` field.
    */
   tier?: "sonnet" | "haiku";
@@ -51,8 +55,8 @@ export interface WorkerOutput {
 }
 
 /**
- * Per-call token usage. Read from the AI SDK v6 `streamText` result's
- * `totalUsage` (summed over all steps) after the stream resolves.
+ * Token usage counts. Read per step from the AI SDK v6 `streamText`
+ * `onStepFinish` callback (see `CallUsageMeter`).
  * Cost-tracking SQLite (`reviewRuns`) is deferred per M14 Q12; v0 keeps
  * usage in-memory on the scratchpad and renders it via
  * `packages/cli/src/render.ts`.
@@ -95,6 +99,108 @@ export function accumulateTokenUsage(
   }
   if (next.cacheWriteInputTokens !== undefined) {
     acc.cacheWriteInputTokens = (acc.cacheWriteInputTokens ?? 0) + next.cacheWriteInputTokens;
+  }
+}
+
+/**
+ * Usage of one model call (one `streamText` run, all of its tool-loop
+ * steps). Usage is telemetry: no reader may fail a review on it.
+ */
+export interface CallUsage {
+  /** Sum over `requests`. */
+  total: TokenUsage;
+  /**
+   * One entry per model request (tool-loop step) that reported usage. The
+   * long-context price tiers apply per request, so the cost is priced from
+   * these entries, not from `total`.
+   */
+  requests: TokenUsage[];
+  /**
+   * Model requests (or retried attempts) that started but reported no
+   * usage: an error, a timeout, or an abort during the request. The
+   * provider can bill these, so when this is above 0 the cost is a lower
+   * bound. Warden does not guess a number for them.
+   */
+  unknownRequests: number;
+}
+
+export function emptyCallUsage(): CallUsage {
+  return { total: { inputTokens: 0, outputTokens: 0 }, requests: [], unknownRequests: 0 };
+}
+
+/** Add `next` into `acc` in place. */
+export function mergeCallUsage(acc: CallUsage, next: CallUsage): void {
+  accumulateTokenUsage(acc.total, next.total);
+  acc.requests.push(...next.requests);
+  acc.unknownRequests += next.unknownRequests;
+}
+
+/**
+ * Counts the usage of one `streamText` call step by step, so that a call
+ * that fails still records the tokens it spent.
+ *
+ * Why not `result.totalUsage`: in `ai@6.0.77` (`dist/index.mjs`, the
+ * `flush` of the event processor), `totalUsage` rejects when no step
+ * finished, and resolves to the all-`undefined` null usage when a later
+ * step errors or the call aborts (the final `finish` part never arrives).
+ * Both cases lose the usage of the steps that did finish. `onStepFinish`
+ * fires once per finished step with that step's usage, and `prepareStep`
+ * fires once before each step's model request, so the difference between
+ * the two counts is the requests whose usage is unknown.
+ *
+ * Wire it with `prepareStep: meter.prepareStep` and
+ * `onStepFinish: meter.onStepFinish`. Every method is total: none throws.
+ */
+export class CallUsageMeter {
+  private readonly requests: TokenUsage[] = [];
+  private unknown = 0;
+  private pending = false;
+  private pendingFailedAttempts = 0;
+
+  /** `streamText({ prepareStep })` hook. Returns `undefined`: no step override. */
+  readonly prepareStep = (): undefined => {
+    // Steps run in sequence, so a step that is still pending here never
+    // reported usage.
+    if (this.pending) this.unknown += Math.max(1, this.pendingFailedAttempts);
+    this.pending = true;
+    this.pendingFailedAttempts = 0;
+    return undefined;
+  };
+
+  /** `streamText({ onStepFinish })` hook. */
+  readonly onStepFinish = (step: { readonly usage: LanguageModelUsage }): void => {
+    const { usage } = step;
+    if (usage.inputTokens === undefined && usage.outputTokens === undefined) {
+      // A step that ends on a stream error has the null usage.
+      this.unknown += 1;
+    } else {
+      this.requests.push(tokenUsageFromSdk(usage));
+    }
+    // A failed attempt that a retry recovered is a request with no usage.
+    this.unknown += this.pendingFailedAttempts;
+    this.pending = false;
+    this.pendingFailedAttempts = 0;
+  };
+
+  /**
+   * Record one failed attempt of the current request (for example from an
+   * `ai-retry` `onError` callback). The attempt can be billed, but the
+   * provider reports no usage for it.
+   */
+  attemptFailed(): void {
+    this.pendingFailedAttempts += 1;
+  }
+
+  /** The usage known so far. Safe to call after a failure. */
+  snapshot(): CallUsage {
+    const total: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+    for (const r of this.requests) accumulateTokenUsage(total, r);
+    const inFlight = this.pending ? Math.max(1, this.pendingFailedAttempts) : 0;
+    return {
+      total,
+      requests: this.requests.map((r) => ({ ...r })),
+      unknownRequests: this.unknown + inFlight,
+    };
   }
 }
 
@@ -149,8 +255,8 @@ export class ReviewScratchpad {
   private _detPriors: DetPriors | undefined;
   private readonly _workerOutputs: WorkerOutput[] = [];
   private readonly _degraded: DegradedEntry[] = [];
-  private _bossTokens: TokenUsage | undefined;
-  private _workerTokens: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  private _bossUsage: CallUsage | undefined;
+  private readonly _workerUsage: CallUsage = emptyCallUsage();
   private readonly _concurrencyMetrics: ConcurrencyMetric[] = [];
 
   /**
@@ -175,7 +281,7 @@ export class ReviewScratchpad {
    */
   recordWorker(output: WorkerOutput): void {
     this._workerOutputs.push(output);
-    if (output.tokenUsage) accumulateTokenUsage(this._workerTokens, output.tokenUsage);
+    if (output.usage) mergeCallUsage(this._workerUsage, output.usage);
   }
 
   workerOutputs(): readonly WorkerOutput[] {
@@ -187,20 +293,25 @@ export class ReviewScratchpad {
     this._degraded.push(entry);
   }
 
-  /** Boss-loop token usage (single accumulator across all boss rounds). */
-  recordBossTokens(usage: TokenUsage): void {
-    if (!this._bossTokens) {
-      this._bossTokens = { inputTokens: 0, outputTokens: 0 };
-    }
-    accumulateTokenUsage(this._bossTokens, usage);
+  /**
+   * Boss-loop usage (single accumulator across all boss rounds). The boss
+   * records it on failure too, so a failed review still knows its spend.
+   */
+  recordBossUsage(usage: CallUsage): void {
+    if (!this._bossUsage) this._bossUsage = emptyCallUsage();
+    mergeCallUsage(this._bossUsage, usage);
+  }
+
+  bossUsage(): CallUsage | undefined {
+    return this._bossUsage;
   }
 
   bossTokens(): TokenUsage | undefined {
-    return this._bossTokens;
+    return this._bossUsage?.total;
   }
 
   workerTokens(): TokenUsage {
-    return this._workerTokens;
+    return this._workerUsage.total;
   }
 
   /**

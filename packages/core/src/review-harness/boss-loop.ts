@@ -30,7 +30,7 @@ import {
   type BossPromptVariant,
   type WorkerPromptVariant,
 } from "./prompts/loader.js";
-import { tokenUsageFromSdk, type ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
+import { CallUsageMeter, type ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import {
   makeDispatchWorkerTool,
   type Concern,
@@ -467,6 +467,20 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
 
   const transientCondition = anyError.isRetryable(true).or(timeoutCondition());
 
+  // Count boss usage per step, so a boss call that fails still records the
+  // tokens it spent (see `CallUsageMeter`). The record happens once: on
+  // success, or in the catch before the hard fail.
+  const meter = new CallUsageMeter();
+  let usageRecorded = false;
+  const recordBossUsage = (): TokenUsage => {
+    const usage = meter.snapshot();
+    if (!usageRecorded) {
+      usageRecorded = true;
+      input.scratchpad.recordBossUsage(usage);
+    }
+    return usage.total;
+  };
+
   // Per ADR-0017 2026-05-17 amendment: cascade for tool-using
   // `streamText` call sites is primary + 1× transient retry only. No
   // Gemini fallback step is registered.
@@ -482,6 +496,8 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     model: primary,
     retries,
     onError: (ctx: RetryContext<LanguageModel>) => {
+      // A failed attempt reports no usage, but the provider can bill it.
+      meter.attemptFailed();
       if (ctx.current.type === "error") {
         const summary = errorSummary(ctx.current.error);
         errorSummaries.push(summary);
@@ -541,6 +557,8 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
         submit_review: submitReviewTool,
       },
       stopWhen: [stepCountIs(stepCap), hasToolCall("submit_review")],
+      prepareStep: meter.prepareStep,
+      onStepFinish: meter.onStepFinish,
       ...(primaryInfo.providerOptions !== undefined
         ? { providerOptions: primaryInfo.providerOptions }
         : {}),
@@ -577,14 +595,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
       );
     }
     const output = parsedOutput.data;
-    let bossTokens: TokenUsage | undefined;
-    try {
-      // `totalUsage` sums every step of the tool loop; `usage` is the last step only.
-      bossTokens = tokenUsageFromSdk(await result.totalUsage);
-    } catch {
-      bossTokens = undefined;
-    }
-    if (bossTokens) input.scratchpad.recordBossTokens(bossTokens);
+    const bossTokens = recordBossUsage();
 
     const modelId = modelLabel(servedBy);
 
@@ -612,11 +623,14 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     void modelId; // currently unused downstream but kept for future render hooks.
     return {
       comments,
-      ...(bossTokens !== undefined ? { bossTokens } : {}),
+      bossTokens,
       degraded,
       durationMs: Date.now() - startedAt,
     };
   } catch (err) {
+    // Keep the spend of the failed boss call. The harness writes it to the
+    // review-run row before it rethrows.
+    recordBossUsage();
     const primarySummary = lastPrimarySummary ?? errorSummaries[0] ?? errorSummary(err);
     // Per ADR-0017 2026-05-17 amendment: tool-using call sites do not fall
     // back to Gemini. Hard-fail cleanly with a legible message.
