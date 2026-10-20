@@ -7,8 +7,9 @@
 // Reads hook JSON from stdin (prompt/pre-edit), prints hookSpecificOutput JSON to
 // stdout, and exits 0. Prints nothing when there is no match (no injection).
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 const mode = process.argv[2] || "session-start";
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -52,6 +53,29 @@ function splitWords(s) {
         .split(/\s+/)
         .filter((w) => w.length >= 3)
     : [];
+}
+
+// A lesson glob is relative to a checkout root. An agent worktree under
+// `.claude/worktrees/<name>/` is its own checkout, so take the path relative to
+// the root that `git rev-parse --show-toplevel` gives for the file, not to ROOT.
+// Lessons still load from ROOT: `.lessons/` is gitignored and lives only there.
+function repoRelative(fp) {
+  try {
+    const top = spawnSync("git", ["-C", dirname(fp), "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      timeout: 2_000,
+    });
+    const root = top.status === 0 ? top.stdout.trim() : "";
+    if (root) {
+      // Pre-edit runs before a Write creates the file, so resolve its directory.
+      const real = join(realpathSync(dirname(fp)), basename(fp));
+      const rel = relative(realpathSync(root), real);
+      if (!rel.startsWith("..")) return rel;
+    }
+  } catch {
+    // Fall through to the ROOT-relative path below.
+  }
+  return fp.startsWith(ROOT) ? fp.slice(ROOT.length + 1) : fp;
 }
 
 function globMatch(glob, path) {
@@ -184,7 +208,7 @@ if (mode === "pre-edit") {
   }
   const fp = (input.tool_input && input.tool_input.file_path) || "";
   if (!fp) process.exit(0);
-  const rel = fp.startsWith(ROOT) ? fp.slice(ROOT.length + 1) : fp;
+  const rel = repoRelative(fp);
   const base = basename(rel);
   const matches = [];
   for (const f of listLessonFiles()) {

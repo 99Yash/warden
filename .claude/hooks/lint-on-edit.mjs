@@ -15,17 +15,13 @@
 // Reads PostToolUse JSON on stdin, prints hookSpecificOutput JSON, exits 0.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 // Advisory: a bug in this file must not surface as a hook error on every edit.
 process.on("uncaughtException", () => process.exit(0));
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-
-const OXLINT = join(ROOT, "node_modules", ".bin", "oxlint");
-
-const CONFIG = join(ROOT, ".oxlintrc.json");
 
 // The root config sets `options.typeAware`, so this run includes the type-aware
 // rules; tsgolint builds the program for the one file's tsconfig. Past this,
@@ -52,16 +48,39 @@ const filePath = String(payload.tool_input?.file_path ?? "");
 
 if (!filePath.startsWith(`${ROOT}/`) || !/\.(tsx?|mts)$/.test(filePath)) process.exit(0);
 
-if (!existsSync(filePath) || !existsSync(OXLINT) || !existsSync(CONFIG)) process.exit(0);
+if (!existsSync(filePath)) process.exit(0);
 
-const rel = filePath.slice(ROOT.length + 1);
+// Lint from the checkout that owns the file, not from the session root. An agent
+// worktree under `.claude/worktrees/<name>/` is its own checkout. From the main
+// root its files sit at `.claude/worktrees/<name>/packages/...`, so `overrides`
+// globs such as `packages/env/src/**` miss them and allowed code reads as an
+// error. `git rev-parse --show-toplevel` returns the worktree root for them.
+const top = spawnSync("git", ["-C", dirname(filePath), "rev-parse", "--show-toplevel"], {
+  encoding: "utf8",
+  timeout: TIMEOUT_MS,
+});
 
-// The same config as `pnpm lint`, from the root, so `overrides` globs and
-// `ignorePatterns` resolve as they do there.
+const repoRoot = top.status === 0 && top.stdout.trim() ? top.stdout.trim() : ROOT;
+
+const CONFIG = join(repoRoot, ".oxlintrc.json");
+
+const OXLINT = [repoRoot, ROOT]
+  .map((dir) => join(dir, "node_modules", ".bin", "oxlint"))
+  .find((bin) => existsSync(bin));
+
+if (!OXLINT || !existsSync(CONFIG)) process.exit(0);
+
+// git prints the real path; the payload path can go through a symlink.
+const rel = relative(realpathSync(repoRoot), realpathSync(filePath));
+
+if (rel.startsWith("..")) process.exit(0);
+
+// The same config as `pnpm lint`, from that checkout's root, so `overrides`
+// globs and `ignorePatterns` resolve as they do there.
 const run = spawnSync(
   OXLINT,
   ["--config", CONFIG, "--no-error-on-unmatched-pattern", "--format", "json", rel],
-  { cwd: ROOT, encoding: "utf8", timeout: TIMEOUT_MS },
+  { cwd: repoRoot, encoding: "utf8", timeout: TIMEOUT_MS },
 );
 
 if (run.error || !run.stdout) process.exit(0);
