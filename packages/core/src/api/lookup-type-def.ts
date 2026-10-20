@@ -128,6 +128,21 @@ interface SymbolEntry {
 
 type SymbolTable = Map<string, SymbolEntry>;
 
+/**
+ * The `package.json` fields the resolver reads. A file whose `version` is not
+ * a non-empty string is skipped. The other fields stay `unknown`, because each
+ * reader checks the shape it accepts; the parse strips the remaining keys.
+ */
+const InstalledPackageJsonSchema = z.object({
+  version: z.string().min(1),
+  types: z.unknown(),
+  typings: z.unknown(),
+  exports: z.unknown(),
+  typesVersions: z.unknown(),
+});
+
+type InstalledPackageJson = z.infer<typeof InstalledPackageJsonSchema>;
+
 export interface LookupTypeDefOptions {
   /**
    * M12 (ADR-0027): additional search roots to probe before falling back to
@@ -171,19 +186,18 @@ export async function lookupTypeDef(
   }
   if (!roots.includes(repoRoot)) roots.push(repoRoot);
 
-  let pkgJson: Record<string, unknown> | undefined;
+  let pkgJson: InstalledPackageJson | undefined;
   let version: string | undefined;
   let effectiveRoot: string | undefined;
   for (const root of roots) {
     const packageJsonPath = join(root, "node_modules", packageName, "package.json");
     try {
       const raw = await fs.readFile(packageJsonPath, "utf8");
-      const parsed: unknown = JSON.parse(raw);
-      if (!isRecord(parsed)) continue;
-      const v = parsed["version"];
-      if (typeof v !== "string" || v.length === 0) continue;
-      pkgJson = parsed;
-      version = v;
+      const json: unknown = JSON.parse(raw);
+      const parsed = InstalledPackageJsonSchema.safeParse(json);
+      if (!parsed.success) continue;
+      pkgJson = parsed.data;
+      version = parsed.data.version;
       effectiveRoot = root;
       break;
     } catch {
@@ -288,7 +302,7 @@ interface ResolveOpts {
   repoRoot: string;
   packageName: string;
   subpath: string;
-  packageJson: Record<string, unknown>;
+  packageJson: InstalledPackageJson;
 }
 
 async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
@@ -305,15 +319,13 @@ async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
   if (subpath === "") {
     // Root entrypoint.
     // a) `package.json#types` / `#typings`.
-    for (const key of ["types", "typings"]) {
-      const v = packageJson[key];
+    for (const v of [packageJson.types, packageJson.typings]) {
       if (typeof v === "string") {
         await pushIfExists(resolvePath(pkgDir, v));
       }
     }
     // b) `package.json#exports['.']`.
-    const exportsField = packageJson["exports"];
-    const fromExports = pickTypesFromExports(exportsField, ".");
+    const fromExports = pickTypesFromExports(packageJson.exports, ".");
     if (fromExports) await pushIfExists(resolvePath(pkgDir, fromExports));
 
     // c) `@types/<pkg>/index.d.ts`.
@@ -321,12 +333,11 @@ async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
   } else {
     // Subpath import.
     // a) `package.json#exports['./<subpath>']`.
-    const exportsField = packageJson["exports"];
-    const fromExports = pickTypesFromExports(exportsField, "./" + subpath);
+    const fromExports = pickTypesFromExports(packageJson.exports, "./" + subpath);
     if (fromExports) await pushIfExists(resolvePath(pkgDir, fromExports));
 
     // b) `package.json#typesVersions['*'][<subpath>]`.
-    const typesVersions = packageJson["typesVersions"];
+    const typesVersions = packageJson.typesVersions;
     if (isRecord(typesVersions)) {
       // Walk version ranges in declaration order; first matching wins.
       for (const map of Object.values(typesVersions)) {

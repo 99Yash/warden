@@ -403,12 +403,8 @@ const LaneErrorSchema = z.looseObject({
 /** The fenced JSON submission in the lane's final message. */
 const LaneSubmissionSchema = z.looseObject({ findings: z.array(z.unknown()) });
 
-/** The object at `record[key]`, or `undefined` when that value is not an object. */
-function recordField(
-  record: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> | undefined {
-  const value = record[key];
+/** The value as a record, or `undefined` when it is not an object. */
+function asRecord(value: unknown) {
   return isRecord(value) ? value : undefined;
 }
 
@@ -467,7 +463,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       if (typeof sid === "string" && sid !== "") sessionId = sid;
     }
     if (record["type"] === "step_start") {
-      const part = recordField(record, "part");
+      const part = asRecord(record["part"]);
       const id = part?.["messageID"];
       if (typeof id !== "string" || id === "") {
         parseError ??= "step_start without messageID in the event stream";
@@ -476,7 +472,7 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       announcedStepIds.add(id);
       lastStepId = id;
     } else if (record["type"] === "text") {
-      const part = recordField(record, "part");
+      const part = asRecord(record["part"]);
       const id = part?.["messageID"];
       if (typeof id !== "string" || id === "") {
         parseError ??= "text part without messageID in the event stream";
@@ -488,16 +484,16 @@ export function parseLaneEvents(stdout: string): ParsedLane {
       if (list !== undefined) list.push(text);
       else textsById.set(id, [text]);
     } else if (record["type"] === "tool_use") {
-      const part = recordField(record, "part");
+      const part = asRecord(record["part"]);
       // Wire shape is `part.tool` (verified against a live `--format json`
       // stream); `part.name` is accepted as a fallback for forward tolerance.
       const name = part?.["tool"] ?? part?.["name"];
       if (typeof name !== "string" || name === "") continue;
       seenByTool.set(name, (seenByTool.get(name) ?? 0) + 1);
-      const state = part === undefined ? undefined : recordField(part, "state");
+      const state = asRecord(part?.["state"]);
       if (state?.["status"] === "completed") {
         completedByTool.set(name, (completedByTool.get(name) ?? 0) + 1);
-        const time = recordField(state, "time");
+        const time = asRecord(state["time"]);
         const start = time?.["start"];
         const end = time?.["end"];
         if (typeof start === "number" && typeof end === "number" && end >= start) {

@@ -1,4 +1,4 @@
-import { createId, db, eq, externalKnowledge, sql } from "@warden/db";
+import { createId, db, eq, externalKnowledge, sql, type NewExternalKnowledge } from "@warden/db";
 import type { ZodType } from "zod";
 import type { SourceType } from "../schema.js";
 
@@ -68,7 +68,7 @@ export interface PutOptions {
   queryKey: string;
   sourceType: ExternalSourceType;
   sourceUrl?: string;
-  payload: Record<string, unknown>;
+  payload: NewExternalKnowledge["payload"];
   ttlMs: number;
 }
 

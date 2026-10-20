@@ -104,12 +104,12 @@ function toolDefinitions(reviewCache: ReviewResultCache) {
  * output direction would advertise the response shape as the request shape.
  * `$schema` is dropped because MCP clients do not expect it in a tool schema.
  */
-function toInputJsonSchema(schema: ZodType): Record<string, unknown> {
+function toInputJsonSchema(schema: ZodType) {
   const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { io: "input" });
   return rest;
 }
 
-function toOutputJsonSchema(schema: ZodType): Record<string, unknown> {
+function toOutputJsonSchema(schema: ZodType) {
   const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { io: "output" });
   return rest;
 }

@@ -78,6 +78,12 @@ export class SqliteIndexExporter implements IndexExporter {
   }
 }
 
-function write(stream: NodeJS.WritableStream, record: Record<string, unknown>): void {
+/** The `kind` of each JSONL line; `SqliteIndexImporter` switches on the same values. */
+type ExportRecordKind = "manifest" | "meta" | "chunk" | "embedding" | "merkle";
+
+function write<ExportRecord extends { kind: ExportRecordKind }>(
+  stream: NodeJS.WritableStream,
+  record: ExportRecord,
+): void {
   stream.write(`${JSON.stringify(record)}\n`);
 }
