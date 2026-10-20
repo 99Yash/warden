@@ -8,13 +8,20 @@
  * `callWorker()` (the worker's LLM-call seam) with a mock model, so the real
  * `streamText` + `CallUsageMeter` wiring runs.
  *
- * Offline: mock models only, no network, no paid call.
+ * Gap 2 — the GPT-6.x long-context tier. A request whose prompt is more
+ * than 272k input tokens pays the tier rates for all of its tokens. The cost
+ * is priced per request, not on the summed total. The models.dev catalog
+ * parser reads `cost.tiers`, and a bad tier entry does not break the parse.
+ *
+ * Offline: mock models and a mock `fetch` only, no network, no paid call.
  *
  * Usage: pnpm --filter @warden/cli smoke:cost-gaps
  */
 
-import { tool } from "@warden/ai";
+import { requestCostUsd, tool, type LlmModelPrice, type ResolvedLlmModel } from "@warden/ai";
+import { _resetModelCatalogCacheForTests, modelCatalogPrice } from "@warden/ai/model-catalog";
 import { MockLanguageModelV3 } from "@warden/ai/test";
+import { priceRequestsByTier } from "@warden/core/review-harness/harness";
 import { CallUsageMeter, ReviewScratchpad } from "@warden/core/review-harness/scratchpad";
 import { callWorker } from "@warden/core/review-harness/workers/run-worker";
 import { z } from "zod";
@@ -251,6 +258,152 @@ process.stdout.write("\n[6] boss meter: retried attempts and the scratchpad reco
   pad.recordBossUsage(snap);
   assert(pad.bossTokens()?.inputTokens === 10_000, "scratchpad holds the failed boss usage");
   assert(pad.bossUsage()?.unknownRequests === 2, "scratchpad holds the unknown count");
+}
+
+// ---------------------------------------------------------------------------
+// Gap 2 — long-context tier, priced per request.
+// ---------------------------------------------------------------------------
+
+// models.dev `openai/gpt-6.1-sol` on 2026-10-20 (same rates as the OpenAI
+// pricing page: $2 / $0.10 / $2.50 / $10 short, $4 / $0.20 / $5 / $15 long).
+const SOL: LlmModelPrice = {
+  input: 2,
+  output: 10,
+  cachedInput: 0.1,
+  cacheWriteInput: 2.5,
+  contextTiers: [
+    {
+      aboveInputTokens: 272_000,
+      rates: { input: 4, output: 15, cachedInput: 0.2, cacheWriteInput: 5 },
+    },
+  ],
+};
+const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+process.stdout.write("\n[7] one request above 272k pays the tier for all its tokens\n");
+{
+  const big = { inputTokens: 300_000, outputTokens: 2_000, cachedInputTokens: 50_000 };
+  // 250k uncached x $4 + 50k cached x $0.20 + 2k output x $15, per 1M.
+  const want = 1.0 + 0.01 + 0.03;
+  const got = requestCostUsd(SOL, big);
+  assert(close(got, want), `300k-input request costs $${want} (got $${got})`);
+  const base = 0.5 + 0.005 + 0.02;
+  assert(close(requestCostUsd({ ...SOL, contextTiers: [] }, big), base), "no tier = base rates");
+}
+
+process.stdout.write("\n[8] the threshold is strict and per request\n");
+{
+  const at = requestCostUsd(SOL, { inputTokens: 272_000, outputTokens: 0 });
+  const over = requestCostUsd(SOL, { inputTokens: 272_001, outputTokens: 0 });
+  assert(close(at, 0.544), `272,000 input tokens pay the base rate (got $${at})`);
+  assert(close(over, 1.088004), `272,001 input tokens pay the tier rate (got $${over})`);
+}
+
+process.stdout.write("\n[9] harness prices each step, not the summed total\n");
+{
+  // A worker tool loop with two 200k-token steps. No single request is
+  // above 272k, so no request pays the tier, though the sum (400k) is.
+  const step = { inputTokens: 200_000, outputTokens: 1_000 };
+  const usage = { sonnet: { inputTokens: 400_000, outputTokens: 2_000 } };
+  const prices = { opus: SOL, sonnet: SOL, haiku: SOL };
+  const perStep = priceRequestsByTier(usage, { opus: [], sonnet: [step, step], haiku: [] }, prices);
+  assert(close(perStep.costUsd, 0.82), `two 200k steps cost $0.82 (got $${perStep.costUsd})`);
+  const asOne = requestCostUsd(SOL, usage.sonnet);
+  assert(close(asOne, 1.63), `pricing the sum as one request would say $1.63 (got $${asOne})`);
+  assert(perStep.costByTier.sonnet === 0.82, "costByTier carries the per-step sum");
+  assert(perStep.costByTier.opus === undefined, "no block, no tier entry");
+
+  // A boss with one long step and one short step: only the long one pays more.
+  const mixed = priceRequestsByTier(
+    { opus: { inputTokens: 400_000, outputTokens: 2_000 } },
+    {
+      opus: [
+        { inputTokens: 300_000, outputTokens: 1_000 },
+        { inputTokens: 100_000, outputTokens: 1_000 },
+      ],
+      sonnet: [],
+      haiku: [],
+    },
+    prices,
+  );
+  // 300k x $4 + 1k x $15 = 1.215; 100k x $2 + 1k x $10 = 0.21.
+  assert(close(mixed.costUsd, 1.425), `mixed steps cost $1.425 (got $${mixed.costUsd})`);
+}
+
+process.stdout.write("\n[10] models.dev catalog: tiers parse, bad entries skip\n");
+{
+  const MODEL = {
+    provider: "openai",
+    modelId: "gpt-6.1-sol",
+    label: "gpt-6.1-sol high",
+    fallbackPricePerMillionTokens: {
+      input: 99,
+      output: 199,
+      cachedInput: 9,
+      cacheWriteInput: 12,
+      contextTiers: [
+        { aboveInputTokens: 1, rates: { input: 1, output: 1, cachedInput: 1, cacheWriteInput: 1 } },
+      ],
+    },
+  } satisfies ResolvedLlmModel;
+  const originalFetch = globalThis.fetch;
+  try {
+    _resetModelCatalogCacheForTests();
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          openai: {
+            models: {
+              "gpt-6.1-sol": {
+                id: "gpt-6.1-sol",
+                cost: {
+                  input: 2,
+                  output: 10,
+                  cache_read: 0.1,
+                  cache_write: 2.5,
+                  tiers: [
+                    "not a tier",
+                    { input: 9, output: 9, tier: { type: "batch", size: 1 } },
+                    {
+                      input: 4,
+                      output: 15,
+                      cache_read: 0.2,
+                      cache_write: 5,
+                      tier: { type: "context", size: 272000 },
+                    },
+                  ],
+                },
+              },
+              "gpt-odd": { id: "gpt-odd", cost: { input: 1, output: 2, tiers: { not: "array" } } },
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const price = await modelCatalogPrice(MODEL);
+    assert(price.input === 2, "catalog base price used (the catalog parsed)");
+    const tiers = price.contextTiers ?? [];
+    assert(
+      tiers.length === 1,
+      `one context tier kept, bad and non-context skipped (got ${tiers.length})`,
+    );
+    assert(tiers[0]?.aboveInputTokens === 272_000, "tier threshold is 272000");
+    assert(
+      tiers[0]?.rates.input === 4 &&
+        tiers[0].rates.output === 15 &&
+        tiers[0].rates.cachedInput === 0.2 &&
+        tiers[0].rates.cacheWriteInput === 5,
+      "tier rates are $4 / $15 / $0.20 / $5",
+    );
+
+    _resetModelCatalogCacheForTests();
+    globalThis.fetch = async () => new Response("down", { status: 503 });
+    const fallback = await modelCatalogPrice(MODEL);
+    assert(fallback.contextTiers?.length === 1, "unreachable catalog keeps the fallback tiers");
+  } finally {
+    globalThis.fetch = originalFetch;
+    _resetModelCatalogCacheForTests();
+  }
 }
 
 if (failed > 0) {

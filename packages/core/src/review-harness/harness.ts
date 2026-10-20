@@ -2,6 +2,7 @@ import {
   getReviewModelLabelsByTier,
   getReviewModelPricingByTier,
   recordDroppedCandidate,
+  requestCostUsd,
   type LlmModelPrice,
   type ReviewCostTier,
 } from "@warden/ai";
@@ -294,8 +295,8 @@ export async function runReviewHarness(input: ReviewHarnessInput): Promise<Revie
   // Per-tier token-usage bucket: opus (boss) + sonnet/haiku (workers).
   // Workers record their actual tier in the scratchpad even when the boss
   // overrode the per-concern default, so this aggregation is honest.
-  const { tokenUsage, unknownRequests } = summarizeUsage(scratchpad);
-  const costs = await computeCosts(tokenUsage);
+  const { tokenUsage, requestsByTier, unknownRequests } = summarizeUsage(scratchpad);
+  const costs = await computeCosts(tokenUsage, requestsByTier);
   if (unknownRequests > 0) {
     aggregatedDegraded.push(unknownUsageEntry(unknownRequests));
   }
@@ -447,8 +448,8 @@ async function recordFailedReviewRun(input: {
   scratchpad: ReviewScratchpad;
 }): Promise<void> {
   try {
-    const { tokenUsage, unknownRequests } = summarizeUsage(input.scratchpad);
-    const costs = await computeCosts(tokenUsage);
+    const { tokenUsage, requestsByTier, unknownRequests } = summarizeUsage(input.scratchpad);
+    const costs = await computeCosts(tokenUsage, requestsByTier);
     recordReviewRun({
       runId: input.runId,
       inputHash: input.inputHash,
@@ -496,8 +497,16 @@ function formatErr(err: unknown): string {
 // AI SDK 6 reports `inputTokens` as the TOTAL input: it already includes the
 // cache-read and cache-write parts (Anthropic: `total = input + cacheWrite +
 // cacheRead`; OpenAI and Google: `total = prompt tokens`, cached included).
-// `tierCost` splits the total into its three parts and bills each part once.
+// `requestCostUsd` (`@warden/ai`) splits the total into its three parts and
+// bills each part once.
+//
+// Cost is priced per model request (per tool-loop step), never on the
+// summed total: a long-context tier (GPT-6.x above 272k input tokens)
+// depends on the prompt size of one request. A sum over steps can cross the
+// threshold when no single request does.
 // ---------------------------------------------------------------------------
+
+type RequestsByTier = Record<ReviewCostTier, TokenUsage[]>;
 
 function toUsageBlock(usage: TokenUsageBlock): TokenUsageBlock {
   const block: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -518,13 +527,22 @@ function addUsage(acc: TokenUsageBlock, next: TokenUsage): TokenUsageBlock {
  */
 function summarizeUsage(scratchpad: ReviewScratchpad): {
   tokenUsage: TokenUsageByTier | undefined;
+  requestsByTier: RequestsByTier;
   unknownRequests: number;
 } {
   const boss = scratchpad.bossUsage();
   const workers = scratchpad.workerOutputs();
+  const requestsByTier: RequestsByTier = {
+    opus: [...(boss?.requests ?? [])],
+    sonnet: [],
+    haiku: [],
+  };
   let unknownRequests = boss?.unknownRequests ?? 0;
-  for (const w of workers) unknownRequests += w.usage?.unknownRequests ?? 0;
-  return { tokenUsage: buildTokenUsageByTier(boss, workers), unknownRequests };
+  for (const w of workers) {
+    unknownRequests += w.usage?.unknownRequests ?? 0;
+    if (w.usage && w.tier) requestsByTier[w.tier].push(...w.usage.requests);
+  }
+  return { tokenUsage: buildTokenUsageByTier(boss, workers), requestsByTier, unknownRequests };
 }
 
 function unknownUsageEntry(unknownRequests: number): DegradedEntry {
@@ -564,54 +582,49 @@ function buildTokenUsageByTier(
   };
 }
 
-function tierCost(
-  block: TokenUsageBlock | undefined,
-  tier: ReviewCostTier,
-  prices: Record<ReviewCostTier, LlmModelPrice>,
-): number {
-  if (!block) return 0;
-  const price = prices[tier];
-  // `inputTokens` is the total input (AI SDK 6). Take the cache parts out so
-  // each token is billed once: uncached at `input`, cache reads at
-  // `cachedInput`, cache writes at `cacheWriteInput`. The uncached part equals
-  // the SDK's `inputTokenDetails.noCacheTokens` for every installed provider.
-  const cacheRead = block.cachedInputTokens ?? 0;
-  const cacheWrite = block.cacheWriteInputTokens ?? 0;
-  const noCache = Math.max(0, block.inputTokens - cacheRead - cacheWrite);
-  const inputCost = (noCache / 1_000_000) * price.input;
-  const cacheReadCost = (cacheRead / 1_000_000) * price.cachedInput;
-  const cacheWriteCost = (cacheWrite / 1_000_000) * price.cacheWriteInput;
-  const outputCost = (block.outputTokens / 1_000_000) * price.output;
-  return inputCost + cacheReadCost + cacheWriteCost + outputCost;
+/** Sum of `requestCostUsd` over the requests of one tier. */
+function tierCost(requests: readonly TokenUsage[], price: LlmModelPrice): number {
+  let cost = 0;
+  for (const r of requests) cost += requestCostUsd(price, r);
+  return cost;
 }
 
 async function computeCosts(
   usage: TokenUsageByTier | undefined,
+  requests: RequestsByTier,
 ): Promise<{ costUsd: number; costByTier: CostByTier; costLabels: CostLabelsByTier } | undefined> {
   if (!usage) return undefined;
   const prices = await getReviewModelPricingByTier();
-  const labels = getReviewModelLabelsByTier();
-  const opus = usage.opus !== undefined ? round4(tierCost(usage.opus, "opus", prices)) : undefined;
-  const sonnet =
-    usage.sonnet !== undefined ? round4(tierCost(usage.sonnet, "sonnet", prices)) : undefined;
-  const haiku =
-    usage.haiku !== undefined ? round4(tierCost(usage.haiku, "haiku", prices)) : undefined;
-  // Sum the raw (unrounded) tier costs then round once to preserve the
-  // pre-refactor `costUsd` value to the cent. Individual tier figures are
-  // rounded for display.
-  const total = round4(
-    tierCost(usage.opus, "opus", prices) +
-      tierCost(usage.sonnet, "sonnet", prices) +
-      tierCost(usage.haiku, "haiku", prices),
-  );
+  const costs = priceRequestsByTier(usage, requests, prices);
+  return { ...costs, costLabels: getReviewModelLabelsByTier() };
+}
+
+/**
+ * Pure cost step of `computeCosts`: price every request of each tier on its
+ * own, then sum. A tier gets a `costByTier` entry when `usage` has a block
+ * for it. Exported for `smoke-cost-gaps.mts`.
+ *
+ * @internal
+ */
+export function priceRequestsByTier(
+  usage: TokenUsageByTier,
+  requests: RequestsByTier,
+  prices: Record<ReviewCostTier, LlmModelPrice>,
+): { costUsd: number; costByTier: CostByTier } {
+  const raw = {
+    opus: tierCost(requests.opus, prices.opus),
+    sonnet: tierCost(requests.sonnet, prices.sonnet),
+    haiku: tierCost(requests.haiku, prices.haiku),
+  };
+  // Sum the raw (unrounded) tier costs then round once. Individual tier
+  // figures are rounded for display.
   return {
-    costUsd: total,
+    costUsd: round4(raw.opus + raw.sonnet + raw.haiku),
     costByTier: {
-      ...(opus !== undefined ? { opus } : {}),
-      ...(sonnet !== undefined ? { sonnet } : {}),
-      ...(haiku !== undefined ? { haiku } : {}),
+      ...(usage.opus !== undefined ? { opus: round4(raw.opus) } : {}),
+      ...(usage.sonnet !== undefined ? { sonnet: round4(raw.sonnet) } : {}),
+      ...(usage.haiku !== undefined ? { haiku: round4(raw.haiku) } : {}),
     },
-    costLabels: labels,
   };
 }
 

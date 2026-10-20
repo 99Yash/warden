@@ -21,7 +21,8 @@ export interface LlmJsonObject {
 }
 export type LlmProviderOptions = Record<string, LlmJsonObject>;
 
-export interface LlmModelPrice {
+/** USD per 1M tokens for each token kind of one request. */
+export interface LlmPriceRates {
   /** USD per 1M uncached input tokens. */
   input: number;
   /** USD per 1M output tokens. */
@@ -33,6 +34,24 @@ export interface LlmModelPrice {
    * (`inputTokenDetails.cacheWriteTokens`); the catalog falls back to `input`.
    */
   cacheWriteInput: number;
+}
+
+/**
+ * A long-context price tier. A request whose prompt is MORE than
+ * `aboveInputTokens` pays `rates` for ALL of its tokens (input, cache reads,
+ * cache writes, and output), not only for the tokens above the threshold.
+ * The prompt size is the total input of that one request, cache reads and
+ * cache writes included. The tier applies per request (per tool-loop step),
+ * never to the sum of a session.
+ */
+export interface LlmContextTier {
+  aboveInputTokens: number;
+  rates: LlmPriceRates;
+}
+
+export interface LlmModelPrice extends LlmPriceRates {
+  /** Long-context tiers, when the model has them. Absent = one flat price. */
+  contextTiers?: readonly LlmContextTier[];
 }
 
 export interface ResolvedLlmModel {
@@ -63,6 +82,14 @@ const ANTHROPIC_SONNET_5_5 = {
   providerOptions: { anthropic: { effort: "high" } },
 } satisfies ResolvedLlmModel;
 
+// Anthropic long context (checked 2026-10-20,
+// https://platform.claude.com/docs/en/about-claude/pricing#long-context-pricing):
+// "Claude 4.6 and later models (except Claude Haiku 5.5) ... include the full
+// 1M token context window at standard pricing." Haiku 4.5 has a 200k
+// context window and no tier. So no Anthropic model below has a tier. Haiku
+// 5.5 has one (prompts over 100,000 tokens); models.dev lists it, so the
+// catalog prices it if Haiku 5.5 replaces Haiku 4.5 here.
+//
 // Haiku 5.5 ($0.1/$0.5) is cheaper, but Cloudflare AI Gateway Unified
 // Billing does not serve it yet (2026-10-09: the gateway forwards the call
 // with no key). Keep Haiku 4.5 until it does.
@@ -91,6 +118,19 @@ const ANTHROPIC_HAIKU_4_5 = {
 //
 // 2026-10-09 prices: GPT-6.1 Sol ($2/$10) replaces GPT-5.5 ($5/$30), and
 // GPT-6 Luna ($0.1/$0.5) replaces GPT-5.4 mini ($0.75/$4.5).
+//
+// Long-context tier (checked 2026-10-20). Sources:
+//   - https://developers.openai.com/api/docs/models/gpt-6.1-sol and
+//     .../gpt-6-luna: "Prompts with more than 272K input tokens are priced
+//     at 2x input and cache rates and 1.5x output for the full request."
+//   - https://developers.openai.com/api/docs/pricing: "Short context: ≤272K
+//     input tokens. Long context: >272K input tokens."
+//   - https://models.dev/api.json: `cost.tiers[]` with
+//     `tier: { type: "context", size: 272000 }`; same rates as below.
+// So the tier is per request, it counts all input tokens of the request
+// (cached input included), and it reprices input, cache reads, cache
+// writes, and output. The fallback prices below carry the tier for when
+// models.dev is unreachable.
 // `forceReasoning`: @ai-sdk/openai 3.0.72 knows reasoning models only by
 // the `o1`/`o3`/`o4-mini`/`gpt-5` prefixes, so without it the SDK drops
 // `reasoningEffort` for `gpt-6*` ("not supported for non-reasoning models").
@@ -98,7 +138,18 @@ const OPENAI_GPT_6_1_SOL = {
   provider: "openai",
   modelId: "gpt-6.1-sol",
   label: "gpt-6.1-sol high",
-  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1, cacheWriteInput: 2.5 },
+  fallbackPricePerMillionTokens: {
+    input: 2,
+    output: 10,
+    cachedInput: 0.1,
+    cacheWriteInput: 2.5,
+    contextTiers: [
+      {
+        aboveInputTokens: 272_000,
+        rates: { input: 4, output: 15, cachedInput: 0.2, cacheWriteInput: 5 },
+      },
+    ],
+  },
   providerOptions: {
     openai: { reasoningEffort: "high", strictJsonSchema: false, forceReasoning: true },
   },
@@ -113,6 +164,12 @@ const OPENAI_GPT_6_LUNA = {
     output: 0.5,
     cachedInput: 0.01,
     cacheWriteInput: 0.125,
+    contextTiers: [
+      {
+        aboveInputTokens: 272_000,
+        rates: { input: 0.2, output: 0.75, cachedInput: 0.02, cacheWriteInput: 0.25 },
+      },
+    ],
   },
   providerOptions: {
     openai: { reasoningEffort: "high", strictJsonSchema: false, forceReasoning: true },
@@ -264,6 +321,13 @@ export function getReviewModelLabelsByTier(): Record<ReviewCostTier, string> {
  *
  * Tier mapping is the stable contract; specific Gemini SKUs are
  * point-in-time and revisited on each Google generation ship.
+ *
+ * Pricing: no call site uses these since the 2026-05-17 amendment, so no
+ * Gemini usage is priced today. If one comes back: Gemini 2.5 Pro has a
+ * long-context tier ("prompts > 200k tokens": $2.50 input, $15 output,
+ * $0.25 caching, per https://ai.google.dev/gemini-api/docs/pricing, checked
+ * 2026-10-20). models.dev lists it in `cost.tiers`, so the catalog parser
+ * reads it. Gemini 2.5 Flash has no tier.
  */
 export function getBossFallbackModel(): LanguageModel | undefined {
   const g = googleProvider();
