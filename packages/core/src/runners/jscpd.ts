@@ -51,6 +51,7 @@ export async function runJscpd(
 
   let detectClones: DetectClones;
   try {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- createRequire returns `any`; DetectClones restates jscpd's CJS export
     detectClones = (requireCjs("jscpd") as { detectClones: DetectClones }).detectClones;
   } catch (err) {
     return {

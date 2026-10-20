@@ -7,6 +7,7 @@ import {
   merkle as merkleTable,
   sql,
 } from "@warden/db";
+import { isRecord } from "../guards.js";
 import type { ExportCounts, IndexImporter } from "./interfaces.js";
 
 /**
@@ -39,12 +40,13 @@ export class SqliteIndexImporter implements IndexImporter {
     for await (const rawLine of rl) {
       const line = rawLine.trim();
       if (!line) continue;
-      let record: Record<string, unknown>;
+      let record: unknown;
       try {
-        record = JSON.parse(line) as Record<string, unknown>;
+        record = JSON.parse(line);
       } catch {
         continue;
       }
+      if (!isRecord(record)) continue;
       switch (record.kind) {
         case "manifest":
           // Format version hand-off. M6 only knows version 1; bumping is ADR-worthy.

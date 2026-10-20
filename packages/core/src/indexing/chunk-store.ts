@@ -1,4 +1,5 @@
 import { and, chunks as chunksTable, count, db, eq, inArray } from "@warden/db";
+import { isSupportedLanguage } from "../context/chunker.js";
 import type { ChunkRecord, ChunkStore } from "./interfaces.js";
 
 /**
@@ -46,7 +47,8 @@ export class SqliteChunkStore implements ChunkStore {
         .where(inArray(chunksTable.chunkHash, slice))
         .all();
       for (const row of rows) {
-        out.set(row.chunkHash, rowToRecord(row));
+        const record = rowToRecord(row);
+        if (record !== null) out.set(row.chunkHash, record);
       }
     }
     return out;
@@ -58,7 +60,7 @@ export class SqliteChunkStore implements ChunkStore {
       .from(chunksTable)
       .where(and(eq(chunksTable.filePath, filePath), eq(chunksTable.fileSha, fileSha)))
       .all();
-    return rows.map(rowToRecord);
+    return rows.flatMap((row) => rowToRecord(row) ?? []);
   }
 
   async count(): Promise<number> {
@@ -67,7 +69,15 @@ export class SqliteChunkStore implements ChunkStore {
   }
 }
 
-function rowToRecord(row: typeof chunksTable.$inferSelect): ChunkRecord {
+/**
+ * `null` when the row's language is not a `SupportedLanguage`. The chunker
+ * writes only supported languages, but the JSONL importer (`importer.ts`)
+ * writes the language of an imported row as it is. The readers treat such a
+ * row as absent.
+ */
+function rowToRecord(row: typeof chunksTable.$inferSelect): ChunkRecord | null {
+  const language = row.language;
+  if (!isSupportedLanguage(language)) return null;
   let symbolPath: string[] = [];
   try {
     const parsed = JSON.parse(row.symbolPathJson) as unknown;
@@ -80,10 +90,7 @@ function rowToRecord(row: typeof chunksTable.$inferSelect): ChunkRecord {
     chunkHash: row.chunkHash,
     filePath: row.filePath,
     fileSha: row.fileSha,
-    // The schema enum is wider than the chunker's runtime guarantee; the
-    // value at write time is always one of `SupportedLanguage` so the cast
-    // is safe.
-    language: row.language as ChunkRecord["language"],
+    language,
     symbolPath,
     startLine: row.startLine,
     endLine: row.endLine,

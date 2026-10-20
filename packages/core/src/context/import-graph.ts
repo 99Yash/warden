@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { and, db, eq, importGraph } from "@warden/db";
+import { z } from "zod";
+import { errnoCode } from "../guards.js";
 import { sha256Hex } from "../hash.js";
 import { plural } from "../plural.js";
 import type { DegradedEntry } from "../schema.js";
@@ -101,7 +103,7 @@ export async function loadImportGraph(input: {
       bytes = await readFile(abs);
     } catch (err) {
       // A missing path is classified below; any other error is a read failure.
-      status[index] = (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unreadable";
+      status[index] = errnoCode(err) === "ENOENT" ? "absent" : "unreadable";
       return;
     }
     status[index] = "read";
@@ -262,14 +264,31 @@ function readImportGraphRow(
     .get();
   if (!row) return undefined;
   try {
-    return {
-      imports: JSON.parse(row.importsJson) as ImportRef[],
-      exports: JSON.parse(row.exportsJson) as ExportRef[],
-    };
+    // A row that does not match the parser's shape is a cache miss: the
+    // caller parses the source again and rewrites the row.
+    const imports = z.array(ImportRefSchema).safeParse(JSON.parse(row.importsJson));
+    const exports = z.array(ExportRefSchema).safeParse(JSON.parse(row.exportsJson));
+    if (!imports.success || !exports.success) return undefined;
+    return { imports: imports.data, exports: exports.data };
   } catch {
     return undefined;
   }
 }
+
+const ImportRefSchema = z.object({
+  module: z.string(),
+  resolved: z.string().exactOptional(),
+  kind: z.enum(["value", "type"]),
+  symbols: z.array(z.string()),
+  startLine: z.number(),
+  endLine: z.number(),
+}) satisfies z.ZodType<ImportRef>;
+
+const ExportRefSchema = z.object({
+  symbol: z.string(),
+  startLine: z.number(),
+  endLine: z.number(),
+}) satisfies z.ZodType<ExportRef>;
 
 function insertImportGraphRow(
   filePath: string,

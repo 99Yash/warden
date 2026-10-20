@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import type { ChangedFile } from "../diff/index.js";
+import { errnoCode } from "../guards.js";
 import type { DegradedEntry } from "../schema.js";
 import { formatErr } from "./_shared.js";
 import type { ToolFinding } from "./types.js";
@@ -178,7 +179,7 @@ async function collectDocs(repoRoot: string, degraded: DegradedEntry[]): Promise
   try {
     await walkDocsDir(docsRoot, repoRoot, 0, out);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+    if (errnoCode(err) !== "ENOENT") {
       degraded.push({
         kind: "warning",
         topic: "consistency",
@@ -501,7 +502,7 @@ async function loadCliFacts(
     const content = await readFile(indexAbs, "utf8");
     parseCliFile(indexAbs, content, out);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined; // not a warden tree
+    if (errnoCode(err) === "ENOENT") return undefined; // not a warden tree
     degraded.push({
       kind: "warning",
       topic: "consistency",
@@ -524,7 +525,7 @@ async function loadCliFacts(
       }
     }
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+    if (errnoCode(err) !== "ENOENT") {
       degraded.push({
         kind: "warning",
         topic: "consistency",
@@ -623,7 +624,7 @@ async function collectPathLiterals(
   try {
     pkgEntries = await readdir(packagesDir, { withFileTypes: true });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if (errnoCode(err) === "ENOENT") return undefined;
     degraded.push({
       kind: "warning",
       topic: "consistency",
@@ -637,7 +638,7 @@ async function collectPathLiterals(
     try {
       await walkSourceForPathLiterals(srcDir, 0, out);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      if (errnoCode(err) === "ENOENT") continue;
       degraded.push({
         kind: "warning",
         topic: "consistency",

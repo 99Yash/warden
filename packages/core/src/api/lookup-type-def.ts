@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve as resolvePath } from "nod
 import ts from "typescript";
 import { and, db, eq, typeDefCache } from "@warden/db";
 import { z } from "zod";
+import { isRecord } from "../guards.js";
 
 /**
  * `lookupTypeDef` — M11 (ADR-0026) `.d.ts` resolver.
@@ -45,11 +46,14 @@ const TypeDefKindSchema = z.enum([
 
 export type TypeDefKind = z.infer<typeof TypeDefKindSchema>;
 
-export type NotFoundReason =
-  | "package_not_installed"
-  | "no_types"
-  | "symbol_not_found"
-  | "lookup_error";
+const NotFoundReasonSchema = z.enum([
+  "package_not_installed",
+  "no_types",
+  "symbol_not_found",
+  "lookup_error",
+]);
+
+export type NotFoundReason = z.infer<typeof NotFoundReasonSchema>;
 
 /**
  * Pre-shaped `Source` object the LLM copies verbatim into `Comment.sources[]`.
@@ -174,7 +178,8 @@ export async function lookupTypeDef(
     const packageJsonPath = join(root, "node_modules", packageName, "package.json");
     try {
       const raw = await fs.readFile(packageJsonPath, "utf8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) continue;
       const v = parsed["version"];
       if (typeof v !== "string" || v.length === 0) continue;
       pkgJson = parsed;
@@ -322,12 +327,11 @@ async function resolveDtsCandidates(opts: ResolveOpts): Promise<string[]> {
 
     // b) `package.json#typesVersions['*'][<subpath>]`.
     const typesVersions = packageJson["typesVersions"];
-    if (typesVersions && typeof typesVersions === "object") {
+    if (isRecord(typesVersions)) {
       // Walk version ranges in declaration order; first matching wins.
-      for (const versionRange of Object.keys(typesVersions)) {
-        const map = (typesVersions as Record<string, unknown>)[versionRange];
-        if (!map || typeof map !== "object") continue;
-        const subEntry = (map as Record<string, unknown>)[subpath];
+      for (const map of Object.values(typesVersions)) {
+        if (!isRecord(map)) continue;
+        const subEntry = map[subpath];
         if (Array.isArray(subEntry) && subEntry.length > 0) {
           const first: unknown = subEntry[0];
           if (typeof first === "string") {
@@ -385,16 +389,15 @@ function atTypesPackageName(packageName: string): string {
  *    only when the resolved string ends in `.d.ts`.
  */
 function pickTypesFromExports(exportsField: unknown, key: string): string | undefined {
-  if (!exportsField || typeof exportsField !== "object") return undefined;
-  const exportsMap = exportsField as Record<string, unknown>;
+  if (!isRecord(exportsField)) return undefined;
 
   // The exports field can itself be a single shape for `.` (no nested
   // keys). Handle that for the root case.
-  if (key === "." && !Object.keys(exportsMap).some((k) => k.startsWith("."))) {
+  if (key === "." && !Object.keys(exportsField).some((k) => k.startsWith("."))) {
     return pickFromConditionalShape(exportsField);
   }
 
-  const entry = exportsMap[key];
+  const entry = exportsField[key];
   if (entry === undefined) return undefined;
   return pickFromConditionalShape(entry);
 }
@@ -403,17 +406,16 @@ function pickFromConditionalShape(entry: unknown): string | undefined {
   if (typeof entry === "string") {
     return entry;
   }
-  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-    const obj = entry as Record<string, unknown>;
+  if (isRecord(entry)) {
     // Prefer `types`.
-    if (typeof obj["types"] === "string") return obj["types"];
-    if (obj["types"] && typeof obj["types"] === "object") {
-      const recur = pickFromConditionalShape(obj["types"]);
+    if (typeof entry["types"] === "string") return entry["types"];
+    if (entry["types"] && typeof entry["types"] === "object") {
+      const recur = pickFromConditionalShape(entry["types"]);
       if (recur) return recur;
     }
     // Then default / import / require — only if they land on a `.d.ts`.
     for (const k of ["default", "import", "require"]) {
-      const v = obj[k];
+      const v = entry[k];
       if (typeof v === "string" && v.endsWith(".d.ts")) return v;
       if (v && typeof v === "object") {
         const recur = pickFromConditionalShape(v);
@@ -818,6 +820,12 @@ function readCache(pkg: string, version: string, symbol: string): LookupTypeDefR
   return rowToResult(row, pkg, version, symbol);
 }
 
+/**
+ * `null` (a cache miss, so the caller looks the symbol up again and rewrites
+ * the row) when a positive row's `kind` is not a `TypeDefKind`. A negative
+ * row with an unknown `reason` reads as `lookup_error`, as a null one does.
+ */
+
 interface TypeDefRow {
   package: string;
   version: string;
@@ -838,9 +846,11 @@ function rowToResult(
   pkg: string,
   version: string,
   symbol: string,
-): LookupTypeDefResult {
+): LookupTypeDefResult | null {
   if (row.found) {
-    const kind = row.kind as TypeDefKind;
+    const parsedKind = TypeDefKindSchema.safeParse(row.kind);
+    if (!parsedKind.success) return null;
+    const kind = parsedKind.data;
     const signature = row.signature ?? "";
     const dts_file = row.dts_file ?? "";
     const line_start = row.line_start ?? 1;
@@ -872,7 +882,7 @@ function rowToResult(
     found: false,
     package: pkg,
     symbol,
-    reason: (row.reason ?? "lookup_error") as NotFoundReason,
+    reason: NotFoundReasonSchema.catch("lookup_error").parse(row.reason),
   };
 }
 

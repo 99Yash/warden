@@ -1,6 +1,7 @@
 import { dirname, resolve as resolvePath } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { ChangedFile } from "../../diff/index.js";
+import { isRecord } from "../../guards.js";
 import type { DegradedEntry } from "../../schema.js";
 import type { ReasonedFindingMode } from "../boss-loop.js";
 import type { WorkerPromptVariant } from "../prompts/loader.js";
@@ -141,7 +142,8 @@ async function buildDepsContext(repoRoot: string, changed: ChangedFile[]): Promi
   for (const root of manifestRoots) {
     try {
       const raw = await readFile(resolvePath(root, "package.json"), "utf8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) continue;
       for (const key of MANIFEST_DEP_KEYS) {
         const block = parsed[key];
         if (!block || typeof block !== "object") continue;

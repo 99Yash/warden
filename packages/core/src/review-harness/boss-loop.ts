@@ -18,6 +18,7 @@ import {
 } from "@warden/ai";
 import { wardenEnv } from "@warden/env";
 import { stableCommentId } from "../comment-id.js";
+import { isRecord } from "../guards.js";
 import type { FormatterListener } from "../llm/index.js";
 import { CommentSchema, type Comment, type DegradedEntry } from "../schema.js";
 import { z } from "zod";
@@ -525,7 +526,7 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     inputSchema: geminiPair.requestSchema,
     execute: (args: unknown) => {
       submittedRaw = args;
-      const comments = (args as { comments?: unknown[] }).comments;
+      const comments = isRecord(args) ? args["comments"] : undefined;
       return { received: Array.isArray(comments) ? comments.length : 0 };
     },
   });
@@ -565,7 +566,17 @@ export async function runBossLoop(input: BossLoopInput): Promise<BossLoopOutput>
     }
     // Coerce string-form numeric literals back to numbers. No-op when the
     // schema contained no numeric-literal-union (geminiPair is identity).
-    const output = geminiPair.responseTransform(submittedRaw) as z.infer<typeof BossOutputSchema>;
+    // The SDK validated the input against `requestSchema`; this parse checks
+    // the value after the transform. A failure ends the review the same way
+    // as a missing `submit_review` call.
+    const parsedOutput = BossOutputSchema.safeParse(geminiPair.responseTransform(submittedRaw));
+    if (!parsedOutput.success) {
+      throw new Error(
+        `boss submit_review input failed BossOutputSchema after the response transform: ${z.prettifyError(parsedOutput.error)}`,
+        { cause: parsedOutput.error },
+      );
+    }
+    const output = parsedOutput.data;
     let bossTokens: TokenUsage | undefined;
     try {
       // `totalUsage` sums every step of the tool loop; `usage` is the last step only.
