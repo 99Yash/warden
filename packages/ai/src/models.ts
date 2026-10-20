@@ -26,8 +26,13 @@ export interface LlmModelPrice {
   input: number;
   /** USD per 1M output tokens. */
   output: number;
-  /** USD per 1M cached input tokens, when the provider reports them. */
+  /** USD per 1M cache-read input tokens, when the provider reports them. */
   cachedInput: number;
+  /**
+   * USD per 1M cache-write input tokens. Only Anthropic reports cache writes
+   * (`inputTokenDetails.cacheWriteTokens`); the catalog falls back to `input`.
+   */
+  cacheWriteInput: number;
 }
 
 export interface ResolvedLlmModel {
@@ -46,7 +51,7 @@ const ANTHROPIC_OPUS_5_5 = {
   provider: "anthropic",
   modelId: "claude-opus-5-5",
   label: "claude-opus-5-5 high",
-  fallbackPricePerMillionTokens: { input: 4, output: 20, cachedInput: 0.2 },
+  fallbackPricePerMillionTokens: { input: 4, output: 20, cachedInput: 0.2, cacheWriteInput: 5 },
   providerOptions: { anthropic: { effort: "high" } },
 } satisfies ResolvedLlmModel;
 
@@ -54,7 +59,7 @@ const ANTHROPIC_SONNET_5_5 = {
   provider: "anthropic",
   modelId: "claude-sonnet-5-5",
   label: "claude-sonnet-5-5 high",
-  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1 },
+  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1, cacheWriteInput: 2.5 },
   providerOptions: { anthropic: { effort: "high" } },
 } satisfies ResolvedLlmModel;
 
@@ -65,7 +70,7 @@ const ANTHROPIC_HAIKU_4_5 = {
   provider: "anthropic",
   modelId: "claude-haiku-4-5-20251001",
   label: "claude-haiku-4-5",
-  fallbackPricePerMillionTokens: { input: 1, output: 5, cachedInput: 0.1 },
+  fallbackPricePerMillionTokens: { input: 1, output: 5, cachedInput: 0.1, cacheWriteInput: 1.25 },
 } satisfies ResolvedLlmModel;
 
 // `strictJsonSchema: false` is load-bearing on the OpenAI path. OpenAI's
@@ -93,7 +98,7 @@ const OPENAI_GPT_6_1_SOL = {
   provider: "openai",
   modelId: "gpt-6.1-sol",
   label: "gpt-6.1-sol high",
-  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1 },
+  fallbackPricePerMillionTokens: { input: 2, output: 10, cachedInput: 0.1, cacheWriteInput: 2.5 },
   providerOptions: {
     openai: { reasoningEffort: "high", strictJsonSchema: false, forceReasoning: true },
   },
@@ -103,7 +108,12 @@ const OPENAI_GPT_6_LUNA = {
   provider: "openai",
   modelId: "gpt-6-luna",
   label: "gpt-6-luna high",
-  fallbackPricePerMillionTokens: { input: 0.1, output: 0.5, cachedInput: 0.01 },
+  fallbackPricePerMillionTokens: {
+    input: 0.1,
+    output: 0.5,
+    cachedInput: 0.01,
+    cacheWriteInput: 0.125,
+  },
   providerOptions: {
     openai: { reasoningEffort: "high", strictJsonSchema: false, forceReasoning: true },
   },

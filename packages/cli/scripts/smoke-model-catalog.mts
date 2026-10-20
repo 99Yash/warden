@@ -12,7 +12,7 @@ const MODEL = {
   provider: "openai",
   modelId: "gpt-5.4-mini",
   label: "gpt-5.4-mini xhigh",
-  fallbackPricePerMillionTokens: { input: 99, output: 199, cachedInput: 9 },
+  fallbackPricePerMillionTokens: { input: 99, output: 199, cachedInput: 9, cacheWriteInput: 12 },
   providerOptions: { openai: { reasoningEffort: "xhigh" } },
 } satisfies ResolvedLlmModel;
 
@@ -38,6 +38,7 @@ try {
   assert(price.input === 0.75, "uses models.dev input price");
   assert(price.output === 4.5, "uses models.dev output price");
   assert(price.cachedInput === 0.075, "uses models.dev cache_read price");
+  assert(price.cacheWriteInput === 0.75, "no models.dev cache_write price falls back to input");
 
   process.stdout.write("\n[2] unavailable catalog falls back\n");
   _resetModelCatalogCacheForTests();
@@ -46,6 +47,7 @@ try {
   assert(fallback.input === 99, "falls back to local input price");
   assert(fallback.output === 199, "falls back to local output price");
   assert(fallback.cachedInput === 9, "falls back to local cached-input price");
+  assert(fallback.cacheWriteInput === 12, "falls back to local cache-write price");
 
   process.stdout.write("\n✓ smoke-model-catalog passed\n");
 } finally {

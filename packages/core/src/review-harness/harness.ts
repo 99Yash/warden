@@ -25,7 +25,7 @@ import type {
 import { BOSS_LOOP_DEFAULTS, runBossLoop, type BossLoopConfig } from "./boss-loop.js";
 import { scopeCommentsToDiff } from "./comment-scope.js";
 import { runDetPriors, type DetPriors } from "./det-priors.js";
-import { ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
+import { accumulateTokenUsage, ReviewScratchpad, type TokenUsage } from "./scratchpad.js";
 import type { DispatchConcurrency } from "./tools/dispatch-worker.js";
 import { makeWorkerRoute } from "./workers/index.js";
 
@@ -435,32 +435,23 @@ function formatErr(err: unknown): string {
 // boss / worker-strong / worker-cheap. The concrete provider model behind
 // each alias is resolved by `@warden/ai` from the available API keys.
 //
-// Cached input tokens are charged at the model's cached-input price. The
-// `cachedInputTokens` figure is *non-cumulative* with `inputTokens`; the
-// usage object reports them as a separate count for the cache-hit portion.
-// We bill `inputTokens` at the full rate and `cachedInputTokens` separately.
+// AI SDK 6 reports `inputTokens` as the TOTAL input: it already includes the
+// cache-read and cache-write parts (Anthropic: `total = input + cacheWrite +
+// cacheRead`; OpenAI and Google: `total = prompt tokens`, cached included).
+// `tierCost` splits the total into its three parts and bills each part once.
 // ---------------------------------------------------------------------------
 
-function toUsageBlock(usage: TokenUsage): TokenUsageBlock {
-  return {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    ...(usage.cachedInputTokens !== undefined
-      ? { cachedInputTokens: usage.cachedInputTokens }
-      : {}),
-  };
+function toUsageBlock(usage: TokenUsageBlock): TokenUsageBlock {
+  const block: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  accumulateTokenUsage(block, usage);
+  return block;
 }
 
 function addUsage(acc: TokenUsageBlock, next: TokenUsage): TokenUsageBlock {
-  return {
-    inputTokens: acc.inputTokens + next.inputTokens,
-    outputTokens: acc.outputTokens + next.outputTokens,
-    ...(acc.cachedInputTokens !== undefined || next.cachedInputTokens !== undefined
-      ? {
-          cachedInputTokens: (acc.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0),
-        }
-      : {}),
-  };
+  const block: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  accumulateTokenUsage(block, acc);
+  accumulateTokenUsage(block, next);
+  return block;
 }
 
 function buildTokenUsageByTier(
@@ -496,15 +487,18 @@ function tierCost(
 ): number {
   if (!block) return 0;
   const price = prices[tier];
-  // `inputTokens` per AI SDK v6 already excludes the cache-hit portion when
-  // `cachedInputTokens` is reported — bill them separately at the cache rate.
-  const inputCost = (block.inputTokens / 1_000_000) * price.input;
-  const cachedCost =
-    block.cachedInputTokens !== undefined
-      ? (block.cachedInputTokens / 1_000_000) * price.cachedInput
-      : 0;
+  // `inputTokens` is the total input (AI SDK 6). Take the cache parts out so
+  // each token is billed once: uncached at `input`, cache reads at
+  // `cachedInput`, cache writes at `cacheWriteInput`. The uncached part equals
+  // the SDK's `inputTokenDetails.noCacheTokens` for every installed provider.
+  const cacheRead = block.cachedInputTokens ?? 0;
+  const cacheWrite = block.cacheWriteInputTokens ?? 0;
+  const noCache = Math.max(0, block.inputTokens - cacheRead - cacheWrite);
+  const inputCost = (noCache / 1_000_000) * price.input;
+  const cacheReadCost = (cacheRead / 1_000_000) * price.cachedInput;
+  const cacheWriteCost = (cacheWrite / 1_000_000) * price.cacheWriteInput;
   const outputCost = (block.outputTokens / 1_000_000) * price.output;
-  return inputCost + cachedCost + outputCost;
+  return inputCost + cacheReadCost + cacheWriteCost + outputCost;
 }
 
 async function computeCosts(

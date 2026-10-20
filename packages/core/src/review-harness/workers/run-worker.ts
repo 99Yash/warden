@@ -20,7 +20,7 @@ import { makeLookupTypeDefTool } from "../../llm/tools/lookup-type-def.js";
 import type { Category, Comment, DegradedEntry, Source } from "../../schema.js";
 import type { ReasonedFindingMode } from "../boss-loop.js";
 import { loadWorkerSystemPrompt, type WorkerPromptVariant } from "../prompts/loader.js";
-import type { TokenUsage } from "../scratchpad.js";
+import { tokenUsageFromSdk, type TokenUsage } from "../scratchpad.js";
 import {
   resolveWorkerTier,
   type Concern,
@@ -529,14 +529,7 @@ async function tryProvider(
     const parsed = schemaPair.responseTransform(rawOutput) as WorkerOutput;
     let tokenUsage: TokenUsage | undefined;
     try {
-      const usage = await result.usage;
-      tokenUsage = {
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        ...(usage.inputTokenDetails.cacheReadTokens !== undefined
-          ? { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }
-          : {}),
-      };
+      tokenUsage = tokenUsageFromSdk(await result.usage);
     } catch {
       tokenUsage = undefined;
     }

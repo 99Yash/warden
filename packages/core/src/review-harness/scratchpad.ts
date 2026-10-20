@@ -1,3 +1,4 @@
+import type { LanguageModelUsage } from "@warden/ai";
 import type { Comment, DegradedEntry } from "../schema.js";
 import type { DetPriors } from "./det-priors.js";
 
@@ -56,10 +57,44 @@ export interface WorkerOutput {
  * renders it via `packages/cli/src/render.ts`.
  */
 export interface TokenUsage {
+  /** Total input tokens, including cache reads and cache writes (AI SDK 6). */
   inputTokens: number;
   outputTokens: number;
-  /** Anthropic-reported cache hits if `streamText` reports them; optional. */
+  /** Cache-read part of `inputTokens`, when the provider reports it. */
   cachedInputTokens?: number;
+  /** Cache-write part of `inputTokens`; only Anthropic reports it. */
+  cacheWriteInputTokens?: number;
+}
+
+/** Map an AI SDK 6 usage object onto the harness `TokenUsage` shape. */
+export function tokenUsageFromSdk(usage: LanguageModelUsage): TokenUsage {
+  const { cacheReadTokens, cacheWriteTokens } = usage.inputTokenDetails;
+  return {
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+    ...(cacheReadTokens !== undefined ? { cachedInputTokens: cacheReadTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteInputTokens: cacheWriteTokens } : {}),
+  };
+}
+
+/** Add `next` into `acc` in place. Optional cache counts stay absent until reported. */
+export function accumulateTokenUsage(
+  acc: TokenUsage,
+  next: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cachedInputTokens?: number | undefined;
+    readonly cacheWriteInputTokens?: number | undefined;
+  },
+): void {
+  acc.inputTokens += next.inputTokens;
+  acc.outputTokens += next.outputTokens;
+  if (next.cachedInputTokens !== undefined) {
+    acc.cachedInputTokens = (acc.cachedInputTokens ?? 0) + next.cachedInputTokens;
+  }
+  if (next.cacheWriteInputTokens !== undefined) {
+    acc.cacheWriteInputTokens = (acc.cacheWriteInputTokens ?? 0) + next.cacheWriteInputTokens;
+  }
 }
 
 /**
@@ -139,14 +174,7 @@ export class ReviewScratchpad {
    */
   recordWorker(output: WorkerOutput): void {
     this._workerOutputs.push(output);
-    if (output.tokenUsage) {
-      this._workerTokens.inputTokens += output.tokenUsage.inputTokens;
-      this._workerTokens.outputTokens += output.tokenUsage.outputTokens;
-      if (output.tokenUsage.cachedInputTokens !== undefined) {
-        this._workerTokens.cachedInputTokens =
-          (this._workerTokens.cachedInputTokens ?? 0) + output.tokenUsage.cachedInputTokens;
-      }
-    }
+    if (output.tokenUsage) accumulateTokenUsage(this._workerTokens, output.tokenUsage);
   }
 
   workerOutputs(): readonly WorkerOutput[] {
@@ -163,12 +191,7 @@ export class ReviewScratchpad {
     if (!this._bossTokens) {
       this._bossTokens = { inputTokens: 0, outputTokens: 0 };
     }
-    this._bossTokens.inputTokens += usage.inputTokens;
-    this._bossTokens.outputTokens += usage.outputTokens;
-    if (usage.cachedInputTokens !== undefined) {
-      this._bossTokens.cachedInputTokens =
-        (this._bossTokens.cachedInputTokens ?? 0) + usage.cachedInputTokens;
-    }
+    accumulateTokenUsage(this._bossTokens, usage);
   }
 
   bossTokens(): TokenUsage | undefined {
