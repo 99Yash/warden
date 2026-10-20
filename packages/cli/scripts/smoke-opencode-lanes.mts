@@ -29,6 +29,7 @@ import {
   isNotClean,
   type CommentSet,
 } from "@warden/core";
+import { isRecord } from "@warden/core/guards";
 import {
   DOWN_LANE_SPEC,
   LANE_MCP_TOOLS,
@@ -1502,21 +1503,15 @@ if (mode === "runfail") {
     JSON.stringify(driven.timings) === JSON.stringify(timingsFile.timings),
     "the returning core carries the same timings it writes",
   );
-  // Key order differs across the CLI JSON round-trip, so canonicalize
-  // (sorted keys) before comparing.
-  const canonical = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(canonical);
-    if (typeof value === "object" && value !== null) {
-      return Object.fromEntries(
-        Object.entries(value)
-          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([k, v]) => [k, canonical(v)]),
-      );
-    }
-    return value;
-  };
+  // Key order differs across the CLI JSON round-trip, so stringify with
+  // sorted keys before comparing. JSON.stringify calls the replacer again on
+  // each value of the object that it returns, so nested objects sort too.
+  const sortKeys = (_key: string, value: unknown) =>
+    isRecord(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : value;
   const normalize = (set: CommentSet): string =>
-    JSON.stringify(canonical({ ...set, metadata: { ...set.metadata, durationMs: 0 } }));
+    JSON.stringify({ ...set, metadata: { ...set.metadata, durationMs: 0 } }, sortKeys);
   assert(
     okSet !== undefined && normalize(driven.result) === normalize(okSet),
     "driveOpencodeLane returns the CommentSet the wrapper prints",

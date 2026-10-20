@@ -64,6 +64,7 @@ import { z, type ZodType } from "zod";
  */
 export interface GeminiSchemaPair<T extends ZodType> {
   requestSchema: T;
+  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the raw model output, walked but not parsed; each caller parses the result with its schema
   responseTransform: (raw: unknown) => unknown;
 }
 
@@ -116,7 +117,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function identity(v: unknown): unknown {
+function identity<V>(v: V): V {
   return v;
 }
 
@@ -256,6 +257,7 @@ function numericLiteralUnionToString(def: ZodDef): ZodType {
  * so the caller's input is not mutated in place — the AI SDK's response
  * object may be referenced elsewhere.
  */
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- generic walker over the unparsed model output; the caller parses the result
 function applyPaths(raw: unknown, paths: PathStep[][]): unknown {
   let acc: unknown = raw;
   for (const path of paths) {
@@ -264,6 +266,7 @@ function applyPaths(raw: unknown, paths: PathStep[][]): unknown {
   return acc;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- generic walker over the unparsed model output; the caller parses the result
 function applyPath(value: unknown, path: PathStep[], step: number): unknown {
   if (value === null || value === undefined) return value;
   if (step === path.length) {
