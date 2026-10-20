@@ -115,6 +115,20 @@
     // `as unknown as T` (`anti-slop/no-chained-type-assertions`). It applies to every
     // surface, JavaScript included, with no override.
     "typescript/no-unsafe-type-assertion": "error",
+    // no-unnecessary-condition: a condition, `?.`, or `??` whose result the types already
+    // decide. Delete it only when a parse or the code above it established the type. When the
+    // value comes from JSON, an SDK, env, a cast, or a child process, fix the type at that
+    // boundary instead: a zod parse, `.at(i)` for an index read in `scripts/` (which has no
+    // `noUncheckedIndexedAccess`), or a `T | undefined` type. TS does not see a write inside a
+    // callback or through a shared object, so a flag set that way keeps its check with
+    // `// oxlint-disable-next-line typescript/no-unnecessary-condition -- <reason>`; a security
+    // or fail-closed guard does too. `allowConstantLoopConditions: "only-allowed-literals"`
+    // allows the literal `while (true)`, the loop the tree uses; a variable of type `true` as a
+    // loop condition still fails. It applies to every surface, JavaScript included.
+    "typescript/no-unnecessary-condition": [
+      "error",
+      { "allowConstantLoopConditions": "only-allowed-literals" }
+    ],
     // no-useless-spread: `{ ...{ a } }` is `{ a }`, and `[...[a]]` is `[a]`.
     "unicorn/no-useless-spread": "error",
     // no-empty: an empty block, an empty `catch {}` included (`allowEmptyCatch` stays false).
