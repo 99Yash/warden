@@ -81,11 +81,14 @@ const SERVE_KILL_GRACE_MS = 2000;
 /** Rejection reason when the MCP wait stops because the serve child failed to start. */
 const MCP_WAIT_ABORTED = "MCP wait aborted: opencode serve failed to start";
 
-/** Isolate config and home discovery without changing saved provider auth paths. */
-export function createOpencodeIsolation(): {
+/** The env that redirects OpenCode's config and home discovery, and the cleanup of its temp root. */
+interface OpencodeIsolation {
   env: Record<string, string>;
   cleanup: () => void;
-} {
+}
+
+/** Isolate config and home discovery without changing saved provider auth paths. */
+export function createOpencodeIsolation(): OpencodeIsolation {
   const root = mkdtempSync(resolve(tmpdir(), "warden-opencode-"));
   const cleanup = () => rmSync(root, { recursive: true, force: true });
   try {
@@ -1151,7 +1154,7 @@ export async function driveOpencodeLane(opts: DriveOptions): Promise<DriveLaneRe
   try {
     // oxlint-disable-next-line node/no-process-env -- the OpenCode binary ignores ANTHROPIC_BASE_URL, so it is forwarded as provider config (see buildMcpConfigContent)
     const anthropicBaseUrl = process.env["ANTHROPIC_BASE_URL"];
-    const childEnv: Record<string, string | undefined> = {
+    const childEnv: NodeJS.ProcessEnv = {
       // oxlint-disable-next-line node/no-process-env -- the OpenCode child keeps the full parent env on purpose: provider credentials and saved auth (see the comment above)
       ...process.env,
       ...isolation.env,
