@@ -1,3 +1,7 @@
+// Checks the OSV cache against a real temporary SQLite database: malformed JSON,
+// invalid records and expired rows refetch, and a valid row reuses the cache. Only
+// the HTTP boundary is replaced, so the check needs no network and no credentials.
+
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

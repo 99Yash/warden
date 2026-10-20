@@ -2,6 +2,7 @@
 #
 # - check:oxlint-plugin  the vendored lint rules are tested, registered, and
 #                        driven through the root config at "error"
+# - check:rules-catalog  docs/enforced-rules.md matches the rule sources
 # - check:osv-cache      real SQLite cache regression checks, with no network
 # - lint                 oxlint with the root config, type-aware, --deny-warnings
 # - format:check         oxfmt over code and config
